@@ -1,0 +1,565 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API for Chromebook cart reservations and Wi-Fi point operations
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: dashboard
+    description: Daily operations overview
+  - name: reservations
+    description: Chromebook cart reservations
+  - name: carts
+    description: Chromebook cart inventory
+  - name: access-points
+    description: Wi-Fi access point assignments
+  - name: locks
+    description: Daily reservation locks
+  - name: activity
+    description: Operational audit feed
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get the daily operations overview
+      parameters:
+        - $ref: "#/components/parameters/DateQuery"
+      responses:
+        "200":
+          description: Daily dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /reservations:
+    get:
+      operationId: listReservations
+      tags: [reservations]
+      summary: List reservations for a day
+      parameters:
+        - $ref: "#/components/parameters/DateQuery"
+        - name: cartId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [reserved, in_use, completed, cancelled]
+      responses:
+        "200":
+          description: Reservations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Reservation"
+    post:
+      operationId: createReservation
+      tags: [reservations]
+      summary: Create a cart reservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReservationInput"
+      responses:
+        "201":
+          description: Reservation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+        "409":
+          description: Cart already reserved for this period
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /reservations/{id}:
+    patch:
+      operationId: updateReservation
+      tags: [reservations]
+      summary: Update a reservation
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReservationUpdate"
+      responses:
+        "200":
+          description: Reservation updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+        "403":
+          description: Reservation is locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteReservation
+      tags: [reservations]
+      summary: Cancel a reservation
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "204":
+          description: Reservation cancelled
+  /carts:
+    get:
+      operationId: listCarts
+      tags: [carts]
+      summary: List Chromebook carts
+      responses:
+        "200":
+          description: Chromebook carts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Cart"
+  /carts/{id}:
+    patch:
+      operationId: updateCart
+      tags: [carts]
+      summary: Update cart operational status or location
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CartUpdate"
+      responses:
+        "200":
+          description: Cart updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+  /access-points:
+    get:
+      operationId: listAccessPoints
+      tags: [access-points]
+      summary: List Wi-Fi access points
+      responses:
+        "200":
+          description: Wi-Fi access points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessPoint"
+  /access-points/{id}:
+    patch:
+      operationId: updateAccessPoint
+      tags: [access-points]
+      summary: Move or update a Wi-Fi access point
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessPointUpdate"
+      responses:
+        "200":
+          description: Access point updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessPoint"
+  /locks:
+    get:
+      operationId: getLockState
+      tags: [locks]
+      summary: Get lock state for a day
+      parameters:
+        - $ref: "#/components/parameters/DateQuery"
+      responses:
+        "200":
+          description: Lock state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockState"
+    post:
+      operationId: setLockState
+      tags: [locks]
+      summary: Lock or unlock a day
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockInput"
+      responses:
+        "200":
+          description: Lock state updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockState"
+  /activity:
+    get:
+      operationId: listActivity
+      tags: [activity]
+      summary: List recent operational activity
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 8
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+components:
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    DateQuery:
+      name: date
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    DashboardSummary:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        dateLabel:
+          type: string
+        locked:
+          type: boolean
+        lockTime:
+          type: string
+        bookedCount:
+          type: integer
+        totalSlots:
+          type: integer
+        cartsAvailable:
+          type: integer
+        cartsInUse:
+          type: integer
+        maintenanceCount:
+          type: integer
+        classesCount:
+          type: integer
+        nextReservation:
+          anyOf:
+            - $ref: "#/components/schemas/Reservation"
+            - type: "null"
+      required:
+        - date
+        - dateLabel
+        - locked
+        - lockTime
+        - bookedCount
+        - totalSlots
+        - cartsAvailable
+        - cartsInUse
+        - maintenanceCount
+        - classesCount
+        - nextReservation
+    Reservation:
+      type: object
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+          format: date
+        period:
+          type: string
+        time:
+          type: string
+        cartId:
+          type: integer
+        cartName:
+          type: string
+        level:
+          type: string
+        className:
+          type: string
+        teacherName:
+          type: string
+        room:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [reserved, in_use, completed, cancelled]
+        locked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        canEdit:
+          type: boolean
+      required:
+        - id
+        - date
+        - period
+        - time
+        - cartId
+        - cartName
+        - level
+        - className
+        - teacherName
+        - room
+        - notes
+        - status
+        - locked
+        - createdAt
+        - canEdit
+    ReservationInput:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        period:
+          type: string
+        time:
+          type: string
+        cartId:
+          type: integer
+        level:
+          type: string
+        className:
+          type: string
+          minLength: 1
+        room:
+          type: string
+        notes:
+          type: string
+      required: [date, period, time, cartId, level, className]
+    ReservationUpdate:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        period:
+          type: string
+        time:
+          type: string
+        cartId:
+          type: integer
+        level:
+          type: string
+        className:
+          type: string
+          minLength: 1
+        room:
+          type: string
+        notes:
+          type: string
+        status:
+          type: string
+          enum: [reserved, in_use, completed, cancelled]
+    Cart:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        assetTag:
+          type: string
+        totalDevices:
+          type: integer
+        status:
+          type: string
+          enum: [ready, in_use, maintenance]
+        wifiPointId:
+          type: ["integer", "null"]
+        wifiPointName:
+          type: ["string", "null"]
+        location:
+          type: string
+        batteryPercent:
+          type: integer
+        lastCheckedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - assetTag
+        - totalDevices
+        - status
+        - wifiPointId
+        - wifiPointName
+        - location
+        - batteryPercent
+        - lastCheckedAt
+    CartUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, in_use, maintenance]
+        wifiPointId:
+          type: ["integer", "null"]
+        location:
+          type: string
+        batteryPercent:
+          type: integer
+    AccessPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        room:
+          type: string
+        status:
+          type: string
+          enum: [online, attention, offline]
+        signal:
+          type: integer
+        cartId:
+          type: ["integer", "null"]
+        cartName:
+          type: ["string", "null"]
+        lastUpdated:
+          type: string
+          format: date-time
+        notes:
+          type: ["string", "null"]
+      required:
+        - id
+        - name
+        - room
+        - status
+        - signal
+        - cartId
+        - cartName
+        - lastUpdated
+        - notes
+    AccessPointUpdate:
+      type: object
+      properties:
+        room:
+          type: string
+        status:
+          type: string
+          enum: [online, attention, offline]
+        cartId:
+          type: ["integer", "null"]
+        notes:
+          type: string
+    LockState:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        locked:
+          type: boolean
+        lockTime:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+      required: [date, locked, lockTime, updatedAt, updatedBy]
+    LockInput:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        locked:
+          type: boolean
+        reason:
+          type: string
+      required: [date, locked]
+    Activity:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [reservation, lock, wifi, cart]
+        title:
+          type: string
+        description:
+          type: string
+        actor:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, type, title, description, actor, createdAt]
+

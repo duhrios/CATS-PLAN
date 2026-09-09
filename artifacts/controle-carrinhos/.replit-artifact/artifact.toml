@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Controle de Carrinhos Chromebook"
+description = "Aplicativo interno para escolas gerenciarem reservas de carrinhos Chromebook, horários de professores, bloqueios diários e localização dos pontos Wi-Fi."
+version = "1.0.0"
+id = "artifacts/controle-carrinhos"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20680
+
+[services.development]
+run = "pnpm --filter @workspace/controle-carrinhos run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/controle-carrinhos", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/controle-carrinhos/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20680"
+BASE_PATH = "/"
