@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "packia": {
+      "type": "http",
+      "url": "https://packia.com.br/api/mcp",
+      "headers": {
+        "Authorization": "Bearer pk_live_n4qiTlnPaS0xcTRvItNElgVZgtgkqI5sBKAbj3y_m3o"
+      }
+    }
+  }
+}

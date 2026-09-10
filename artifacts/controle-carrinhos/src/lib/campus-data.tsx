@@ -18,6 +18,12 @@ export type TeacherAccount = TeacherProfile & {
   mustSetPassword: boolean;
 };
 
+export type TeacherAuthResult = TeacherAccount | "first-access" | null;
+export type TeacherRegistrationResult = TeacherAccount | "name-taken" | null;
+
+export const normalizeTeacherName = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+export const profileFromTeacherAccount = ({ name, email, segment, subject }: TeacherAccount): TeacherProfile => ({ name, email, segment, subject });
+
 export type WifiPoint = {
   id: string;
   name: string;
@@ -66,6 +72,7 @@ const teacherStorageKey = "controle-carrinhos-teacher";
 const reservationStorageKey = "controle-carrinhos-reservations";
 const cartStorageKey = "controle-carrinhos-carts";
 const teacherAccountsStorageKey = "controle-carrinhos-teacher-accounts";
+const rememberedTeacherStorageKey = "controle-carrinhos-remembered-teacher";
 const wifiPointsStorageKey = "controle-carrinhos-wifi-points";
 const wifiRoomsStorageKey = "controle-carrinhos-wifi-rooms";
 
@@ -134,8 +141,11 @@ type CampusDataValue = {
   teacherAccounts: TeacherAccount[];
   addTeacherAccounts: (entries: Array<Omit<TeacherAccount, "id" | "password" | "mustSetPassword">>) => void;
   resetTeacherPassword: (id: string) => void;
-  setTeacherPassword: (id: string, password: string) => boolean;
-  authenticateTeacher: (email: string, password: string) => TeacherAccount | "first-access" | null;
+  completeTeacherRegistration: (id: string, name: string, password: string) => TeacherRegistrationResult;
+  authenticateTeacher: (name: string, password: string) => TeacherAuthResult;
+  rememberTeacherLogin: (id: string, remember: boolean) => void;
+  getRememberedTeacher: () => TeacherAccount | null;
+  clearRememberedTeacher: () => void;
   reservations: Reservation[];
   saveReservation: (data: Omit<Reservation, "id" | "status">, id?: number) => void;
   carts: Cart[];
@@ -223,17 +233,46 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   };
   const resetTeacherPassword = (id: string) => {
     persistTeacherAccounts(teacherAccounts.map((account) => account.id === id ? { ...account, password: undefined, mustSetPassword: true } : account));
+    const remembered = readStorage<{ accountId: string } | null>(rememberedTeacherStorageKey, null);
+    if (remembered?.accountId === id) window.localStorage.removeItem(rememberedTeacherStorageKey);
   };
-  const setTeacherPassword = (id: string, password: string) => {
-    if (!/^\d{4}$/.test(password)) return false;
-    persistTeacherAccounts(teacherAccounts.map((account) => account.id === id ? { ...account, password, mustSetPassword: false } : account));
-    return true;
+  const completeTeacherRegistration = (id: string, name: string, password: string): TeacherRegistrationResult => {
+    const trimmedName = name.trim().replace(/\s+/g, " ");
+    if (!trimmedName || password.length < 6) return null;
+    if (teacherAccounts.some((account) => account.id !== id && normalizeTeacherName(account.name) === normalizeTeacherName(trimmedName))) {
+      return "name-taken";
+    }
+    const current = teacherAccounts.find((account) => account.id === id);
+    if (!current) return null;
+    const updated = { ...current, name: trimmedName, password, mustSetPassword: false };
+    persistTeacherAccounts(teacherAccounts.map((account) => account.id === id ? updated : account));
+    return updated;
   };
-  const authenticateTeacher = (email: string, password: string) => {
-    const account = teacherAccounts.find((item) => item.email === email.trim().toLowerCase());
+  const authenticateTeacher = (name: string, password: string): TeacherAuthResult => {
+    const account = teacherAccounts.find((item) => normalizeTeacherName(item.name) === normalizeTeacherName(name));
     if (!account) return null;
     if (account.mustSetPassword) return "first-access" as const;
     return account.password === password ? account : null;
+  };
+  const rememberTeacherLogin = (id: string, remember: boolean) => {
+    if (remember) {
+      window.localStorage.setItem(rememberedTeacherStorageKey, JSON.stringify({ accountId: id }));
+    } else {
+      window.localStorage.removeItem(rememberedTeacherStorageKey);
+    }
+  };
+  const getRememberedTeacher = () => {
+    const remembered = readStorage<{ accountId: string } | null>(rememberedTeacherStorageKey, null);
+    if (!remembered) return null;
+    const account = teacherAccounts.find((item) => item.id === remembered.accountId && !item.mustSetPassword);
+    if (!account) {
+      window.localStorage.removeItem(rememberedTeacherStorageKey);
+      return null;
+    }
+    return account;
+  };
+  const clearRememberedTeacher = () => {
+    window.localStorage.removeItem(rememberedTeacherStorageKey);
   };
   const toggleRoomWifi = (room: string) => {
     persistWifiRooms(wifiRooms.map((item) => item.room === room ? { ...item, hasWifi: !item.hasWifi } : item));
@@ -252,7 +291,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const reserveAvailable = useMemo(() => carts.reduce((total, cart) => total + cart.reserveCapacity, 0) - reservations.filter((item) => item.kind === "Reserva").reduce((total, item) => total + item.quantity, 0), [carts, reservations]);
   const teacherReserved = useMemo(() => reservations.filter((item) => item.kind === "Reserva" && item.teacher === teacher.name).reduce((total, item) => total + item.quantity, 0), [reservations, teacher.name]);
 
-  return <CampusDataContext.Provider value={{ teacher, updateTeacher: persistTeacher, teacherAccounts, addTeacherAccounts, resetTeacherPassword, setTeacherPassword, authenticateTeacher, reservations, saveReservation, carts, addCart, toggleCartUnavailable, toggleCartUnitUnavailable, toggleCartMaintenance, wifiPoints, wifiRooms, toggleRoomWifi, updateWifiPointStatus, assignMobileAntenna, reserveAvailable, teacherReserved }}>{children}</CampusDataContext.Provider>;
+  return <CampusDataContext.Provider value={{ teacher, updateTeacher: persistTeacher, teacherAccounts, addTeacherAccounts, resetTeacherPassword, completeTeacherRegistration, authenticateTeacher, rememberTeacherLogin, getRememberedTeacher, clearRememberedTeacher, reservations, saveReservation, carts, addCart, toggleCartUnavailable, toggleCartUnitUnavailable, toggleCartMaintenance, wifiPoints, wifiRooms, toggleRoomWifi, updateWifiPointStatus, assignMobileAntenna, reserveAvailable, teacherReserved }}>{children}</CampusDataContext.Provider>;
 }
 
 export function useCampusData() {

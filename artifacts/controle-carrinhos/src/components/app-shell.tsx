@@ -1,7 +1,8 @@
-import { Activity, CalendarDays, ChevronRight, DoorOpen, LayoutDashboard, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X } from "lucide-react";
+import { Activity, CalendarDays, ChevronRight, DoorOpen, LayoutDashboard, LogOut, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { cx } from "@/components/app-ui";
+import { useCampusData } from "@/lib/campus-data";
 
 const adminNavItems = [
   { href: "/", label: "Visão do dia", icon: LayoutDashboard },
@@ -21,10 +22,16 @@ const userNavItems = [
 
 export function AppShell({ children, role = "admin" }: { children: React.ReactNode; role?: "admin" | "user" }) {
   const [location] = useLocation();
+  const [, setLocation] = useLocation();
+  const { teacher, clearRememberedTeacher } = useCampusData();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const userMode = role === "user";
   const navItems = userMode ? userNavItems : adminNavItems;
+  const signOut = () => {
+    clearRememberedTeacher();
+    setLocation("/login");
+  };
   return (
     <div className="min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <aside className={cx(
@@ -76,8 +83,9 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
           <button type="button" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] md:hidden" aria-label="Abrir menu" data-testid="button-open-menu"><Menu size={21} /></button>
           <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex"><span className="h-2 w-2 rounded-full bg-[hsl(158_43%_43%)]" /> Sistema operacional <span className="mx-1 text-[hsl(var(--border))]">/</span> Campus Vila Nova</div>
           <div className="ml-auto flex items-center gap-3">
-             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{userMode ? "Professor(a)" : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{userMode ? "Área do usuário" : "Administrador"}</p></div>
+             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{userMode ? "Área do usuário" : "Administrador"}</p></div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="text-user-avatar">CM</div>
+            {userMode && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
           </div>
         </header>
         <main className="app-grid min-h-[calc(100dvh-76px)] px-5 py-7 sm:px-8 lg:px-10">{children}</main>
