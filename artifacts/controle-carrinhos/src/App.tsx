@@ -13,6 +13,7 @@ import { RoomDirectoryProvider } from '@/lib/room-directory';
 import { CampusDataProvider } from '@/lib/campus-data';
 import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
 import { AccessPage, AdminLoginPage } from '@/pages/access';
+import { ConfigurationPage } from '@/pages/configuration';
 import {
   Route,
   Switch,
@@ -28,13 +29,15 @@ function Router() {
   const storedRole = typeof window !== "undefined"
     ? window.localStorage.getItem("controle-carrinhos-role")
     : null;
+  const isSuperAdmin = typeof window !== "undefined" && window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
   const operatorMode =
     location === "/operador" ||
     location.startsWith("/operador/") ||
     (storedRole === "operator" && ["/reservas", "/carrinhos", "/wifi"].includes(location));
-  const adminOnlyRoute = ["/admin", "/salas", "/professores", "/historico"].some(
+  const adminOnlyRoute = ["/admin", "/salas", "/professores", "/historico", "/carrinhos"].some(
     (path) => location === path || location.startsWith(`${path}/`),
   );
+  if (location.startsWith("/configuracao") && !isSuperAdmin) return <RoleRedirect role="operator" />;
   const restrictedRole = adminOnlyRoute && storedRole === "operator"
     ? "operator"
     : adminOnlyRoute && storedRole === "user"
@@ -67,6 +70,7 @@ function Router() {
             <WifiPage readOnly={operatorMode} />
           </Route>
           <Route path="/historico" component={HistoryPage} />
+          <Route path="/configuracao" component={ConfigurationPage} />
           <Route path="/usuario" component={UserOverviewPage} />
           <Route path="/usuario/reservas">
             <ReservationsPage mode="user" />

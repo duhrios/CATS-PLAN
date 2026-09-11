@@ -1,4 +1,4 @@
-import { Check, FileSpreadsheet, FileText, KeyRound, Loader2, Mail, Plus, RotateCcw, Upload, UserRound } from "lucide-react";
+import { Check, FileSpreadsheet, FileText, KeyRound, Loader2, Mail, Plus, RotateCcw, Upload, UserRound, ShieldCheck, Pencil } from "lucide-react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { Button, Field, PageHeader, SectionCard, StatusPill, cx, inputClass } from "@/components/app-ui";
@@ -30,6 +30,10 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     operatorAccounts,
     addOperatorAccount,
     deleteOperatorAccount,
+    adminAccounts,
+    updateAdminAccount,
+    updateOperatorAccount,
+    deleteAdminAccount,
   } = useCampusData();
   const [form, setForm] = useState({ ...teacher });
   const [saved, setSaved] = useState(false);
@@ -41,10 +45,11 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const [bulkFileName, setBulkFileName] = useState("");
   const [importingFile, setImportingFile] = useState(false);
   const [selectedTeacherIds, setSelectedTeacherIds] = useState<string[]>([]);
-  const [operatorForm, setOperatorForm] = useState({ name: "", password: "" });
+  const [operatorForm, setOperatorForm] = useState({ name: "", password: "", isAdmin: false });
   const [operatorMessage, setOperatorMessage] = useState("");
   const [operatorError, setOperatorError] = useState("");
   const [selectedOperatorIds, setSelectedOperatorIds] = useState<string[]>([]);
+  const [adminForm, setAdminForm] = useState({ name: "", password: "" });
   const showSubject = form.segment === "Fundamental 2" || form.segment === "Ensino Médio";
 
   const toggleTeacherSelection = (id: string) => {
@@ -134,21 +139,27 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     event.preventDefault();
     setOperatorMessage("");
     setOperatorError("");
-    const result = addOperatorAccount(operatorForm.name, operatorForm.password);
+    const result = addOperatorAccount(operatorForm.name, operatorForm.password, operatorForm.isAdmin);
     if (result === "name-taken") {
-      setOperatorError("Já existe um operador com este nome.");
+      setOperatorError("Já existe um usuário TI com este nome.");
       return;
     }
     if (result === "invalid-name") {
-      setOperatorError("Informe um nome de operador com pelo menos 3 caracteres.");
+      setOperatorError("Informe um nome de usuário TI com pelo menos 3 caracteres.");
       return;
     }
     if (result === "invalid-password") {
-      setOperatorError("A senha do operador precisa ter pelo menos 6 caracteres.");
+      setOperatorError("A senha do usuário TI precisa ter pelo menos 6 caracteres.");
       return;
     }
-    setOperatorForm({ name: "", password: "" });
+    setOperatorForm({ name: "", password: "", isAdmin: false });
     setOperatorMessage(`Usuário ${result.name} criado com sucesso.`);
+  };
+  const saveAdmin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const account = adminAccounts[0];
+    if (!account || !updateAdminAccount(account.id, adminForm.name || account.name, adminForm.password)) return;
+    setAdminForm({ name: "", password: "" });
   };
 
   if (!admin) {
@@ -194,22 +205,23 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
           <div className="overflow-x-auto"><table className="data-table w-full min-w-[720px] text-left"><thead><tr className="border-b border-[hsl(var(--border))]"><th className="px-3 py-3"><input type="checkbox" checked={teacherAccounts.length > 0 && teacherAccounts.every((account) => selectedTeacherIds.includes(account.id))} onChange={(event) => setSelectedTeacherIds(event.target.checked ? teacherAccounts.map((account) => account.id) : [])} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label="Selecionar todos os professores" /></th><th className="px-6 py-3">Nome de login</th><th className="px-3 py-3">E-mail de ativação</th><th className="px-3 py-3">Segmento</th><th className="px-3 py-3">Situação</th><th className="px-6 py-3 text-right">Ação</th></tr></thead><tbody>{teacherAccounts.map((account) => <tr key={account.id} data-testid={`row-teacher-${account.id}`}><td className="px-3 py-4"><input type="checkbox" checked={selectedTeacherIds.includes(account.id)} onChange={() => toggleTeacherSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar professor ${account.name}`} /></td><td className="px-6 py-4 text-sm font-semibold">{account.mustSetPassword ? <span className="text-[hsl(var(--muted-foreground))]">Será definido no primeiro acesso</span> : account.name}</td><td className="px-3 py-4 text-sm">{account.email}</td><td className="px-3 py-4 text-xs text-[hsl(var(--muted-foreground))]">{account.segment}</td><td className="px-3 py-4"><StatusPill status={account.mustSetPassword ? "Primeiro acesso" : "Acesso ativo"} /></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => resetTeacherPassword(account.id)} data-testid={`button-reset-teacher-${account.id}`}><RotateCcw size={14} /> Redefinir acesso</Button><Button size="sm" variant="ghost" onClick={() => deleteTeacherAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></td></tr>)}</tbody></table></div>
         </div>
       </SectionCard>
-      <SectionCard title="Usuários operadores" eyebrow="Criar acessos para movimentação">
+      <SectionCard title="Usuários TI" eyebrow="Criar acessos para movimentação">
         <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
           <form className="space-y-4" onSubmit={saveOperator} data-testid="form-operator-account">
-            <Field label="Nome do operador">
+            <Field label="Nome do usuário TI">
               <input required minLength={3} value={operatorForm.name} onChange={(event) => setOperatorForm({ ...operatorForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Carlos Souza" data-testid="input-new-operator-name" />
             </Field>
             <Field label="Senha" hint="Use pelo menos 6 caracteres.">
               <input required minLength={6} type="password" value={operatorForm.password} onChange={(event) => setOperatorForm({ ...operatorForm, password: event.target.value })} className={inputClass} placeholder="Senha de acesso" data-testid="input-new-operator-password" />
             </Field>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={operatorForm.isAdmin as unknown as boolean} onChange={(event) => setOperatorForm({ ...operatorForm, isAdmin: event.target.checked } as typeof operatorForm)} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Associar como administrador</label>
             {operatorError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" data-testid="text-operator-error">{operatorError}</p>}
             {operatorMessage && <p className="rounded-lg bg-[hsl(var(--primary)/.12)] px-3 py-2 text-xs font-semibold text-[hsl(var(--primary))]" data-testid="text-operator-success">{operatorMessage}</p>}
-            <Button type="submit"><Plus size={15} /> Criar usuário operador</Button>
+            <Button type="submit"><Plus size={15} /> Criar usuário TI</Button>
           </form>
           <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.25)]">
             <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-4 py-3">
-              <div><p className="text-sm font-semibold">Operadores cadastrados</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Acesso pela tela do operador.</p></div>
+              <div><p className="text-sm font-semibold">TI cadastrado</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Acesso pela tela do TI.</p></div>
               <span className="rounded-full bg-[hsl(var(--primary)/.1)] px-2.5 py-1 text-xs font-bold text-[hsl(var(--primary))]">{operatorAccounts.length}</span>
             </div>
             {selectedOperatorIds.length > 0 && (
@@ -220,9 +232,15 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
               </div>
             )}
             <div className="divide-y divide-[hsl(var(--border))]">
-              {operatorAccounts.map((account) => <div key={account.id} className="flex items-center justify-between gap-3 px-4 py-3"><div className="flex items-center gap-3"><input type="checkbox" checked={selectedOperatorIds.includes(account.id)} onChange={() => toggleOperatorSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar operador ${account.name}`} /><div><p className="text-sm font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Usuário operador</p></div></div><div className="flex items-center gap-2"><Link href="/operador/login" className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Tela de acesso</Link><Button size="sm" variant="ghost" onClick={() => deleteOperatorAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
+              {operatorAccounts.map((account) => <div key={account.id} className="flex items-center justify-between gap-3 px-4 py-3"><div className="flex items-center gap-3"><input type="checkbox" checked={selectedOperatorIds.includes(account.id)} onChange={() => toggleOperatorSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar operador ${account.name}`} /><div><p className="text-sm font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{account.isAdmin ? "Administrador · TI" : "Usuário TI"}</p></div></div><div className="flex items-center gap-2"><Button size="sm" variant="ghost" onClick={() => { const name = window.prompt("Nome do usuário TI", account.name); const password = window.prompt("Nova senha (mínimo 6 caracteres)", account.password); if (name && password) updateOperatorAccount(account.id, name, password, Boolean(account.isAdmin)); }}><Pencil size={14} /> Editar</Button><Link href="/operador/login" className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Tela de acesso</Link><Button size="sm" variant="ghost" onClick={() => deleteOperatorAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
             </div>
           </div>
+        </div>
+      </SectionCard>
+      <SectionCard title="Administradores" eyebrow="Perfil administrador e super administrador">
+        <div className="space-y-4 p-5 sm:p-6">
+          {adminAccounts.map((account) => <div key={account.id} className="flex items-center justify-between rounded-xl border border-[hsl(var(--border))] p-4"><div><p className="font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{account.isSuperAdmin ? "Super administrador (não pode ser removido)" : "Administrador"}</p></div><div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => { const name = window.prompt("Nome do administrador", account.name); const password = window.prompt("Nova senha (mínimo 6 caracteres)", account.password); if (name && password) updateAdminAccount(account.id, name, password); }}><Pencil size={14} /> Editar</Button><Button size="sm" variant="ghost" disabled={adminAccounts.length <= 1} onClick={() => deleteAdminAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
+          <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]" onSubmit={saveAdmin}><input value={adminForm.name} onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })} className={inputClass} placeholder="Nome do administrador" /><input required minLength={6} type="password" value={adminForm.password} onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })} className={inputClass} placeholder="Nova senha" /><Button type="submit"><Plus size={14} /> Atualizar</Button></form>
         </div>
       </SectionCard>
       {modalOpen && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(187_54%_17%/.35)] p-0 backdrop-blur-[2px] sm:items-center sm:p-6" role="dialog" aria-modal="true"><div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:max-w-xl sm:rounded-2xl"><div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-5 py-4"><h2 className="font-display text-xl font-semibold">{mode === "single" ? "Cadastrar professor" : "Importar e-mails em lote"}</h2><button type="button" onClick={() => setModalOpen(false)} className="text-sm text-[hsl(var(--muted-foreground))]">Fechar</button></div><form className="space-y-5 p-5 sm:p-6" onSubmit={saveAccounts} data-testid="form-teacher-account"><div className="flex gap-1 rounded-lg bg-[hsl(var(--muted))] p-1"><button type="button" onClick={() => setMode("single")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "single" && "bg-[hsl(var(--card))] shadow-sm")}>Um professor</button><button type="button" onClick={() => setMode("bulk")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "bulk" && "bg-[hsl(var(--card))] shadow-sm")}>Planilha ou PDF</button></div>{mode === "single" ? <div className="space-y-4"><Field label="Nome inicial (opcional)" hint="O professor poderá definir o nome do login no primeiro acesso."><input value={singleForm.name} onChange={(event) => setSingleForm({ ...singleForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Marina Lopes" data-testid="input-new-teacher-name" /></Field><Field label="E-mail de ativação"><input required type="email" value={singleForm.email} onChange={(event) => setSingleForm({ ...singleForm, email: event.target.value })} className={inputClass} placeholder="professor@escola.com.br" data-testid="input-new-teacher-email" /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Seguimento"><select value={singleForm.segment} onChange={(event) => setSingleForm({ ...singleForm, segment: event.target.value as Segment })} className={inputClass}>{segments.map((segment) => <option key={segment}>{segment}</option>)}</select></Field><Field label="Matéria"><input value={singleForm.subject} onChange={(event) => setSingleForm({ ...singleForm, subject: event.target.value })} className={inputClass} placeholder="Ex.: Ciências" /></Field></div></div> : <div className="space-y-4"><div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.35)] p-4"><div className="flex items-start gap-3"><FileSpreadsheet className="mt-0.5 text-[hsl(var(--primary))]" size={19} /><div><p className="text-sm font-semibold">Importe vários e-mails de uma vez</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Aceitamos CSV, Excel (.xls/.xlsx) e PDF. O sistema encontra os e-mails em qualquer coluna ou página.</p></div></div><label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[hsl(var(--primary)/.45)] bg-[hsl(var(--card))] px-4 py-3 text-sm font-semibold text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/.06)]"><Upload size={16} /> {importingFile ? <><Loader2 className="animate-spin" size={15} /> Lendo arquivo...</> : "Escolher planilha ou PDF"}<input type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,.pdf,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleBulkFile} className="sr-only" disabled={importingFile} data-testid="input-bulk-teacher-file" /></label>{bulkFileName && <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[hsl(var(--primary))]"><FileText size={14} /> {bulkFileName}</p>}</div><Field label="E-mails encontrados" hint="Você também pode colar ou editar os endereços. Um por linha, separados por vírgula ou ponto e vírgula."><textarea required value={bulkEmails} onChange={(event) => setBulkEmails(event.target.value)} className={`${inputClass} min-h-32 py-3`} placeholder={"ana.silva@escola.com.br\nbruno.souza@escola.com.br"} data-testid="textarea-bulk-teacher-emails" /></Field></div>}{error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]">{error}</p>}<div className="flex justify-end gap-2 border-t border-[hsl(var(--border))] pt-4"><Button variant="ghost" onClick={() => setModalOpen(false)}>Cancelar</Button><Button type="submit" disabled={importingFile}><Check size={15} /> Criar acessos</Button></div></form></div></div>}

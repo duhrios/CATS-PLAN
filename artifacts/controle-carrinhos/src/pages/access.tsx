@@ -1,6 +1,7 @@
 import { CalendarDays, KeyRound, LockKeyhole, Router, ShieldCheck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
+import { useCampusData } from "@/lib/campus-data";
 
 const accessCards = [
   {
@@ -53,24 +54,29 @@ export function AccessPage() {
 }
 
 export function AdminLoginPage() {
+  const { authenticateAdmin } = useCampusData();
   const [, setLocation] = useLocation();
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("Administrador");
   const [error, setError] = useState("");
   return (
     <main className="flex min-h-[100dvh] items-center justify-center bg-[hsl(var(--background))] px-5">
       <form className="w-full max-w-sm space-y-5 rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-6 shadow-xl" onSubmit={(event) => {
         event.preventDefault();
-        if (password !== "admin123") {
+        const account = authenticateAdmin(name, password);
+        if (!account) {
           setError("Senha administrativa incorreta.");
           return;
         }
         window.localStorage.setItem("controle-carrinhos-role", "admin");
+        window.localStorage.setItem("controle-carrinhos-super-admin", account.isSuperAdmin ? "true" : "false");
         setLocation("/admin");
       }}>
         <div className="flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><LockKeyhole size={20} /></span>
           <div><h1 className="font-display text-xl font-semibold">Acesso administrativo</h1><p className="text-xs text-[hsl(var(--muted-foreground))]">Área restrita</p></div>
         </div>
+        <label className="block text-sm font-semibold">Nome<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm" /></label>
         <label className="block text-sm font-semibold">Senha administrativa<input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary)/.2)]" placeholder="Digite a senha" autoFocus /></label>
         {error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{error}</p>}
         <button type="submit" className="h-10 w-full rounded-lg bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))]">Entrar</button>

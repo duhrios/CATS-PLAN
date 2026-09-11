@@ -37,7 +37,8 @@ export type OperatorRegistrationResult =
   | "invalid-name"
   | "invalid-password";
 export type MovementStatus = "Não movido" | "Movendo" | "Concluído";
-export type OperatorAccount = { id: string; name: string; password: string };
+export type OperatorAccount = { id: string; name: string; password: string; isAdmin?: boolean };
+export type AdminAccount = { id: string; name: string; password: string; isSuperAdmin: boolean };
 export type CartMovement = {
   reservationId: number;
   status: MovementStatus;
@@ -45,6 +46,11 @@ export type CartMovement = {
   notReceived: boolean;
   autoCompleted: boolean;
   requestCount: number;
+  movedBy?: string;
+  completedBy?: string;
+  movedAt?: string;
+  completedAt?: string;
+  movedLate?: boolean;
 };
 
 export const isReservationInProgress = (reservation: Reservation) => {
@@ -121,6 +127,7 @@ const wifiRoomsStorageKey = "controle-carrinhos-wifi-rooms";
 const operatorAccountsStorageKey = "controle-carrinhos-operator-accounts";
 const movementsStorageKey = "controle-carrinhos-movements";
 const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
+const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
 
 export const addDaysISO = (days: number) => {
   const date = new Date();
@@ -293,7 +300,10 @@ export const initialTeacherAccounts: TeacherAccount[] = [
   },
 ];
 export const initialOperatorAccounts: OperatorAccount[] = [
-  { id: "operator-01", name: "Operador", password: "1234" },
+  { id: "operator-01", name: "TI", password: "123456", isAdmin: false },
+];
+export const initialAdminAccounts: AdminAccount[] = [
+  { id: "admin-01", name: "Administrador", password: "admin123", isSuperAdmin: true },
 ];
 
 export const initialWifiPoints: WifiPoint[] = [
@@ -355,11 +365,15 @@ export type MovementSettings = {
   alertIntervalMinutes: number;
   alertRepeat: number;
   autoComplete: boolean;
+  earlyWarningMinutes: number;
+  earlyWarningEnabled: boolean;
 };
 export const defaultMovementSettings: MovementSettings = {
   alertIntervalMinutes: 10,
   alertRepeat: 2,
   autoComplete: true,
+  earlyWarningMinutes: 10,
+  earlyWarningEnabled: true,
 };
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -391,9 +405,15 @@ type CampusDataValue = {
   getRememberedTeacher: () => TeacherAccount | null;
   clearRememberedTeacher: () => void;
   operatorAccounts: OperatorAccount[];
+  adminAccounts: AdminAccount[];
+  updateAdminAccount: (id: string, name: string, password: string) => boolean;
+  updateOperatorAccount: (id: string, name: string, password: string, isAdmin: boolean) => boolean;
+  deleteAdminAccount: (id: string) => boolean;
+  authenticateAdmin: (name: string, password: string) => AdminAccount | null;
   addOperatorAccount: (
     name: string,
     password: string,
+    isAdmin?: boolean,
   ) => OperatorRegistrationResult;
   deleteOperatorAccount: (id: string) => void;
   authenticateOperator: (name: string, password: string) => OperatorAccount | null;
@@ -402,6 +422,8 @@ type CampusDataValue = {
     reservationId: number,
     status: MovementStatus,
     autoCompleted?: boolean,
+    actor?: string,
+    movedLate?: boolean,
   ) => void;
   reportNotReceived: (reservationId: number) => void;
   requestMovementAgain: (reservationId: number) => void;
@@ -425,6 +447,7 @@ type CampusDataValue = {
   assignMobileAntenna: (pointId: string, room: string | undefined) => void;
   reserveAvailable: number;
   teacherReserved: number;
+  resetData: (kind: "reservations" | "profiles" | "history" | "teachers" | "factory") => void;
 };
 
 const CampusDataContext = createContext<CampusDataValue | null>(null);
@@ -474,6 +497,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const [operatorAccounts, setOperatorAccounts] = useState<OperatorAccount[]>(() =>
     readStorage(operatorAccountsStorageKey, initialOperatorAccounts),
   );
+  const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>(() =>
+    readStorage(adminAccountsStorageKey, initialAdminAccounts),
+  );
   const [movements, setMovements] = useState<CartMovement[]>(() =>
     readStorage<Partial<CartMovement>[]>(movementsStorageKey, []).map((item) => ({
       reservationId: item.reservationId as number,
@@ -482,10 +508,21 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       notReceived: item.notReceived ?? false,
       autoCompleted: item.autoCompleted ?? false,
       requestCount: item.requestCount ?? (item.notReceived ? 1 : 0),
+      movedBy: item.movedBy,
+      completedBy: item.completedBy,
+      movedAt: item.movedAt,
+      completedAt: item.completedAt,
+      movedLate: item.movedLate ?? false,
     })),
   );
   const [movementSettings, setMovementSettings] = useState<MovementSettings>(() =>
-    readStorage(movementSettingsStorageKey, defaultMovementSettings),
+    ({
+      ...defaultMovementSettings,
+      ...readStorage<Partial<MovementSettings>>(
+        movementSettingsStorageKey,
+        {},
+      ),
+    }),
   );
 
   const persistTeacher = (next: TeacherProfile) => {
@@ -522,9 +559,32 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       JSON.stringify(next),
     );
   };
+  const persistAdminAccounts = (next: AdminAccount[]) => {
+    setAdminAccounts(next);
+    window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(next));
+  };
+  const updateAdminAccount = (id: string, name: string, password: string) => {
+    const normalized = name.trim().replace(/\s+/g, " ");
+    if (normalized.length < 3 || password.length < 6 || adminAccounts.some((a) => a.id !== id && a.name.toLowerCase() === normalized.toLowerCase())) return false;
+    persistAdminAccounts(adminAccounts.map((a) => a.id === id ? { ...a, name: normalized, password } : a));
+    return true;
+  };
+  const updateOperatorAccount = (id: string, name: string, password: string, isAdmin: boolean) => {
+    const normalized = name.trim().replace(/\s+/g, " ");
+    if (normalized.length < 3 || password.length < 6 || operatorAccounts.some((a) => a.id !== id && a.name.toLowerCase() === normalized.toLowerCase())) return false;
+    persistOperatorAccounts(operatorAccounts.map((a) => a.id === id ? { ...a, name: normalized, password, isAdmin } : a));
+    return true;
+  };
+  const deleteAdminAccount = (id: string) => {
+    const account = adminAccounts.find((item) => item.id === id);
+    if (!account || account.isSuperAdmin || adminAccounts.length <= 1) return false;
+    persistAdminAccounts(adminAccounts.filter((a) => a.id !== id));
+    return true;
+  };
   const addOperatorAccount = (
     name: string,
     password: string,
+    isAdmin = false,
   ): OperatorRegistrationResult => {
     const normalizedName = name.trim().replace(/\s+/g, " ");
     if (normalizedName.length < 3) return "invalid-name";
@@ -542,6 +602,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       id: `operator-${Date.now()}`,
       name: normalizedName,
       password,
+      isAdmin,
     };
     persistOperatorAccounts([...operatorAccounts, account]);
     return account;
@@ -551,6 +612,20 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       operatorAccounts.filter((account) => account.id !== id),
     );
   };
+  const resetData = (kind: "reservations" | "profiles" | "history" | "teachers" | "factory") => {
+    const remove = (key: string) => window.localStorage.removeItem(key);
+    if (kind === "reservations" || kind === "factory") { persistReservations(kind === "factory" ? initialReservations : []); }
+    if (kind === "profiles" || kind === "factory") { persistTeacherAccounts(kind === "factory" ? initialTeacherAccounts : []); persistOperatorAccounts(kind === "factory" ? initialOperatorAccounts : []); }
+    if (kind === "profiles") { persistAdminAccounts(adminAccounts.filter((account) => account.isSuperAdmin)); }
+    if (kind === "history" || kind === "factory") { persistMovements([]); }
+    if (kind === "teachers" || kind === "factory") { persistTeacherAccounts(kind === "factory" ? initialTeacherAccounts : []); }
+    if (kind === "factory") {
+      persistTeacher(defaultTeacher); persistCarts(initialCarts); persistWifiPoints(initialWifiPoints);
+      window.localStorage.removeItem(movementSettingsStorageKey);
+      persistAdminAccounts(adminAccounts.filter((a) => a.isSuperAdmin).slice(0, 1).length ? adminAccounts.filter((a) => a.isSuperAdmin).slice(0, 1) : initialAdminAccounts);
+    }
+    void remove;
+  };
   const persistMovements = (next: CartMovement[]) => {
     setMovements(next);
     window.localStorage.setItem(movementsStorageKey, JSON.stringify(next));
@@ -559,15 +634,22 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     reservationId: number,
     status: MovementStatus,
     autoCompleted = false,
+    actor = autoCompleted ? "Conclusão automática" : "TI",
+    movedLate?: boolean,
   ) => {
     const current = movements.find((item) => item.reservationId === reservationId);
-    const nextItem = {
+    const nextItem: CartMovement = {
       reservationId,
       status,
       updatedAt: new Date().toISOString(),
       notReceived: current?.notReceived ?? false,
       autoCompleted,
       requestCount: current?.requestCount ?? 0,
+      movedBy: status === "Movendo" ? actor : current?.movedBy,
+      completedBy: status === "Concluído" ? actor : current?.completedBy,
+      movedAt: status === "Movendo" ? new Date().toISOString() : current?.movedAt,
+      completedAt: status === "Concluído" ? new Date().toISOString() : current?.completedAt,
+      movedLate: movedLate ?? current?.movedLate ?? false,
     };
     persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
@@ -837,6 +919,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         getRememberedTeacher,
         clearRememberedTeacher,
         operatorAccounts,
+        adminAccounts,
+        updateAdminAccount,
+        updateOperatorAccount,
+        deleteAdminAccount,
+        authenticateAdmin: (name, password) => adminAccounts.find((item) => item.name.toLowerCase() === name.trim().toLowerCase() && item.password === password) ?? null,
         addOperatorAccount,
         deleteOperatorAccount,
         authenticateOperator: (name, password) => operatorAccounts.find((item) => item.name.toLowerCase() === name.trim().toLowerCase() && item.password === password) ?? null,
@@ -861,6 +948,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         assignMobileAntenna,
         reserveAvailable,
         teacherReserved,
+        resetData,
       }}
     >
       {children}

@@ -604,7 +604,7 @@ function ReservationModal({
 }: {
   reservation?: Reservation;
   initialDate?: string;
-  mode?: "admin" | "user";
+  mode?: "admin" | "user" | "operator";
   onClose: () => void;
   onSave: (value: Omit<Reservation, "id" | "status">) => void;
   teacher: { name: string; segment: Segment; subject: string };
@@ -1077,7 +1077,7 @@ function ReservationModal({
 export function ReservationsPage({
   mode = "admin",
 }: {
-  mode?: "admin" | "user";
+  mode?: "admin" | "user" | "operator";
 }) {
   const {
     reservations,
@@ -1190,20 +1190,22 @@ export function ReservationsPage({
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
-        eyebrow={mode === "user" ? "Área do professor" : "Agenda compartilhada"}
+        eyebrow={mode === "user" ? "Área do professor" : mode === "operator" ? "Área do TI" : "Agenda compartilhada"}
         title="Reservas"
         description={
           mode === "user"
             ? "Escolha um dia no calendário para consultar ou criar uma reserva."
+            : mode === "operator"
+              ? "Consulte os agendamentos para organizar a movimentação dos carrinhos."
             : "Consulte a agenda por dia e distribua os carrinhos sem conflitos."
         }
         action={
-          <Button
-            onClick={() => setModal({ open: true, reservation: undefined })}
-            data-testid="button-new-reservation"
-          >
-            <Plus size={16} /> Nova reserva
-          </Button>
+          mode !== "operator" && <Button
+              onClick={() => setModal({ open: true, reservation: undefined })}
+              data-testid="button-new-reservation"
+            >
+              <Plus size={16} /> Nova reserva
+            </Button>
         }
       />
       {selectedFridayMessage && (
@@ -1470,7 +1472,7 @@ export function ReservationsPage({
                                   <span className="text-[11px] font-semibold text-[hsl(var(--primary))]">
                                     {expandedReservationId === item.id ? "Fechar" : "Ver agendamento"}
                                   </span>
-                                ) : (
+                                ) : mode === "operator" ? null : (
                                   <IconButton
                                     label={`Editar reserva ${item.id}`}
                                     onClick={() =>
@@ -1535,7 +1537,7 @@ export function ReservationsPage({
   );
 }
 
-export function CartsPage() {
+export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     carts,
     addCart,
@@ -1578,12 +1580,14 @@ export function CartsPage() {
         title="Carrinhos"
         description="Clique no código de cada Chromebook para marcar apenas a unidade quebrada ou indisponível. A categoria Reservas fica separada para solicitações de professores."
         action={
+          !readOnly && (
           <Button
             onClick={() => setModalOpen(true)}
             data-testid="button-new-cart"
           >
             <Plus size={16} /> Adicionar carrinho
           </Button>
+          )
         }
       />
       <div className="grid gap-4 sm:grid-cols-3">
@@ -1614,7 +1618,7 @@ export function CartsPage() {
         />
       </div>
       <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
-        <div className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+        <div className="grid max-w-2xl gap-3 p-4 sm:grid-cols-2 sm:p-5">
           <Field label="Intervalo do alerta (minutos)">
             <input
               type="number"
@@ -1630,7 +1634,7 @@ export function CartsPage() {
                   ),
                 })
               }
-              className={inputClass}
+              className={`${inputClass} h-9`}
             />
           </Field>
           <Field label="Repetições do alerta">
@@ -1645,10 +1649,29 @@ export function CartsPage() {
                   alertRepeat: Math.max(1, Number(event.target.value)),
                 })
               }
-              className={inputClass}
+              className={`${inputClass} h-9`}
             />
           </Field>
-          <label className="flex items-center gap-3 self-end rounded-xl border border-[hsl(var(--border))] p-3 text-sm font-semibold">
+          <Field label="Aviso de movimentação antecipada (minutos)">
+            <input
+              type="number"
+              min="1"
+              max="120"
+              disabled={!movementSettings.earlyWarningEnabled}
+              value={movementSettings.earlyWarningMinutes}
+              onChange={(event) =>
+                updateMovementSettings({
+                  ...movementSettings,
+                  earlyWarningMinutes: Math.min(
+                    120,
+                    Math.max(1, Number(event.target.value)),
+                  ),
+                })
+              }
+              className={`${inputClass} h-9`}
+            />
+          </Field>
+          <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
             <input
               type="checkbox"
               checked={movementSettings.autoComplete}
@@ -1661,6 +1684,20 @@ export function CartsPage() {
               className="h-4 w-4 accent-[hsl(var(--primary))]"
             />
             Concluir automaticamente após o intervalo
+          </label>
+          <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={movementSettings.earlyWarningEnabled}
+              onChange={(event) =>
+                updateMovementSettings({
+                  ...movementSettings,
+                  earlyWarningEnabled: event.target.checked,
+                })
+              }
+              className="h-4 w-4 accent-[hsl(var(--primary))]"
+            />
+            Avisar quando o TI movimentar o carrinho antecipadamente
           </label>
         </div>
       </SectionCard>
@@ -1804,6 +1841,7 @@ export function CartsPage() {
                           <button
                             type="button"
                             key={unit}
+                            disabled={readOnly}
                             onClick={() =>
                               toggleCartUnitUnavailable(cart.id, unit)
                             }
@@ -1848,6 +1886,7 @@ export function CartsPage() {
                   <div className="mt-5 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4">
                     <button
                       type="button"
+                      disabled={readOnly}
                       onClick={() => toggleCartUnavailable(cart.id)}
                       className="flex items-center gap-1.5 text-left text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
                     >
@@ -1862,6 +1901,7 @@ export function CartsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={readOnly}
                       onClick={() => toggleCartMaintenance(cart.id)}
                       data-testid={`button-toggle-cart-${cart.id}`}
                     >
@@ -2002,7 +2042,7 @@ export function CartsPage() {
   );
 }
 
-export function WifiPage() {
+export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     wifiPoints,
     wifiRooms,
@@ -2038,6 +2078,7 @@ export function WifiPage() {
         title="Pontos Wi‑Fi"
         description="Cadastre os pontos físicos e identifique as salas sem cobertura fixa. Quando uma sala sem Wi‑Fi receber um agendamento, a reserva avisará que será preciso levar uma antena volante."
         action={
+          !readOnly && (
           <Button
             variant="secondary"
             onClick={() => setSelected(null)}
@@ -2045,6 +2086,7 @@ export function WifiPage() {
           >
             <RefreshCcw size={15} /> Atualizar cadastro
           </Button>
+          )
         }
       />
       <div className="grid gap-4 sm:grid-cols-3">
@@ -2206,6 +2248,7 @@ export function WifiPage() {
                       )
                     }
                     className={inputClass}
+                    disabled={readOnly}
                     data-testid={`select-wifi-room-${activePoint.id}`}
                   >
                     <option value="">Nenhuma sala</option>
@@ -2235,6 +2278,7 @@ export function WifiPage() {
                     <input
                       type="checkbox"
                       checked={room.hasWifi}
+                      disabled={readOnly}
                       onChange={() => toggleRoomWifi(room.room)}
                       className="h-4 w-4 accent-[hsl(var(--primary))]"
                       data-testid={`checkbox-wifi-room-${room.room.replaceAll(" ", "-")}`}
@@ -2273,7 +2317,7 @@ export function WifiPage() {
                 <Button
                   size="sm"
                   onClick={addRoomWithoutWifi}
-                  disabled={!roomToAdd}
+                  disabled={readOnly || !roomToAdd}
                 >
                   <Plus size={14} /> Adicionar
                 </Button>
@@ -2287,11 +2331,39 @@ export function WifiPage() {
 }
 
 export function HistoryPage() {
+  const { movements, reservations } = useCampusData();
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
   const [exported, setExported] = useState(false);
   const types = ["Todos", "Reserva", "Equipamento", "Wi-Fi", "Movimentação"];
-  const filtered = historySeed.filter(
+  const movementHistory = movements.flatMap((movement) => {
+    const reservation = reservations.find((item) => item.id === movement.reservationId);
+    if (!reservation) return [];
+    const events = [];
+    if (movement.movedAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-moved`,
+        time: new Date(movement.movedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        title: movement.movedLate ? "Carrinho movido com atraso" : "Carrinho em movimentação",
+        detail: `${reservation.cart} · ${reservation.room} · Movido por: ${movement.movedBy ?? "TI"}`,
+        type: "Movimentação",
+        tone: "warm",
+      });
+    }
+    if (movement.completedAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-completed`,
+        time: new Date(movement.completedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        title: "Movimentação concluída",
+        detail: `${reservation.cart} · ${reservation.room} · Concluído por: ${movement.completedBy ?? "TI"}`,
+        type: "Movimentação",
+        tone: "good",
+      });
+    }
+    return events;
+  });
+  const historyEvents = [...movementHistory, ...historySeed];
+  const filtered = historyEvents.filter(
     (event) =>
       (type === "Todos" || event.type === type) &&
       `${event.title} ${event.detail}`
