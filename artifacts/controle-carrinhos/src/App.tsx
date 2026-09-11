@@ -11,6 +11,7 @@ import { UserOverviewPage } from '@/pages/user';
 import { TeacherLoginPage, TeacherProfilePage } from '@/pages/profile';
 import { RoomDirectoryProvider } from '@/lib/room-directory';
 import { CampusDataProvider } from '@/lib/campus-data';
+import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
 import {
   Route,
   Switch,
@@ -23,11 +24,12 @@ const queryClient = new QueryClient();
 function Router() {
   const [location] = useLocation();
   const userMode = location === "/usuario" || location.startsWith("/usuario/");
+  const operatorMode = location === "/operador" || location.startsWith("/operador/");
   return (
     // Keep a shared shell (sidebar, navbar) outside the boundary so it
     // survives a page crash.
     <RoutedErrorBoundary>
-      <AppShell role={userMode ? "user" : "admin"}>
+      <AppShell role={operatorMode ? "operator" : userMode ? "user" : "admin"}>
         <Switch>
           <Route path="/" component={OverviewPage} />
           <Route path="/reservas">
@@ -37,6 +39,8 @@ function Router() {
           <Route path="/salas" component={RoomsPage} />
           <Route path="/professores"><TeacherProfilePage admin /></Route>
           <Route path="/login" component={TeacherLoginPage} />
+          <Route path="/operador/login" component={OperatorLoginPage} />
+          <Route path="/operador" component={OperatorPage} />
           <Route path="/wifi" component={WifiPage} />
           <Route path="/historico" component={HistoryPage} />
           <Route path="/usuario" component={UserOverviewPage} />

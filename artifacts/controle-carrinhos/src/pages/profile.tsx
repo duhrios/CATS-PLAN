@@ -20,7 +20,7 @@ const displayNameFromEmail = (email: string) => email
 const emailsFromText = (value: string) => [...new Set(value.match(emailPattern)?.map((email) => email.toLowerCase()) ?? [])];
 
 export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
-  const { teacher, updateTeacher, teacherAccounts, addTeacherAccounts, resetTeacherPassword } = useCampusData();
+  const { teacher, updateTeacher, teacherAccounts, addTeacherAccounts, resetTeacherPassword, operatorAccounts, addOperatorAccount, movementSettings, updateMovementSettings } = useCampusData();
   const [form, setForm] = useState({ ...teacher });
   const [saved, setSaved] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -30,6 +30,9 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const [bulkEmails, setBulkEmails] = useState("");
   const [bulkFileName, setBulkFileName] = useState("");
   const [importingFile, setImportingFile] = useState(false);
+  const [operatorForm, setOperatorForm] = useState({ name: "", password: "" });
+  const [operatorMessage, setOperatorMessage] = useState("");
+  const [operatorError, setOperatorError] = useState("");
   const showSubject = form.segment === "Fundamental 2" || form.segment === "Ensino Médio";
 
   const openAccountModal = (nextMode: "single" | "bulk") => {
@@ -89,6 +92,27 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     setModalOpen(false);
   };
 
+  const saveOperator = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOperatorMessage("");
+    setOperatorError("");
+    const result = addOperatorAccount(operatorForm.name, operatorForm.password);
+    if (result === "name-taken") {
+      setOperatorError("Já existe um operador com este nome.");
+      return;
+    }
+    if (result === "invalid-name") {
+      setOperatorError("Informe um nome de operador com pelo menos 3 caracteres.");
+      return;
+    }
+    if (result === "invalid-password") {
+      setOperatorError("A senha do operador precisa ter pelo menos 6 caracteres.");
+      return;
+    }
+    setOperatorForm({ name: "", password: "" });
+    setOperatorMessage(`Usuário ${result.name} criado com sucesso.`);
+  };
+
   if (!admin) {
     return (
       <div className="animate-rise space-y-7">
@@ -115,6 +139,37 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
         description="Autorize os e-mails individualmente ou em lote. No primeiro acesso, o professor confirma o e-mail e cria o próprio nome de usuário e senha."
         action={<div className="flex flex-wrap gap-2"><Link href="/login" className="inline-flex h-10 items-center gap-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 text-sm font-semibold"><KeyRound size={15} /> Tela de acesso</Link><Button onClick={() => openAccountModal("single")} data-testid="button-new-teacher"><Plus size={16} /> Cadastrar professor</Button></div>}
       />
+      <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
+        <div className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+          <Field label="Intervalo do alerta (minutos)"><input type="number" min="1" max="60" value={movementSettings.alertIntervalMinutes} onChange={(event) => updateMovementSettings({ ...movementSettings, alertIntervalMinutes: Math.max(1, Number(event.target.value)) })} className={inputClass} /></Field>
+          <Field label="Repetições do alerta"><input type="number" min="1" max="10" value={movementSettings.alertRepeat} onChange={(event) => updateMovementSettings({ ...movementSettings, alertRepeat: Math.max(1, Number(event.target.value)) })} className={inputClass} /></Field>
+          <label className="flex items-center gap-3 self-end rounded-xl border border-[hsl(var(--border))] p-3 text-sm font-semibold"><input type="checkbox" checked={movementSettings.autoComplete} onChange={(event) => updateMovementSettings({ ...movementSettings, autoComplete: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Concluir automaticamente após o intervalo</label>
+        </div>
+      </SectionCard>
+      <SectionCard title="Usuários operadores" eyebrow="Criar acessos para movimentação">
+        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+          <form className="space-y-4" onSubmit={saveOperator} data-testid="form-operator-account">
+            <Field label="Nome do operador">
+              <input required minLength={3} value={operatorForm.name} onChange={(event) => setOperatorForm({ ...operatorForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Carlos Souza" data-testid="input-new-operator-name" />
+            </Field>
+            <Field label="Senha" hint="Use pelo menos 6 caracteres.">
+              <input required minLength={6} type="password" value={operatorForm.password} onChange={(event) => setOperatorForm({ ...operatorForm, password: event.target.value })} className={inputClass} placeholder="Senha de acesso" data-testid="input-new-operator-password" />
+            </Field>
+            {operatorError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" data-testid="text-operator-error">{operatorError}</p>}
+            {operatorMessage && <p className="rounded-lg bg-[hsl(158_43%_43%/.12)] px-3 py-2 text-xs font-semibold text-[hsl(158_43%_32%)]" data-testid="text-operator-success">{operatorMessage}</p>}
+            <Button type="submit"><Plus size={15} /> Criar usuário operador</Button>
+          </form>
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.25)]">
+            <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-4 py-3">
+              <div><p className="text-sm font-semibold">Operadores cadastrados</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Acesso pela tela do operador.</p></div>
+              <span className="rounded-full bg-[hsl(var(--primary)/.1)] px-2.5 py-1 text-xs font-bold text-[hsl(var(--primary))]">{operatorAccounts.length}</span>
+            </div>
+            <div className="divide-y divide-[hsl(var(--border))]">
+              {operatorAccounts.map((account) => <div key={account.id} className="flex items-center justify-between gap-3 px-4 py-3"><div><p className="text-sm font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Usuário operador</p></div><Link href="/operador/login" className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Tela de acesso</Link></div>)}
+            </div>
+          </div>
+        </div>
+      </SectionCard>
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Professores cadastrados</p><p className="mt-4 font-display text-3xl font-semibold">{teacherAccounts.length}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">E-mails autorizados</p></div>
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Primeiro acesso pendente</p><p className="mt-4 font-display text-3xl font-semibold">{teacherAccounts.filter((account) => account.mustSetPassword).length}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Ainda precisam criar login</p></div>
@@ -229,5 +284,5 @@ export function TeacherLoginPage() {
     setLocation("/usuario");
   };
 
-  return <div className="flex min-h-[calc(100dvh-76px)] items-center justify-center py-8"><div className="w-full max-w-md rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-6 shadow-[0_16px_48px_hsl(187_30%_20%/.08)] sm:p-8"><div className="mb-7 flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><KeyRound size={20} /></span><div><p className="font-display text-xl font-semibold">Acesso do professor</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Controle de Carrinhos</p></div></div>{step === "login" && <form className="space-y-5" onSubmit={signIn}><Field label="Nome do professor"><input required value={name} onChange={(event) => setName(event.target.value)} className={inputClass} placeholder="Ex.: Marina Lopes" autoFocus data-testid="input-login-name" /></Field><Field label="Senha"><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} className={inputClass} placeholder="Digite sua senha" data-testid="input-login-password" /></Field><label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" data-testid="checkbox-remember-login" /> Lembrar meu acesso neste dispositivo</label><Button type="submit" className="w-full">Entrar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("activation"); }}>Primeiro acesso? Ative com seu e-mail</button></form>}{step === "activation" && <form className="space-y-5" onSubmit={continueWithEmail}><div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.4)] p-4 text-xs leading-5 text-[hsl(var(--muted-foreground))]"><Mail className="mb-2 text-[hsl(var(--primary))]" size={18} /><p>Digite o e-mail autorizado pela coordenação. Ele serve apenas para confirmar seu primeiro acesso.</p></div><Field label="E-mail autorizado"><input required type="email" value={activationEmail} onChange={(event) => setActivationEmail(event.target.value)} className={inputClass} placeholder="professor@escola.com.br" autoFocus data-testid="input-login-email" /></Field><Button type="submit" className="w-full">Continuar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("login"); }}>Já tenho um login</button></form>}{step === "first-access" && <form className="space-y-5" onSubmit={createAccount}><div className="rounded-xl border border-[hsl(var(--accent)/.5)] bg-[hsl(var(--accent)/.12)] p-4 text-xs leading-5 text-[hsl(34_60%_32%)]">E-mail confirmado. Agora crie seu nome de login e uma senha com pelo menos 6 caracteres. Depois disso, o e-mail não será mais usado para entrar.</div><Field label="Seu nome completo"><input required value={registrationName} onChange={(event) => setRegistrationName(event.target.value)} className={inputClass} placeholder="Ex.: Marina Lopes" autoFocus data-testid="input-first-access-name" /></Field><Field label="Criar senha"><input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClass} placeholder="Pelo menos 6 caracteres" data-testid="input-first-access-password" /></Field><Field label="Confirmar senha"><input required minLength={6} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClass} placeholder="Repita a senha" data-testid="input-first-access-password-confirmation" /></Field><label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Lembrar meu acesso neste dispositivo</label><Button type="submit" className="w-full">Criar login e entrar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("activation"); }}>Usar outro e-mail</button></form>}{error && <p className="mt-4 rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" data-testid="text-login-error">{error}</p>}<Link href="/" className="mt-6 block text-center text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">Voltar para administração</Link></div></div>;
+  return <div className="flex min-h-[calc(100dvh-76px)] items-center justify-center py-8"><div className="w-full max-w-md rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-6 shadow-[0_16px_48px_hsl(187_30%_20%/.08)] sm:p-8"><div className="mb-7 flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><KeyRound size={20} /></span><div><p className="font-display text-xl font-semibold">Acesso do professor</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Controle de Carrinhos</p></div></div>{step === "login" && <form className="space-y-5" onSubmit={signIn}><Field label="Nome do professor"><input required value={name} onChange={(event) => setName(event.target.value)} className={inputClass} placeholder="Ex.: Marina Lopes" autoFocus data-testid="input-login-name" /></Field><Field label="Senha"><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} className={inputClass} placeholder="Digite sua senha" data-testid="input-login-password" /></Field><label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" data-testid="checkbox-remember-login" /> Lembrar meu acesso neste dispositivo</label><Button type="submit" className="w-full">Entrar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("activation"); }}>Primeiro acesso? Ative com seu e-mail</button></form>}{step === "activation" && <form className="space-y-5" onSubmit={continueWithEmail}><div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.4)] p-4 text-xs leading-5 text-[hsl(var(--muted-foreground))]"><Mail className="mb-2 text-[hsl(var(--primary))]" size={18} /><p>Digite o e-mail autorizado pela coordenação. Ele serve apenas para confirmar seu primeiro acesso.</p></div><Field label="E-mail autorizado"><input required type="email" value={activationEmail} onChange={(event) => setActivationEmail(event.target.value)} className={inputClass} placeholder="professor@escola.com.br" autoFocus data-testid="input-login-email" /></Field><Button type="submit" className="w-full">Continuar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("login"); }}>Já tenho um login</button></form>}{step === "first-access" && <form className="space-y-5" onSubmit={createAccount}><div className="rounded-xl border border-[hsl(var(--accent)/.5)] bg-[hsl(var(--accent)/.12)] p-4 text-xs leading-5 text-[hsl(34_60%_32%)]">E-mail confirmado. Agora crie seu nome de login e uma senha com pelo menos 6 caracteres. Depois disso, o e-mail não será mais usado para entrar.</div><Field label="Seu nome completo"><input required value={registrationName} onChange={(event) => setRegistrationName(event.target.value)} className={inputClass} placeholder="Ex.: Marina Lopes" autoFocus data-testid="input-first-access-name" /></Field><Field label="Criar senha"><input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClass} placeholder="Pelo menos 6 caracteres" data-testid="input-first-access-password" /></Field><Field label="Confirmar senha"><input required minLength={6} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClass} placeholder="Repita a senha" data-testid="input-first-access-password-confirmation" /></Field><label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Lembrar meu acesso neste dispositivo</label><Button type="submit" className="w-full">Criar login e entrar</Button><button type="button" className="w-full text-xs font-semibold text-[hsl(var(--primary))] hover:underline" onClick={() => { setError(""); setStep("activation"); }}>Usar outro e-mail</button></form>}{error && <p className="mt-4 rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" data-testid="text-login-error">{error}</p>}  <Link href="/" className="mt-6 block text-center text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">Voltar para administração</Link><Link href="/operador/login" className="mt-3 block text-center text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Acesso do operador</Link></div></div>;
 }

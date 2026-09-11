@@ -19,15 +19,19 @@ const userNavItems = [
   { href: "/usuario/reservas", label: "Reservas", icon: CalendarDays },
   { href: "/usuario/perfil", label: "Meu perfil", icon: UserRound },
 ];
+const operatorNavItems = [
+  { href: "/operador", label: "Agenda", icon: CalendarDays },
+];
 
-export function AppShell({ children, role = "admin" }: { children: React.ReactNode; role?: "admin" | "user" }) {
+export function AppShell({ children, role = "admin" }: { children: React.ReactNode; role?: "admin" | "user" | "operator" }) {
   const [location] = useLocation();
   const [, setLocation] = useLocation();
   const { teacher, clearRememberedTeacher } = useCampusData();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const userMode = role === "user";
-  const navItems = userMode ? userNavItems : adminNavItems;
+  const operatorMode = role === "operator";
+  const navItems = operatorMode ? operatorNavItems : userMode ? userNavItems : adminNavItems;
   const signOut = () => {
     clearRememberedTeacher();
     setLocation("/login");
@@ -40,14 +44,14 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
         mobileOpen ? "translate-x-0" : "-translate-x-full",
       )}>
         <div className="flex h-[76px] items-center justify-between border-b border-[hsl(var(--sidebar-border))] px-5">
-          <Link href={userMode ? "/usuario" : "/"} onClick={() => setMobileOpen(false)} className={cx("flex items-center gap-3", collapsed && "md:mx-auto")} data-testid="link-brand">
+          <Link href={operatorMode ? "/operador" : userMode ? "/usuario" : "/"} onClick={() => setMobileOpen(false)} className={cx("flex items-center gap-3", collapsed && "md:mx-auto")} data-testid="link-brand">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[hsl(var(--sidebar-primary))] text-[hsl(var(--sidebar-primary-foreground))]"><Router size={19} strokeWidth={2.4} /></span>
             <span className={cx("leading-tight", collapsed && "md:hidden")}><strong className="block font-display text-[15px] tracking-tight">Controle</strong><span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[hsl(var(--sidebar-foreground)/.58)]">de carrinhos</span></span>
           </Link>
           <button type="button" onClick={() => setMobileOpen(false)} className="text-[hsl(var(--sidebar-foreground)/.6)] md:hidden" aria-label="Fechar menu" data-testid="button-close-menu"><X size={19} /></button>
         </div>
         <div className="px-3 py-6">
-           <p className={cx("mb-3 px-3 text-[10px] font-bold uppercase tracking-[.18em] text-[hsl(var(--sidebar-foreground)/.42)]", collapsed && "md:hidden")}>{userMode ? "Área do professor" : "Administração"}</p>
+           <p className={cx("mb-3 px-3 text-[10px] font-bold uppercase tracking-[.18em] text-[hsl(var(--sidebar-foreground)/.42)]", collapsed && "md:hidden")}>{operatorMode ? "Área do operador" : userMode ? "Área do professor" : "Administração"}</p>
           <nav className="space-y-1">
              {navItems.map(({ href, label, icon: Icon }) => {
               const active = href === "/" ? location === "/" : location.startsWith(href);
@@ -68,10 +72,10 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
         <div className={cx("mt-auto p-4", collapsed && "md:p-3")}>
           <div className={cx("rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.65)] p-4", collapsed && "md:hidden")}>
             <div className="mb-2 flex items-center gap-2 text-[hsl(var(--sidebar-primary))]"><span className="h-2 w-2 rounded-full bg-[hsl(var(--sidebar-primary))]" /><span className="text-[10px] font-bold uppercase tracking-[.14em]">Central de operação</span></div>
-             <p className="text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">{userMode ? "Consulte sua agenda e reserve um carrinho para outra data." : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}</p>
+             <p className="text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">{operatorMode ? "Mova os carrinhos e confirme cada entrega." : userMode ? "Consulte sua agenda e reserve um carrinho para outra data." : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}</p>
           </div>
-           <Link href={userMode ? "/" : "/usuario"} onClick={() => setMobileOpen(false)} className={cx("mt-4 flex items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]", collapsed && "md:hidden")} data-testid="link-switch-role">
-             {userMode ? "Ir para administração" : "Visão do professor"}
+           <Link href={operatorMode ? "/" : userMode ? "/" : "/usuario"} onClick={() => setMobileOpen(false)} className={cx("mt-4 flex items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]", collapsed && "md:hidden")} data-testid="link-switch-role">
+             {operatorMode ? "Ir para administração" : userMode ? "Ir para administração" : "Visão do professor"}
            </Link>
           <button type="button" onClick={() => setCollapsed((value) => !value)} className="mt-4 hidden w-full items-center justify-center gap-2 text-xs text-[hsl(var(--sidebar-foreground)/.46)] hover:text-[hsl(var(--sidebar-foreground))] md:flex" data-testid="button-collapse-sidebar">
             {collapsed ? <PanelLeftOpen size={16} /> : <><PanelLeftClose size={16} /> Recolher menu</>}
@@ -83,9 +87,9 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
           <button type="button" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] md:hidden" aria-label="Abrir menu" data-testid="button-open-menu"><Menu size={21} /></button>
           <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex"><span className="h-2 w-2 rounded-full bg-[hsl(158_43%_43%)]" /> Sistema operacional <span className="mx-1 text-[hsl(var(--border))]">/</span> Campus Vila Nova</div>
           <div className="ml-auto flex items-center gap-3">
-             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{userMode ? "Área do usuário" : "Administrador"}</p></div>
+             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{operatorMode ? "Operador" : userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{operatorMode ? "Área do operador" : userMode ? "Área do usuário" : "Administrador"}</p></div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="text-user-avatar">CM</div>
-            {userMode && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
+            {(userMode || operatorMode) && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
           </div>
         </header>
         <main className="app-grid min-h-[calc(100dvh-76px)] px-5 py-7 sm:px-8 lg:px-10">{children}</main>
