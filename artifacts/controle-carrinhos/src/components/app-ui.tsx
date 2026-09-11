@@ -118,7 +118,7 @@ export function StatusPill({
       data-testid={`status-${status}`}
       className={cx(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.08em]",
-        tone === "good" && "bg-[hsl(157_43%_43%/.12)] text-[hsl(158_43%_35%)]",
+        tone === "good" && "bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]",
         tone === "warm" && "bg-[hsl(var(--accent)/.18)] text-[hsl(34_60%_32%)]",
         tone === "bad" &&
           "bg-[hsl(var(--destructive)/.12)] text-[hsl(var(--destructive))]",
@@ -129,7 +129,7 @@ export function StatusPill({
       <span
         className={cx(
           "h-1.5 w-1.5 rounded-full",
-          tone === "good" && "bg-[hsl(158_43%_43%)]",
+          tone === "good" && "bg-[hsl(var(--primary))]",
           tone === "warm" && "bg-[hsl(var(--accent))]",
           tone === "bad" && "bg-[hsl(var(--destructive))]",
           tone === "neutral" && "bg-[hsl(var(--muted-foreground))]",
@@ -364,6 +364,24 @@ export function SavingLabel({ active }: { active: boolean }) {
 }
 
 export const todayISO = () => new Date().toISOString().slice(0, 10);
+export const isFridayISO = (value: string) =>
+  new Date(`${value}T12:00:00`).getDay() === 5;
+const sabbathMessages = [
+  "Lembrete: “Lembra-te do dia de sábado, para o santificar.” — Êxodo 20:8",
+  "Que o pôr do sol de hoje anuncie um sábado de paz, comunhão e renovação com Deus.",
+  "“Se desviares o teu pé de profanar o sábado... então te deleitarás no Senhor.” — Isaías 58:13-14",
+  "O sábado se aproxima: desacelere, agradeça e prepare o coração para o encontro com o Senhor.",
+  "“O sábado foi estabelecido por causa do homem.” — Marcos 2:27. Que este tempo seja uma bênção.",
+  "Ao chegar o pôr do sol, que a paz do Senhor encha seu lar e sua família neste sábado.",
+  "“Vinde a mim... e eu vos aliviarei.” — Mateus 11:28. Um feliz sábado começa com esperança.",
+] as const;
+export const fridaySabbathMessage = (value: string) => {
+  const date = new Date(`${value}T12:00:00`);
+  const weekIndex = Math.floor(
+    Math.floor(date.getTime() / 86400000) / 7,
+  );
+  return sabbathMessages[Math.abs(weekIndex) % sabbathMessages.length];
+};
 export const formatDate = (date: string) =>
   new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" })
     .format(new Date(`${date}T12:00:00`))

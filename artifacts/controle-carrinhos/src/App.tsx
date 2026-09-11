@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { AppShell } from '@/components/app-shell';
@@ -12,6 +12,7 @@ import { TeacherLoginPage, TeacherProfilePage } from '@/pages/profile';
 import { RoomDirectoryProvider } from '@/lib/room-directory';
 import { CampusDataProvider } from '@/lib/campus-data';
 import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
+import { AccessPage, AdminLoginPage } from '@/pages/access';
 import {
   Route,
   Switch,
@@ -24,24 +25,47 @@ const queryClient = new QueryClient();
 function Router() {
   const [location] = useLocation();
   const userMode = location === "/usuario" || location.startsWith("/usuario/");
-  const operatorMode = location === "/operador" || location.startsWith("/operador/");
+  const storedRole = typeof window !== "undefined"
+    ? window.localStorage.getItem("controle-carrinhos-role")
+    : null;
+  const operatorMode =
+    location === "/operador" ||
+    location.startsWith("/operador/") ||
+    (storedRole === "operator" && ["/reservas", "/carrinhos", "/wifi"].includes(location));
+  const adminOnlyRoute = ["/admin", "/salas", "/professores", "/historico"].some(
+    (path) => location === path || location.startsWith(`${path}/`),
+  );
+  const restrictedRole = adminOnlyRoute && storedRole === "operator"
+    ? "operator"
+    : adminOnlyRoute && storedRole === "user"
+      ? "user"
+      : null;
   return (
     // Keep a shared shell (sidebar, navbar) outside the boundary so it
     // survives a page crash.
     <RoutedErrorBoundary>
-      <AppShell role={operatorMode ? "operator" : userMode ? "user" : "admin"}>
+      {location === "/" || location === "/admin/login" ? (
+        location === "/" ? <AccessPage /> : <AdminLoginPage />
+      ) : restrictedRole ? (
+        <RoleRedirect role={restrictedRole} />
+      ) : <AppShell role={operatorMode ? "operator" : userMode ? "user" : "admin"}>
         <Switch>
-          <Route path="/" component={OverviewPage} />
+          <Route path="/admin" component={OverviewPage} />
+          <Route path="/admin/login" component={AdminLoginPage} />
           <Route path="/reservas">
-            <ReservationsPage />
+            <ReservationsPage mode={operatorMode ? "operator" : "admin"} />
           </Route>
-          <Route path="/carrinhos" component={CartsPage} />
+          <Route path="/carrinhos">
+            <CartsPage readOnly={operatorMode} />
+          </Route>
           <Route path="/salas" component={RoomsPage} />
           <Route path="/professores"><TeacherProfilePage admin /></Route>
           <Route path="/login" component={TeacherLoginPage} />
           <Route path="/operador/login" component={OperatorLoginPage} />
           <Route path="/operador" component={OperatorPage} />
-          <Route path="/wifi" component={WifiPage} />
+          <Route path="/wifi">
+            <WifiPage readOnly={operatorMode} />
+          </Route>
           <Route path="/historico" component={HistoryPage} />
           <Route path="/usuario" component={UserOverviewPage} />
           <Route path="/usuario/reservas">
@@ -50,9 +74,17 @@ function Router() {
           <Route path="/usuario/perfil"><TeacherProfilePage /></Route>
           <Route component={NotFound} />
         </Switch>
-      </AppShell>
+      </AppShell>}
     </RoutedErrorBoundary>
   );
+}
+
+function RoleRedirect({ role }: { role: "operator" | "user" }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation(role === "operator" ? "/operador" : "/usuario");
+  }, [role, setLocation]);
+  return null;
 }
 
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {

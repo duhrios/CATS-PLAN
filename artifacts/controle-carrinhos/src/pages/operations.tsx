@@ -39,12 +39,15 @@ import {
   StatusPill,
   cx,
   formatDate,
+  fridaySabbathMessage,
+  isFridayISO,
   inputClass,
   todayISO,
 } from "@/components/app-ui";
 import { Calendar } from "@/components/ui/calendar";
 import { type Period, useRoomDirectory } from "@/lib/room-directory";
 import {
+  isReservationInProgress,
   segments,
   type Reservation,
   type ReservationKind,
@@ -128,8 +131,24 @@ const campusSchedule: Record<
   },
 };
 
-const scheduleFor = (cart: string, period: "Manhã" | "Tarde") =>
-  campusSchedule[cart]?.[period] ?? [];
+const fridayAfternoonSchedule: ScheduleSlot[] = [
+  { start: "12:00", end: "12:45" },
+  { start: "12:45", end: "13:25" },
+  { start: "13:25", end: "14:05" },
+  { start: "14:05", end: "15:05" },
+  { start: "15:05", end: "15:45" },
+  { start: "15:45", end: "16:20" },
+  { start: "16:20", end: "17:00" },
+];
+
+const scheduleFor = (
+  cart: string,
+  period: "Manhã" | "Tarde",
+  date?: string,
+) =>
+  date && period === "Tarde" && isFridayISO(date)
+    ? fridayAfternoonSchedule
+    : campusSchedule[cart]?.[period] ?? [];
 
 const reservationConflictDetails = (reservations: Reservation[]) => {
   const conflicts: Array<{ reservation: Reservation; other: Reservation }> = [];
@@ -210,7 +229,7 @@ function Metric({
   const colors = {
     teal: "bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]",
     gold: "bg-[hsl(var(--accent)/.2)] text-[hsl(34_60%_32%)]",
-    green: "bg-[hsl(158_43%_43%/.12)] text-[hsl(158_43%_35%)]",
+    green: "bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]",
     red: "bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))]",
   };
   const content = (
@@ -409,7 +428,7 @@ export function OverviewPage() {
                 owner: "Marina Lopes",
                 cart: "Carrinho A",
                 state: "Em andamento",
-                dot: "bg-[hsl(158_43%_43%)]",
+                dot: "bg-[hsl(var(--primary))]",
               },
               {
                 time: "09:15",
@@ -487,7 +506,7 @@ export function OverviewPage() {
         >
           <div className="space-y-5 p-5 sm:p-6">
             <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[hsl(158_43%_43%/.12)] text-[hsl(158_43%_35%)]">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]">
                 <Check size={18} />
               </span>
               <div className="flex-1">
@@ -496,7 +515,7 @@ export function OverviewPage() {
                   86 unidades disponíveis
                 </p>
               </div>
-              <span className="font-data text-xs font-bold text-[hsl(158_43%_35%)]">
+              <span className="font-data text-xs font-bold text-[hsl(var(--primary))]">
                 100%
               </span>
             </div>
@@ -575,7 +594,7 @@ export function OverviewPage() {
 
 function ReservationModal({
   reservation,
-  initialDate,
+  initialDate: initialDateValue,
   mode = "admin",
   onClose,
   onSave,
@@ -598,7 +617,8 @@ function ReservationModal({
   const [error, setError] = useState("");
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialCart = reservation?.cart ?? "Carrinho A";
-  const initialSlots = scheduleFor(initialCart, initialPeriod);
+  const selectedInitialDate = reservation?.date ?? initialDateValue ?? todayISO();
+  const initialSlots = scheduleFor(initialCart, initialPeriod, selectedInitialDate);
   const initialSlot =
     initialSlots.find((slot) => slot.start === reservation?.start) ??
     initialSlots[0];
@@ -610,7 +630,7 @@ function ReservationModal({
     className: reservation?.className ?? "",
     room: reservation?.room ?? "",
     period: initialPeriod,
-    date: reservation?.date ?? initialDate ?? todayISO(),
+    date: selectedInitialDate,
     start: initialSlot?.start ?? reservation?.start ?? "07:00",
     end: initialSlot?.end ?? reservation?.end ?? "07:45",
     cart: initialCart,
@@ -653,16 +673,16 @@ function ReservationModal({
         if (matchingClasses.length === 1) next.className = matchingClasses[0];
       }
       if (key === "start" && next.kind === "Aula") {
-        const slot = scheduleFor(next.cart, next.period).find(
+        const slot = scheduleFor(next.cart, next.period, next.date).find(
           (item) => item.start === value,
         );
         if (slot) next.end = slot.end;
       }
       if (
-        (key === "cart" || key === "period" || key === "kind") &&
+        (key === "cart" || key === "period" || key === "kind" || key === "date") &&
         next.kind === "Aula"
       ) {
-        const slots = scheduleFor(next.cart, next.period);
+        const slots = scheduleFor(next.cart, next.period, next.date);
         const slot =
           slots.find((item) => item.start === next.start) ?? slots[0];
         if (slot) {
@@ -684,7 +704,7 @@ function ReservationModal({
     mode === "user" && form.kind === "Aula" && isWeekendISO(form.date);
   const availableSchedule = isReserve
     ? []
-    : scheduleFor(form.cart, form.period);
+    : scheduleFor(form.cart, form.period, form.date);
   const selectedScheduleSlot = availableSchedule.find(
     (slot) => slot.start === form.start && slot.end === form.end,
   );
@@ -1065,6 +1085,11 @@ export function ReservationsPage({
     teacher,
     reserveAvailable,
     teacherReserved,
+    movements,
+    updateMovementStatus,
+    reportNotReceived,
+    requestMovementAgain,
+    deleteReservation,
   } = useCampusData();
   const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("Todos");
@@ -1076,6 +1101,7 @@ export function ReservationsPage({
   const [calendarDate, setCalendarDate] = useState<string | null>(null);
   const [segmentFilter, setSegmentFilter] = useState("Todos");
   const [kindFilter, setKindFilter] = useState("Todos");
+  const [expandedReservationId, setExpandedReservationId] = useState<number | null>(null);
   const [modal, setModal] = useState<{
     open: boolean;
     reservation?: Reservation;
@@ -1094,9 +1120,16 @@ export function ReservationsPage({
       ),
     [conflictDetails],
   );
+  const visibleReservations = useMemo(
+    () =>
+      mode === "user"
+        ? reservations.filter((item) => item.teacher === teacher.name)
+        : reservations,
+    [mode, reservations, teacher.name],
+  );
   const filtered = useMemo(
     () =>
-      reservations.filter((item) => {
+      visibleReservations.filter((item) => {
         const matchesQuery =
           `${item.teacher} ${item.className} ${item.room} ${item.cart}`
             .toLowerCase()
@@ -1119,7 +1152,7 @@ export function ReservationsPage({
         );
       }),
     [
-      reservations,
+      visibleReservations,
       query,
       dateFilter,
       calendarDate,
@@ -1138,10 +1171,13 @@ export function ReservationsPage({
     [filtered],
   );
   const nextConflict = conflictDetails[0];
-  const bookedDates = reservations.map((item) => isoToDate(item.date));
+  const bookedDates = visibleReservations.map((item) => isoToDate(item.date));
   const calendarSelectedDate = calendarDate
     ? isoToDate(calendarDate)
     : undefined;
+  const selectedFridayMessage = calendarDate && isFridayISO(calendarDate)
+    ? fridaySabbathMessage(calendarDate)
+    : null;
   const selectCalendarDate = (date?: Date) => {
     if (!date) return;
     setCalendarDate(dateToISO(date));
@@ -1170,6 +1206,15 @@ export function ReservationsPage({
           </Button>
         }
       />
+      {selectedFridayMessage && (
+        <div className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--accent)/.5)] bg-[hsl(var(--accent)/.14)] p-4 text-sm">
+          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[hsl(34_60%_32%)]" />
+          <div>
+            <p className="font-semibold text-[hsl(34_60%_28%)]">Preparação para o Sábado do Senhor</p>
+            <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{selectedFridayMessage}</p>
+          </div>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric
           label={mode === "user" ? "Minhas reservas" : "Hoje"}
@@ -1391,9 +1436,12 @@ export function ReservationsPage({
                         {items
                           .sort((a, b) => a.start.localeCompare(b.start))
                           .map((item) => (
+                            <Fragment key={item.id}>
                             <tr
                               key={item.id}
                               data-testid={`row-reservation-${item.id}`}
+                              className={mode === "user" ? "cursor-pointer hover:bg-[hsl(var(--muted)/.35)]" : undefined}
+                              onClick={() => mode === "user" && setExpandedReservationId((current) => current === item.id ? null : item.id)}
                             >
                               <td className="px-6 py-4 font-data text-sm">
                                 {item.start}–{item.end}
@@ -1413,14 +1461,14 @@ export function ReservationsPage({
                                   status={
                                     conflictIds.has(item.id)
                                       ? "Conflito: carrinho ocupado"
-                                      : item.status
+                                      : movements.find((entry) => entry.reservationId === item.id)?.status ?? item.status
                                   }
                                 />
                               </td>
                               <td className="px-6 py-4 text-right">
                                 {mode === "user" ? (
-                                  <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                                    Somente leitura
+                                  <span className="text-[11px] font-semibold text-[hsl(var(--primary))]">
+                                    {expandedReservationId === item.id ? "Fechar" : "Ver agendamento"}
                                   </span>
                                 ) : (
                                   <IconButton
@@ -1437,6 +1485,31 @@ export function ReservationsPage({
                                 )}
                               </td>
                             </tr>
+                            {mode === "user" && expandedReservationId === item.id && (
+                              <tr className="bg-[hsl(var(--primary)/.04)]">
+                                <td colSpan={6} className="px-6 py-4">
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs font-bold uppercase tracking-[.1em] text-[hsl(var(--primary))]">Status da entrega</p>
+                                      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Confirme o recebimento do carrinho ou avise a operação.</p>
+                                      {movements.find((entry) => entry.reservationId === item.id)?.notReceived && (
+                                        <p className="mt-2 text-xs font-semibold text-[hsl(var(--destructive))]">Carrinho não movimentado: a operação foi avisada.</p>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
+                                      <Button size="sm" disabled={!isReservationInProgress(item) || movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído"} onClick={() => updateMovementStatus(item.id, "Concluído")}><Check size={14} /> Concluído</Button>
+                                      <Button size="sm" variant="secondary" disabled={!isReservationInProgress(item) || (movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído" && !movements.find((entry) => entry.reservationId === item.id)?.autoCompleted)} onClick={() => reportNotReceived(item.id)}>Não Recebi</Button>
+                                      <Button size="sm" variant="secondary" disabled={!isReservationInProgress(item) || !movements.find((entry) => entry.reservationId === item.id)?.notReceived} onClick={() => requestMovementAgain(item.id)}>Pedir novamente</Button>
+                                      <div className="basis-full pt-8">
+                                        <Button size="sm" variant="danger" onClick={() => { if (window.confirm("Excluir este agendamento?")) { deleteReservation(item.id); setExpandedReservationId(null); } }}>Excluir agendamento</Button>
+                                      </div>
+                                      {!isReservationInProgress(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Disponível somente no horário da aula.</span>}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </Fragment>
                           ))}
                       </Fragment>
                     ))}
@@ -1471,6 +1544,8 @@ export function CartsPage() {
     toggleCartMaintenance,
     reservations,
     reserveAvailable,
+    movementSettings,
+    updateMovementSettings,
   } = useCampusData();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
@@ -1538,6 +1613,57 @@ export function CartsPage() {
           tone={reserveAvailable > 0 ? "gold" : "red"}
         />
       </div>
+      <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
+        <div className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+          <Field label="Intervalo do alerta (minutos)">
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={movementSettings.alertIntervalMinutes}
+              onChange={(event) =>
+                updateMovementSettings({
+                  ...movementSettings,
+                  alertIntervalMinutes: Math.max(
+                    1,
+                    Number(event.target.value),
+                  ),
+                })
+              }
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Repetições do alerta">
+            <input
+              type="number"
+              min="1"
+              max="10"
+              value={movementSettings.alertRepeat}
+              onChange={(event) =>
+                updateMovementSettings({
+                  ...movementSettings,
+                  alertRepeat: Math.max(1, Number(event.target.value)),
+                })
+              }
+              className={inputClass}
+            />
+          </Field>
+          <label className="flex items-center gap-3 self-end rounded-xl border border-[hsl(var(--border))] p-3 text-sm font-semibold">
+            <input
+              type="checkbox"
+              checked={movementSettings.autoComplete}
+              onChange={(event) =>
+                updateMovementSettings({
+                  ...movementSettings,
+                  autoComplete: event.target.checked,
+                })
+              }
+              className="h-4 w-4 accent-[hsl(var(--primary))]"
+            />
+            Concluir automaticamente após o intervalo
+          </label>
+        </div>
+      </SectionCard>
       <SectionCard
         title="Inventário operacional"
         eyebrow="Cada Chromebook tem um código próprio: A1, A2, B1..."
@@ -2118,7 +2244,7 @@ export function WifiPage() {
                       className={cx(
                         "text-[11px] font-semibold",
                         room.hasWifi
-                          ? "text-[hsl(158_43%_35%)]"
+                          ? "text-[hsl(var(--primary))]"
                           : "text-[hsl(34_60%_32%)]",
                       )}
                     >
@@ -2249,7 +2375,7 @@ export function HistoryPage() {
                   className={cx(
                     "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
                     event.tone === "good" &&
-                      "bg-[hsl(158_43%_43%/.12)] text-[hsl(158_43%_35%)]",
+                      "bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]",
                     event.tone === "warm" &&
                       "bg-[hsl(var(--accent)/.18)] text-[hsl(34_60%_32%)]",
                     event.tone === "bad" &&

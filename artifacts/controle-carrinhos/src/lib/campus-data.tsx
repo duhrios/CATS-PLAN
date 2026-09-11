@@ -43,6 +43,19 @@ export type CartMovement = {
   status: MovementStatus;
   updatedAt: string;
   notReceived: boolean;
+  autoCompleted: boolean;
+  requestCount: number;
+};
+
+export const isReservationInProgress = (reservation: Reservation) => {
+  if (reservation.date !== todayISO()) return false;
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const [startHour, startMinute] = reservation.start.split(":").map(Number);
+  const [endHour, endMinute] = reservation.end.split(":").map(Number);
+  const startMinutes = startHour * 60 + startMinute;
+  const endMinutes = endHour * 60 + endMinute;
+  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
 };
 
 export const normalizeTeacherName = (name: string) =>
@@ -246,7 +259,7 @@ export const initialCarts: Cart[] = [
     location: "Armário C · Bloco 2",
     status: "Em uso",
     lastCheck: "Hoje, 06:41",
-    accent: "bg-[hsl(158_43%_43%)]",
+    accent: "bg-[hsl(var(--primary))]",
     unavailable: false,
     unavailableUnits: ["C4", "C16", "C33", "C48"],
     reserveCapacity: 10,
@@ -344,7 +357,7 @@ export type MovementSettings = {
   autoComplete: boolean;
 };
 export const defaultMovementSettings: MovementSettings = {
-  alertIntervalMinutes: 5,
+  alertIntervalMinutes: 10,
   alertRepeat: 2,
   autoComplete: true,
 };
@@ -366,6 +379,7 @@ type CampusDataValue = {
   addTeacherAccounts: (
     entries: Array<Omit<TeacherAccount, "id" | "password" | "mustSetPassword">>,
   ) => void;
+  deleteTeacherAccount: (id: string) => void;
   resetTeacherPassword: (id: string) => void;
   completeTeacherRegistration: (
     id: string,
@@ -381,10 +395,16 @@ type CampusDataValue = {
     name: string,
     password: string,
   ) => OperatorRegistrationResult;
+  deleteOperatorAccount: (id: string) => void;
   authenticateOperator: (name: string, password: string) => OperatorAccount | null;
   movements: CartMovement[];
-  updateMovementStatus: (reservationId: number, status: MovementStatus) => void;
+  updateMovementStatus: (
+    reservationId: number,
+    status: MovementStatus,
+    autoCompleted?: boolean,
+  ) => void;
   reportNotReceived: (reservationId: number) => void;
+  requestMovementAgain: (reservationId: number) => void;
   movementSettings: MovementSettings;
   updateMovementSettings: (settings: MovementSettings) => void;
   reservations: Reservation[];
@@ -392,6 +412,7 @@ type CampusDataValue = {
     data: Omit<Reservation, "id" | "status">,
     id?: number,
   ) => void;
+  deleteReservation: (id: number) => void;
   carts: Cart[];
   addCart: (cart: Omit<Cart, "id">) => void;
   toggleCartUnavailable: (id: string) => void;
@@ -454,7 +475,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     readStorage(operatorAccountsStorageKey, initialOperatorAccounts),
   );
   const [movements, setMovements] = useState<CartMovement[]>(() =>
-    readStorage(movementsStorageKey, []),
+    readStorage<Partial<CartMovement>[]>(movementsStorageKey, []).map((item) => ({
+      reservationId: item.reservationId as number,
+      status: item.status ?? "Não movido",
+      updatedAt: item.updatedAt ?? new Date().toISOString(),
+      notReceived: item.notReceived ?? false,
+      autoCompleted: item.autoCompleted ?? false,
+      requestCount: item.requestCount ?? (item.notReceived ? 1 : 0),
+    })),
   );
   const [movementSettings, setMovementSettings] = useState<MovementSettings>(() =>
     readStorage(movementSettingsStorageKey, defaultMovementSettings),
@@ -518,19 +546,39 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     persistOperatorAccounts([...operatorAccounts, account]);
     return account;
   };
+  const deleteOperatorAccount = (id: string) => {
+    persistOperatorAccounts(
+      operatorAccounts.filter((account) => account.id !== id),
+    );
+  };
   const persistMovements = (next: CartMovement[]) => {
     setMovements(next);
     window.localStorage.setItem(movementsStorageKey, JSON.stringify(next));
   };
-  const updateMovementStatus = (reservationId: number, status: MovementStatus) => {
+  const updateMovementStatus = (
+    reservationId: number,
+    status: MovementStatus,
+    autoCompleted = false,
+  ) => {
     const current = movements.find((item) => item.reservationId === reservationId);
-    const nextItem = { reservationId, status, updatedAt: new Date().toISOString(), notReceived: current?.notReceived ?? false };
+    const nextItem = {
+      reservationId,
+      status,
+      updatedAt: new Date().toISOString(),
+      notReceived: current?.notReceived ?? false,
+      autoCompleted,
+      requestCount: current?.requestCount ?? 0,
+    };
     persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
   const reportNotReceived = (reservationId: number) => {
     const current = movements.find((item) => item.reservationId === reservationId);
-    const nextItem = { reservationId, status: "Não movido" as const, updatedAt: new Date().toISOString(), notReceived: true };
+    if (current?.status === "Concluído" && !current.autoCompleted) return;
+    const nextItem = { reservationId, status: "Não movido" as const, updatedAt: new Date().toISOString(), notReceived: true, autoCompleted: false, requestCount: (current?.requestCount ?? 0) + 1 };
     persistMovements([...movements.filter((item) => item.reservationId !== reservationId), { ...current, ...nextItem }]);
+  };
+  const requestMovementAgain = (reservationId: number) => {
+    reportNotReceived(reservationId);
   };
   const updateMovementSettings = (settings: MovementSettings) => {
     setMovementSettings(settings);
@@ -554,6 +602,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           ...reservations,
         ];
     persistReservations(next);
+  };
+  const deleteReservation = (id: number) => {
+    persistReservations(reservations.filter((item) => item.id !== id));
+    persistMovements(movements.filter((item) => item.reservationId !== id));
   };
 
   const toggleCartUnavailable = (id: string) => {
@@ -623,6 +675,16 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       });
     });
     persistTeacherAccounts(next);
+  };
+  const deleteTeacherAccount = (id: string) => {
+    const nextAccounts = teacherAccounts.filter((account) => account.id !== id);
+    persistTeacherAccounts(nextAccounts);
+    const remembered = readStorage<{ accountId: string } | null>(
+      rememberedTeacherStorageKey,
+      null,
+    );
+    if (remembered?.accountId === id)
+      window.localStorage.removeItem(rememberedTeacherStorageKey);
   };
   const resetTeacherPassword = (id: string) => {
     persistTeacherAccounts(
@@ -767,6 +829,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         updateTeacher: persistTeacher,
         teacherAccounts,
         addTeacherAccounts,
+        deleteTeacherAccount,
         resetTeacherPassword,
         completeTeacherRegistration,
         authenticateTeacher,
@@ -775,14 +838,17 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         clearRememberedTeacher,
         operatorAccounts,
         addOperatorAccount,
+        deleteOperatorAccount,
         authenticateOperator: (name, password) => operatorAccounts.find((item) => item.name.toLowerCase() === name.trim().toLowerCase() && item.password === password) ?? null,
         movements,
         updateMovementStatus,
         reportNotReceived,
+        requestMovementAgain,
         movementSettings,
         updateMovementSettings,
         reservations,
         saveReservation,
+        deleteReservation,
         carts,
         addCart,
         toggleCartUnavailable,
