@@ -51,7 +51,9 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
       )}>
         <div className="flex h-[76px] items-center justify-between border-b border-[hsl(var(--sidebar-border))] px-5">
           <Link href={operatorMode ? "/operador" : userMode ? "/usuario" : "/admin"} onClick={() => setMobileOpen(false)} className={cx("flex items-center gap-3", collapsed && "md:mx-auto")} data-testid="link-brand">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[hsl(var(--sidebar-primary))] text-[hsl(var(--sidebar-primary-foreground))]"><Router size={19} strokeWidth={2.4} /></span>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[linear-gradient(135deg,hsl(var(--sidebar-primary))_0%,hsl(var(--sidebar-accent))_100%)] text-[hsl(var(--sidebar-primary-foreground))] shadow-[0_10px_20px_rgba(0,0,0,0.18)]">
+              <span className="text-base font-black tracking-[-.12em]">A</span>
+            </span>
             <span className={cx("leading-tight", collapsed && "md:hidden")}><strong className="block font-display text-[15px] tracking-tight">Controle</strong><span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[hsl(var(--sidebar-foreground)/.58)]">de carrinhos</span></span>
           </Link>
           <button type="button" onClick={() => setMobileOpen(false)} className="text-[hsl(var(--sidebar-foreground)/.6)] md:hidden" aria-label="Fechar menu" data-testid="button-close-menu"><X size={19} /></button>

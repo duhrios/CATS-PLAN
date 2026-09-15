@@ -1,6 +1,7 @@
 import { AlertTriangle, CalendarX, Database, Factory, History, Trash2, Users, UserRound } from "lucide-react";
 import { PageHeader, SectionCard, Button } from "@/components/app-ui";
 import { useCampusData } from "@/lib/campus-data";
+import TestViewPage from "@/pages/test-view";
 
 export function ConfigurationPage() {
   const { resetData } = useCampusData();
@@ -15,11 +16,18 @@ export function ConfigurationPage() {
     if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) resetData(kind);
   };
   return <div className="animate-rise space-y-7">
-    <PageHeader eyebrow="Acesso exclusivo · Super administrador" title="Configuração" description="Ações de manutenção do sistema. O Super administrador é preservado em qualquer redefinição." />
-    <div className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.06)] p-4 text-sm"><AlertTriangle size={18} className="mt-0.5 text-[hsl(var(--destructive))]" /><p>As ações abaixo apagam dados locais permanentemente. Confirme somente quando necessário.</p></div>
+    <PageHeader eyebrow="Acesso exclusivo · Super administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <SectionCard title="Validação do projeto" eyebrow="Teste de navegação">
+      <div className="p-4">
+        <TestViewPage compact />
+      </div>
+    </SectionCard>
     <SectionCard title="Manutenção de dados" eyebrow="Operações irreversíveis">
-      <div className="grid gap-3 p-5 sm:grid-cols-2">
-        {actions.map(([kind, label, description, Icon]) => <div key={kind} className="flex items-center justify-between gap-4 rounded-xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><Icon size={19} className="text-[hsl(var(--primary))]" /><div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{description}</p></div></div><Button size="sm" variant={kind === "factory" ? "danger" : "secondary"} onClick={() => run(kind, label)}><Trash2 size={14} /> Executar</Button></div>)}
+      <div className="p-5">
+        <div className="mb-4 flex items-start gap-3 rounded-2xl border border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.06)] p-4 text-sm"><AlertTriangle size={18} className="mt-0.5 text-[hsl(var(--destructive))]" /><p>As ações abaixo apagam dados locais permanentemente. Confirme somente quando necessário.</p></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {actions.map(([kind, label, description, Icon]) => <div key={kind} className="flex items-center justify-between gap-4 rounded-xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><Icon size={19} className="text-[hsl(var(--primary))]" /><div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{description}</p></div></div><Button size="sm" variant={kind === "factory" ? "danger" : "secondary"} onClick={() => run(kind, label)}><Trash2 size={14} /> Executar</Button></div>)}
+        </div>
       </div>
     </SectionCard>
   </div>;

@@ -15,6 +15,7 @@ import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
 import { OperatorSettingsPage } from '@/pages/operator-settings';
 import { AccessPage, AdminLoginPage } from '@/pages/access';
 import { ConfigurationPage } from '@/pages/configuration';
+import TestViewPage from '@/pages/test-view';
 import {
   Route,
   Switch,
@@ -73,6 +74,7 @@ function Router() {
           </Route>
           <Route path="/historico" component={HistoryPage} />
           <Route path="/configuracao" component={ConfigurationPage} />
+          <Route path="/teste"><TestViewPage /></Route>
           <Route path="/usuario" component={UserOverviewPage} />
           <Route path="/usuario/reservas">
             <ReservationsPage mode="user" />
