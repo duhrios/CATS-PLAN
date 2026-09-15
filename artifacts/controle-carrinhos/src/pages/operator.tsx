@@ -1,8 +1,9 @@
-import { Bell, Check, Clock3, LogIn, MoveRight, Volume2, VolumeX, Vibrate, X } from "lucide-react";
+import { Bell, CalendarDays, Check, Clock3, LogIn, MoveRight, Volume2, VolumeX, Vibrate, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button, Field, PageHeader, SectionCard, StatusPill, inputClass, todayISO } from "@/components/app-ui";
 import { type Reservation, useCampusData } from "@/lib/campus-data";
+import { Calendar } from "@/components/ui/calendar";
 
 const operatorSettingsStorageKey = "controle-carrinhos-operator-settings";
 export type OperatorSettings = {
@@ -43,10 +44,12 @@ export const playOperatorAlert = (settings: OperatorSettings, repeat: number, du
       audio.pause();
       audio.currentTime = 0;
     };
+
   }
   const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass || settings.volume === 0) return () => undefined;
   const audio = new AudioContextClass();
+  let closed = false;
   const frequencies = settings.tone === "double" ? [620, 880] : settings.tone === "soft" ? [440] : [740];
   const totalRepeats = Math.max(repeat, Math.ceil(durationSeconds / 0.7));
   for (let index = 0; index < totalRepeats; index += 1) {
@@ -63,12 +66,48 @@ export const playOperatorAlert = (settings: OperatorSettings, repeat: number, du
     oscillator.start(start);
     oscillator.stop(start + 0.24);
   }
-  const timeout = window.setTimeout(() => void audio.close(), durationSeconds * 1000);
+  const timeout = window.setTimeout(() => {
+    if (closed) return;
+    closed = true;
+    void audio.close();
+  }, durationSeconds * 1000);
   return () => {
     window.clearTimeout(timeout);
-    void audio.close();
+    if (!closed) {
+      closed = true;
+      void audio.close();
+    }
   };
 };
+
+type FutureFilter = "day" | "week" | "month" | "calendar";
+const toLocalDate = (value: string) => new Date(`${value}T12:00:00`);
+const isoDate = (value: Date) => value.toISOString().slice(0, 10);
+const startOfWeek = (value: Date) => {
+  const date = new Date(value);
+  date.setDate(date.getDate() - date.getDay());
+  return date;
+};
+
+function FutureReservations({ reservations, movements, onViewChange }: { reservations: Reservation[]; movements: ReturnType<typeof useCampusData>["movements"]; onViewChange: (view: "pending" | "completed") => void }) {
+  const [filter, setFilter] = useState<FutureFilter>("day");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const today = toLocalDate(todayISO());
+  const futureReservations = reservations.filter((item) => item.kind === "Aula" && toLocalDate(item.date) > today).sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
+  const filterDate = toLocalDate(selectedDate ?? futureReservations[0]?.date ?? todayISO());
+  const visible = futureReservations.filter((item) => {
+    const date = toLocalDate(item.date);
+    if (filter === "day" || filter === "calendar") return item.date === isoDate(filterDate);
+    if (filter === "week") {
+      const start = startOfWeek(filterDate);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      return date >= start && date < end;
+    }
+    return date.getFullYear() === filterDate.getFullYear() && date.getMonth() === filterDate.getMonth();
+  });
+  return <div className="space-y-4"><div className="flex gap-2 border-b border-[hsl(var(--border))]"><button type="button" onClick={() => onViewChange("pending")} className="border-b-2 border-transparent px-1 pb-3 text-xs font-bold text-[hsl(var(--muted-foreground))]">Para atender</button><button type="button" onClick={() => onViewChange("completed")} className="border-b-2 border-transparent px-1 pb-3 text-xs font-bold text-[hsl(var(--muted-foreground))]">Concluído</button><span className="border-b-2 border-[hsl(var(--primary))] px-1 pb-3 text-xs font-bold text-[hsl(var(--primary))]">Futuras</span></div><div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,280px)]"><div className="space-y-4"><div className="flex flex-wrap gap-2 border-b border-[hsl(var(--border))] pb-3"><span className="mr-2 inline-flex items-center gap-1.5 text-xs font-bold text-[hsl(var(--muted-foreground))]"><CalendarDays size={14} /> Filtrar</span>{([["day", "Dia"], ["week", "Semana"], ["month", "Mês"], ["calendar", "Dia selecionado"]] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${filter === value ? "bg-[hsl(var(--primary))] text-white" : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]"}`}>{label}</button>)}</div>{visible.length === 0 ? <p className="p-4 text-sm text-[hsl(var(--muted-foreground))]">{futureReservations.length === 0 ? "Nenhum agendamento futuro." : "Nenhum agendamento neste filtro."}</p> : <div className="divide-y divide-[hsl(var(--border))] rounded-xl border border-[hsl(var(--border))]">{visible.map((item) => <div key={item.id} className="flex flex-wrap items-center gap-3 p-4"><div className="min-w-32"><p className="font-data text-sm font-semibold">{item.start}–{item.end}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{item.date}</p></div><div className="min-w-[180px] flex-1"><p className="text-sm font-semibold">{item.className}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{item.room} · {item.teacher}</p></div><span className="rounded-full bg-[hsl(var(--muted))] px-3 py-1 text-[11px] font-bold uppercase text-[hsl(var(--muted-foreground))]">{movements.find((entry) => entry.reservationId === item.id)?.status ?? "Não movido"}</span></div>)}</div>}</div><div className="rounded-xl border border-[hsl(var(--border))] p-3"><p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Escolha uma data para os filtros</p><Calendar mode="single" selected={filterDate} onSelect={(date) => setSelectedDate(date ? isoDate(date) : null)} /></div></div></div>;
+}
 
 export function OperatorLoginPage() {
   const { authenticateOperator } = useCampusData();
@@ -83,7 +122,7 @@ export function OperatorPage() {
   const { reservations, movements, movementSettings, updateMovementStatus, wifiRooms, wifiPoints, assignMobileAntenna, releaseMobileAntenna } = useCampusData();
   const [warning, setWarning] = useState("");
   const [alarm, setAlarm] = useState<Reservation | null>(null);
-  const [view, setView] = useState<"pending" | "completed">("pending");
+  const [view, setView] = useState<"pending" | "completed" | "future">("pending");
   const [alertedReservations, setAlertedReservations] = useState<number[]>([]);
   const alarmStopRef = useRef<(() => void) | null>(null);
   const operatorSettings = readOperatorSettings();
@@ -170,5 +209,5 @@ export function OperatorPage() {
     const movement = movements.find((entry) => entry.reservationId === item.id);
     return view === "completed" ? movement?.status === "Concluído" : movement?.status !== "Concluído";
   });
-  return <div className="animate-rise space-y-7"><PageHeader eyebrow="Área do TI" title="Agenda de movimentações" description="Leve os carrinhos até as salas e atualize cada etapa para a coordenação e o professor." action={<Link href="/admin" className="text-xs font-semibold text-[hsl(var(--primary))]">Voltar ao administrador</Link>} />{alarm && <div role="alert" className="flex items-start gap-3 rounded-xl border border-[hsl(var(--primary)/.45)] bg-[hsl(var(--primary)/.08)] p-4 shadow-sm"><Bell size={20} className="mt-0.5 shrink-0 text-[hsl(var(--primary))]" /><div className="min-w-0 flex-1"><p className="text-sm font-bold">Novo agendamento para movimentar</p><p className="mt-1 text-xs leading-5">{alarm.start}–{alarm.end} · {alarm.cart} · {alarm.room} · {alarm.teacher}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">O aviso segue as configurações definidas pela administração.</p></div><button type="button" onClick={() => setAlarm(null)} className="rounded-md p-1 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]" aria-label="Fechar aviso"><X size={16} /></button></div>}{warning && <div role="alert" className="rounded-xl border border-[hsl(var(--destructive)/.4)] bg-[hsl(var(--destructive)/.08)] p-4 text-sm font-semibold text-[hsl(var(--destructive))]">{warning}</div>}<SectionCard title="Movimentações de hoje" eyebrow={`${visibleToday.length} agendamento${visibleToday.length === 1 ? "" : "s"} ${view === "completed" ? "concluído" : "para atender"}`}><div className="flex gap-2 border-b border-[hsl(var(--border))] px-5 pt-4 sm:px-6"><button type="button" onClick={() => setView("pending")} className={`border-b-2 px-1 pb-3 text-xs font-bold ${view === "pending" ? "border-[hsl(var(--primary))] text-[hsl(var(--primary))]" : "border-transparent text-[hsl(var(--muted-foreground))]"}`}>Para atender</button><button type="button" onClick={() => setView("completed")} className={`border-b-2 px-1 pb-3 text-xs font-bold ${view === "completed" ? "border-[hsl(var(--primary))] text-[hsl(var(--primary))]" : "border-transparent text-[hsl(var(--muted-foreground))]"}`}>Concluído</button></div>{visibleToday.length === 0 ? <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">{view === "completed" ? "Nenhuma movimentação concluída hoje." : "Nenhuma movimentação para hoje."}</p> : <div className="divide-y divide-[hsl(var(--border))]">{visibleToday.map((item) => { const movement = movements.find((entry) => entry.reservationId === item.id); const status = movement?.status ?? "Não movido"; const roomWifi = wifiRooms.find((room) => room.room === item.room); const roomNeedsAntenna = !roomWifi || !roomWifi.hasWifi; const mobileAntenna = wifiPoints.find((point) => point.type === "Antena volante" && (!point.assignedRoom || point.assignedRoom === item.room) && point.status === "Disponível"); return <div key={item.id} className="space-y-4 p-5 sm:p-6"><div className="flex flex-wrap items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"><MoveRight size={18} /></div><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{item.start}–{item.end} · {item.cart}</p><p className="mt-1 text-sm">{item.className}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{item.room} · Professor: {item.teacher}</p>{movement?.notReceived && <p className="mt-2 rounded-lg bg-[hsl(var(--destructive)/.1)] p-2 text-xs font-semibold text-[hsl(var(--destructive))]">Carrinho não movimentado — o professor não recebeu. Solicitação {movement.requestCount > 1 ? `repetida (${movement.requestCount}x)` : "registrada"}.</p>}{roomNeedsAntenna && <p className="mt-2 rounded-lg bg-[hsl(var(--accent)/.12)] p-2 text-xs font-semibold text-[hsl(34_60%_32%)]">Sala sem conexão fixa · {mobileAntenna ? `${mobileAntenna.name} (${mobileAntenna.point})` : "nenhuma antena volante disponível"}</p>}</div><StatusPill status={status} /></div>{view === "pending" && <div className="flex flex-wrap gap-2"><Button size="sm" variant={status === "Movendo" ? "primary" : "secondary"} onClick={() => { const timing = canUpdateMovement(item.start, item.end); if (!timing.allowed) return; if (roomNeedsAntenna && mobileAntenna) assignMobileAntenna(mobileAntenna.id, item.room); playMovementAlert(); updateMovementStatus(item.id, "Movendo", false, movementActor(), timing.late); }}><Clock3 size={14} /> Movendo</Button><Button size="sm" variant={status === "Concluído" ? "primary" : "secondary"} onClick={() => { const timing = canUpdateMovement(item.start, item.end); if (!timing.allowed) return; if (roomNeedsAntenna && mobileAntenna) assignMobileAntenna(mobileAntenna.id, item.room); updateMovementStatus(item.id, "Concluído", false, movementActor(), timing.late); }}><Check size={14} /> Concluído</Button></div>}</div>; })}</div>}</SectionCard><div className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.12)] p-4 text-xs leading-5"><Bell size={17} className="mt-0.5 text-[hsl(34_60%_32%)]" />  <p>O alerta de movimentação é configurado pela administração. Ações antecipadas dentro da janela configurada exibem um aviso; ações após o início ficam registradas como movimentação com atraso.</p></div></div>;
+  return <div className="animate-rise space-y-7"><PageHeader eyebrow="Área do TI" title="Agenda de movimentações" description="Leve os carrinhos até as salas e atualize cada etapa para a coordenação e o professor." action={<Link href="/admin" className="text-xs font-semibold text-[hsl(var(--primary))]">Voltar ao administrador</Link>} />{alarm && <div role="alert" className="flex items-start gap-3 rounded-xl border border-[hsl(var(--primary)/.45)] bg-[hsl(var(--primary)/.08)] p-4 shadow-sm"><Bell size={20} className="mt-0.5 shrink-0 text-[hsl(var(--primary))]" /><div className="min-w-0 flex-1"><p className="text-sm font-bold">Novo agendamento para movimentar</p><p className="mt-1 text-xs leading-5">{alarm.start}–{alarm.end} · {alarm.cart} · {alarm.room} · {alarm.teacher}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">O aviso segue as configurações definidas pela administração.</p></div><button type="button" onClick={() => setAlarm(null)} className="rounded-md p-1 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]" aria-label="Fechar aviso"><X size={16} /></button></div>}{warning && <div role="alert" className="rounded-xl border border-[hsl(var(--destructive)/.4)] bg-[hsl(var(--destructive)/.08)] p-4 text-sm font-semibold text-[hsl(var(--destructive))]">{warning}</div>}{view === "future" ? <SectionCard title="Agendamentos futuros" eyebrow="Próximas movimentações"><FutureReservations reservations={reservations} movements={movements} onViewChange={(nextView) => setView(nextView)} /></SectionCard> : <SectionCard title="Movimentações de hoje" eyebrow={`${visibleToday.length} agendamento${visibleToday.length === 1 ? "" : "s"} ${view === "completed" ? "concluído" : "para atender"}`}><div className="flex gap-2 border-b border-[hsl(var(--border))] px-5 pt-4 sm:px-6"><button type="button" onClick={() => setView("pending")} className={`border-b-2 px-1 pb-3 text-xs font-bold ${view === "pending" ? "border-[hsl(var(--primary))] text-[hsl(var(--primary))]" : "border-transparent text-[hsl(var(--muted-foreground))]"}`}>Para atender</button><button type="button" onClick={() => setView("completed")} className={`border-b-2 px-1 pb-3 text-xs font-bold ${view === "completed" ? "border-[hsl(var(--primary))] text-[hsl(var(--primary))]" : "border-transparent text-[hsl(var(--muted-foreground))]"}`}>Concluído</button><button type="button" onClick={() => setView("future")} className="border-b-2 border-transparent px-1 pb-3 text-xs font-bold text-[hsl(var(--muted-foreground))]">Futuras</button></div>{visibleToday.length === 0 ? <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">{view === "completed" ? "Nenhuma movimentação concluída hoje." : "Nenhuma movimentação para hoje."}</p> : <div className="divide-y divide-[hsl(var(--border))]">{visibleToday.map((item) => { const movement = movements.find((entry) => entry.reservationId === item.id); const status = movement?.status ?? "Não movido"; const roomWifi = wifiRooms.find((room) => room.room === item.room); const roomNeedsAntenna = !roomWifi || !roomWifi.hasWifi; const mobileAntenna = wifiPoints.find((point) => point.type === "Antena volante" && (!point.assignedRoom || point.assignedRoom === item.room) && point.status === "Disponível"); return <div key={item.id} className="space-y-4 p-5 sm:p-6"><div className="flex flex-wrap items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"><MoveRight size={18} /></div><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{item.start}–{item.end} · {item.cart}</p><p className="mt-1 text-sm">{item.className}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{item.room} · Professor: {item.teacher}</p>{movement?.notReceived && <p className="mt-2 rounded-lg bg-[hsl(var(--destructive)/.1)] p-2 text-xs font-semibold text-[hsl(var(--destructive))]">Carrinho não movimentado — o professor não recebeu. Solicitação {movement.requestCount > 1 ? `repetida (${movement.requestCount}x)` : "registrada"}.</p>}{roomNeedsAntenna && <p className="mt-2 rounded-lg bg-[hsl(var(--accent)/.12)] p-2 text-xs font-semibold text-[hsl(34_60%_32%)]">Sala sem conexão fixa · {mobileAntenna ? `${mobileAntenna.name} (${mobileAntenna.point})` : "nenhuma antena volante disponível"}</p>}</div><StatusPill status={status} /></div>{view === "pending" && <div className="flex flex-wrap gap-2"><Button size="sm" variant={status === "Movendo" ? "primary" : "secondary"} onClick={() => { const timing = canUpdateMovement(item.start, item.end); if (!timing.allowed) return; if (roomNeedsAntenna && mobileAntenna) assignMobileAntenna(mobileAntenna.id, item.room); playMovementAlert(); updateMovementStatus(item.id, "Movendo", false, movementActor(), timing.late); }}><Clock3 size={14} /> Movendo</Button><Button size="sm" variant={status === "Concluído" ? "primary" : "secondary"} onClick={() => { const timing = canUpdateMovement(item.start, item.end); if (!timing.allowed) return; if (roomNeedsAntenna && mobileAntenna) assignMobileAntenna(mobileAntenna.id, item.room); updateMovementStatus(item.id, "Concluído", false, movementActor(), timing.late); }}><Check size={14} /> Concluído</Button></div>}</div>; })}</div>}</SectionCard>}<div className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.12)] p-4 text-xs leading-5"><Bell size={17} className="mt-0.5 text-[hsl(34_60%_32%)]" />  <p>O alerta de movimentação é configurado pela administração. Ações antecipadas dentro da janela configurada exibem um aviso; ações após o início ficam registradas como movimentação com atraso.</p></div></div>;
 }
