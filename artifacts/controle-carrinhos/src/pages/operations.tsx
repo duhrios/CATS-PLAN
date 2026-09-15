@@ -19,6 +19,9 @@ import {
   RefreshCcw,
   Router,
   Search,
+  Pencil,
+  Save,
+  Trash2,
   Settings2,
   ShieldCheck,
   Signal,
@@ -218,6 +221,7 @@ function Metric({
   icon: Icon,
   tone = "teal",
   href,
+  onClick,
 }: {
   label: string;
   value: string;
@@ -225,6 +229,7 @@ function Metric({
   icon: typeof Activity;
   tone?: "teal" | "gold" | "green" | "red";
   href?: string;
+  onClick?: () => void;
 }) {
   const colors = {
     teal: "bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]",
@@ -263,7 +268,7 @@ function Metric({
     </div>
   );
   return href ? (
-    <Link href={href} aria-label={`Abrir ${label}`}>
+    <Link href={href} onClick={onClick} aria-label={`Abrir ${label}`}>
       {content}
     </Link>
   ) : (
@@ -613,7 +618,7 @@ function ReservationModal({
 }) {
   const { classEntries, roomForClass, classesForRoom, roomOptionsForSegment } =
     useRoomDirectory();
-  const { carts, wifiRooms } = useCampusData();
+  const { carts, wifiRooms, wifiPoints } = useCampusData();
   const [error, setError] = useState("");
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialCart = reservation?.cart ?? "Carrinho A";
@@ -697,6 +702,7 @@ function ReservationModal({
   const selectedRoomWifi = wifiRooms.find(
     (item) => item.room.toLowerCase() === form.room.toLowerCase(),
   );
+  const mobileWifiPoints = wifiPoints.filter((point) => point.type === "Antena volante");
   const sameDayBlocked =
     mode === "user" && form.kind === "Aula" && form.date === todayISO();
   const isReserve = form.kind === "Reserva";
@@ -926,6 +932,14 @@ function ReservationModal({
                   Ao agendar o carrinho para {form.room}, será necessário levar
                   a <strong>antena volante</strong>. O ponto será cadastrado
                   pela coordenação na tela Pontos Wi‑Fi.
+                </p>
+                <p className="mt-1">
+                  Antenas cadastradas:{" "}
+                  <strong>
+                    {mobileWifiPoints.length
+                      ? mobileWifiPoints.map((point) => point.point).join(", ")
+                      : "nenhuma"}
+                  </strong>
                 </p>
               </div>
             </div>
@@ -1566,13 +1580,6 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const reserveUsed = reservations
     .filter((item) => item.kind === "Reserva")
     .reduce((total, item) => total + item.quantity, 0);
-  const agendaReservations = reservations.filter((item) =>
-    filter === "Todos"
-      ? true
-      : filter === "Reservas"
-        ? item.kind === "Reserva"
-        : item.cart === filter,
-  );
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
@@ -1916,58 +1923,6 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
           </div>
         )}
       </SectionCard>
-      <SectionCard
-        title="Agenda dos carrinhos"
-        eyebrow={
-          filter === "Todos"
-            ? "Todas as reservas"
-            : filter === "Reservas"
-              ? "Categoria Reservas"
-              : filter
-        }
-      >
-        {agendaReservations.length === 0 ? (
-          <EmptyState
-            title="Nenhuma reserva neste filtro"
-            message="As reservas aparecerão aqui assim que forem cadastradas."
-          />
-        ) : (
-          <div className="divide-y divide-[hsl(var(--border))]">
-            {agendaReservations
-              .sort((a, b) =>
-                `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
-              )
-              .map((item) => (
-                <div
-                  key={item.id}
-                  className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-6"
-                  data-testid={`row-cart-agenda-${item.id}`}
-                >
-                  <div className="w-28 shrink-0">
-                    <p className="font-data text-sm font-semibold">
-                      {item.start}–{item.end}
-                    </p>
-                    <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
-                      {formatDate(item.date)}
-                    </p>
-                  </div>
-                  <div className="min-w-[180px] flex-1">
-                    <p className="text-sm font-semibold">{item.teacher}</p>
-                    <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                      {item.kind === "Reserva"
-                        ? `${item.quantity} Chromebooks de reserva`
-                        : item.className}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-[hsl(var(--muted))] px-3 py-1 text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">
-                    {item.cart}
-                  </span>
-                  <StatusPill status={item.status} />
-                </div>
-              ))}
-          </div>
-        )}
-      </SectionCard>
       {modalOpen && (
         <Modal title="Adicionar carrinho" onClose={() => setModalOpen(false)}>
           <form
@@ -2048,29 +2003,35 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
     wifiRooms,
     toggleRoomWifi,
     updateWifiPointStatus,
+    updateWifiPoint,
+    addWifiPoint,
+    deleteWifiPoint,
     assignMobileAntenna,
   } = useCampusData();
   const { roomOptions } = useRoomDirectory();
-  const [filter, setFilter] = useState("Todos");
   const [selected, setSelected] = useState<string | null>(null);
-  const [roomToAdd, setRoomToAdd] = useState("");
-  const filtered = wifiPoints.filter(
-    (point) =>
-      filter === "Todos" ||
-      point.status === filter ||
-      (filter === "Antenas volantes" && point.type === "Antena volante"),
-  );
+  const [roomTab, setRoomTab] = useState<"fixed" | "mobile">("fixed");
+  const [roomSearch, setRoomSearch] = useState("");
+  const [editingRoom, setEditingRoom] = useState<string | null>(null);
+  const [editingPointId, setEditingPointId] = useState<string | null>(null);
+  const [draftPoint, setDraftPoint] = useState({ name: "", point: "", rack: "", observations: "" });
+  const [newAntennaOpen, setNewAntennaOpen] = useState(false);
+  const [editingAntenna, setEditingAntenna] = useState<string | null>(null);
+  const [newAntenna, setNewAntenna] = useState({ name: "", point: "", rack: "", observations: "" });
+  const [antennaError, setAntennaError] = useState("");
   const activePoint = wifiPoints.find((point) => point.id === selected);
+  const allWifiRooms = roomOptions.map(
+    (room) => wifiRooms.find((item) => item.room === room) ?? { room, hasWifi: true },
+  );
   const fixedPoints = wifiPoints.filter((point) => point.type === "Ponto fixo");
   const mobilePoints = wifiPoints.filter(
     (point) => point.type === "Antena volante",
   );
-  const roomsWithoutWifi = wifiRooms.filter((room) => !room.hasWifi);
-  const addRoomWithoutWifi = () => {
-    if (!roomToAdd || wifiRooms.some((room) => room.room === roomToAdd)) return;
-    toggleRoomWifi(roomToAdd);
-    setRoomToAdd("");
-  };
+  const filtered = mobilePoints;
+  const roomsWithoutWifi = allWifiRooms.filter((room) => !room.hasWifi);
+  const roomsWithWifi = allWifiRooms.filter((room) => room.hasWifi);
+  const visibleRoomList = (roomTab === "fixed" ? roomsWithWifi : roomsWithoutWifi)
+    .filter((room) => room.room.toLowerCase().includes(roomSearch.trim().toLowerCase()));
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
@@ -2079,13 +2040,18 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
         description="Cadastre os pontos físicos e identifique as salas sem cobertura fixa. Quando uma sala sem Wi‑Fi receber um agendamento, a reserva avisará que será preciso levar uma antena volante."
         action={
           !readOnly && (
+          <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => { setAntennaError(""); setNewAntennaOpen(true); }} data-testid="button-create-mobile-antenna">
+            <Plus size={15} /> Nova antena volante
+          </Button>
           <Button
             variant="secondary"
-            onClick={() => setSelected(null)}
+            onClick={() => { setSelected(null); setEditingRoom(null); setNewAntennaOpen(false); }}
             data-testid="button-refresh-wifi"
           >
             <RefreshCcw size={15} /> Atualizar cadastro
           </Button>
+          </div>
           )
         }
       />
@@ -2095,6 +2061,8 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
           value={String(wifiPoints.length)}
           detail={`${fixedPoints.length} fixos · ${mobilePoints.length} antenas volantes`}
           icon={Network}
+          href="#wifi-rooms"
+          onClick={() => setRoomTab("fixed")}
         />
         <Metric
           label="Salas sem Wi‑Fi fixo"
@@ -2102,6 +2070,8 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
           detail="exigem antena volante na reserva"
           icon={WifiOff}
           tone={roomsWithoutWifi.length ? "gold" : "green"}
+          href="#wifi-rooms-without-coverage"
+          onClick={() => setRoomTab("mobile")}
         />
         <Metric
           label="Antenas disponíveis"
@@ -2112,39 +2082,20 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
           detail="prontas para deslocamento"
           icon={Router}
           tone="teal"
+          href="#mobile-antennas"
         />
       </div>
       <div className="grid gap-6 xl:grid-cols-[1.15fr_.85fr]">
-        <SectionCard
-          title="Cadastro de pontos"
-          eyebrow="Pontos fixos e antenas volantes"
-          action={
-            <div className="flex items-center gap-1 rounded-lg bg-[hsl(var(--muted))] p-1">
-              {["Todos", "Disponível", "Em manutenção", "Antenas volantes"].map(
-                (item) => (
-                  <button
-                    type="button"
-                    key={item}
-                    onClick={() => setFilter(item)}
-                    className={cx(
-                      "rounded-md px-2.5 py-1.5 text-[11px] font-semibold",
-                      filter === item
-                        ? "bg-[hsl(var(--card))] shadow-sm"
-                        : "text-[hsl(var(--muted-foreground))]",
-                    )}
-                    data-testid={`button-filter-wifi-${item.toLowerCase().replaceAll(" ", "-")}`}
-                  >
-                    {item}
-                  </button>
-                ),
-              )}
-            </div>
-          }
-        >
+        <div id="mobile-antennas" className="scroll-mt-24">
+          <SectionCard
+            title="Antenas volantes"
+            eyebrow="Acompanhe a antena e a sala atendida"
+            action={<span className="rounded-full bg-[hsl(var(--accent)/.2)] px-3 py-1.5 text-xs font-semibold text-[hsl(34_60%_32%)]">{mobilePoints.length} cadastradas</span>}
+          >
           {filtered.length === 0 ? (
             <EmptyState
-              title="Nenhum ponto encontrado"
-              message="Cadastre ou ajuste o filtro para consultar um ponto."
+              title="Nenhuma antena volante cadastrada"
+              message="Use o botão Nova antena volante para cadastrar uma antena."
             />
           ) : (
             <div className="divide-y divide-[hsl(var(--border))]">
@@ -2184,9 +2135,21 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
                       {point.point} · {point.type}
                     </p>
                     <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
-                      {point.location} · {point.rack}
-                      {point.assignedRoom ? ` · em ${point.assignedRoom}` : ""}
+                      {point.location}{point.rack ? ` · ${point.rack}` : ""}
                     </p>
+                    <p className={cx("mt-2 text-xs font-semibold", point.assignedRoom ? "text-[hsl(var(--primary))]" : "text-[hsl(var(--muted-foreground))]")}>
+                      {point.assignedRoom ? `Sala atendida: ${point.assignedRoom} · ${point.point}` : `Sem sala atendida · ${point.point}`}
+                    </p>
+                    {point.attendedRoom && !point.assignedRoom && (
+                      <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                        Última sala atendida: {point.attendedRoom}
+                      </p>
+                    )}
+                    {point.observations && (
+                      <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {point.observations}
+                      </p>
+                    )}
                   </div>
                   <ChevronRight
                     size={16}
@@ -2196,13 +2159,15 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
               ))}
             </div>
           )}
-        </SectionCard>
-        <SectionCard
-          title={activePoint ? activePoint.point : "Salas sem cobertura fixa"}
-          eyebrow={
-            activePoint ? activePoint.name : "Alerta automático nas reservas"
-          }
-        >
+          </SectionCard>
+        </div>
+        <div id="wifi-rooms" className="scroll-mt-24">
+          <SectionCard
+            title={activePoint ? activePoint.point : "Salas e cobertura"}
+            eyebrow={
+              activePoint ? activePoint.name : "Organize as salas por cobertura"
+            }
+          >
           {activePoint ? (
             <div className="space-y-5 p-5 sm:p-6">
               <div className="rounded-xl bg-[hsl(var(--muted)/.5)] p-4">
@@ -2213,8 +2178,18 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
                   {activePoint.location}
                 </p>
                 <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                  {activePoint.rack}
+                  {activePoint.rack || "Rack não informado"}
                 </p>
+                {activePoint.attendedRoom && (
+                  <p className="mt-2 text-xs font-semibold text-[hsl(var(--primary))]">
+                    Sala atendida: {activePoint.attendedRoom}
+                  </p>
+                )}
+                {activePoint.observations && (
+                  <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+                    {activePoint.observations}
+                  </p>
+                )}
               </div>
               <Field label="Status do ponto">
                 <select
@@ -2260,72 +2235,277 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
                   </select>
                 </Field>
               )}
+              {!readOnly && activePoint.type === "Antena volante" && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingAntenna(activePoint.id);
+                      setNewAntenna({
+                        name: activePoint.name,
+                        point: activePoint.point,
+                        rack: activePoint.rack ?? "",
+                        observations: activePoint.observations ?? "",
+                      });
+                      setAntennaError("");
+                    }}
+                  >
+                    <Pencil size={14} /> Editar antena
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                    onClick={() => {
+                      if (window.confirm(`Excluir ${activePoint.name}?`)) {
+                        deleteWifiPoint(activePoint.id);
+                        setSelected(null);
+                      }
+                    }}
+                    data-testid={`button-delete-wifi-${activePoint.id}`}
+                  >
+                    <Trash2 size={14} /> Excluir antena volante
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-5 sm:p-6">
-              <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">
-                Marque aqui as salas que não têm ponto fixo. Elas aparecerão com
-                um alerta na criação de uma reserva, indicando a necessidade da
-                antena volante e permitindo consultar qual ponto está
-                cadastrado.
-              </p>
-              <div className="mt-5 space-y-2">
-                {wifiRooms.map((room) => (
-                  <label
-                    key={room.room}
-                    className="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] p-3 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={room.hasWifi}
-                      disabled={readOnly}
-                      onChange={() => toggleRoomWifi(room.room)}
-                      className="h-4 w-4 accent-[hsl(var(--primary))]"
-                      data-testid={`checkbox-wifi-room-${room.room.replaceAll(" ", "-")}`}
-                    />
-                    <span className="flex-1">{room.room}</span>
-                    <span
-                      className={cx(
-                        "text-[11px] font-semibold",
-                        room.hasWifi
-                          ? "text-[hsl(var(--primary))]"
-                          : "text-[hsl(34_60%_32%)]",
-                      )}
-                    >
-                      {room.hasWifi ? "Ponto fixo" : "Antena volante"}
-                    </span>
-                  </label>
-                ))}
+              <div className="relative mb-4">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-3 text-[hsl(var(--muted-foreground))]"
+                />
+                <input
+                  type="search"
+                  value={roomSearch}
+                  onChange={(event) => setRoomSearch(event.target.value)}
+                  className={cx(inputClass, "pl-9")}
+                  placeholder="Buscar por sala..."
+                  aria-label="Buscar por sala"
+                  data-testid="input-search-wifi-room"
+                />
               </div>
-              <div className="mt-5 flex gap-2">
-                <select
-                  value={roomToAdd}
-                  onChange={(event) => setRoomToAdd(event.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">Adicionar sala ao cadastro</option>
-                  {roomOptions
-                    .filter(
-                      (room) => !wifiRooms.some((item) => item.room === room),
-                    )
-                    .map((room) => (
-                      <option key={room} value={room}>
-                        {room}
-                      </option>
-                    ))}
-                </select>
-                <Button
-                  size="sm"
-                  onClick={addRoomWithoutWifi}
-                  disabled={readOnly || !roomToAdd}
-                >
-                  <Plus size={14} /> Adicionar
-                </Button>
+              <div id="wifi-rooms-without-coverage" className="scroll-mt-24 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.25)] p-1">
+                <div className="grid grid-cols-2 gap-1">
+                  {([
+                    ["fixed", "Salas com Wi‑Fi", Wifi, roomsWithWifi.length],
+                    ["mobile", "Salas sem cobertura fixa", WifiOff, roomsWithoutWifi.length],
+                  ] as const).map(([value, label, Icon, count]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      onClick={() => setRoomTab(value)}
+                      className={cx(
+                        "flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors",
+                        roomTab === value
+                          ? "bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-sm"
+                          : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]",
+                      )}
+                      data-testid={`tab-wifi-rooms-${value}`}
+                    >
+                      <Icon size={14} />
+                      <span>{label}</span>
+                      <span className="rounded-full bg-[hsl(var(--muted))] px-1.5 py-0.5 text-[10px]">{count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {roomTab === "mobile" && (
+                <p className="mt-4 text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+                  Salas sem cobertura fixa. Ao criar uma reserva, o sistema avisará que será necessário levar uma antena volante.
+                </p>
+              )}
+              <div className="mt-4 space-y-2">
+                {visibleRoomList.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[hsl(var(--border))] p-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
+                    Nenhuma sala nesta aba.
+                  </div>
+                ) : visibleRoomList.map((room) => {
+                  const assignedPoints = wifiPoints.filter((point) => point.assignedRoom === room.room);
+                  const availablePoints = wifiPoints.filter(
+                    (point) => point.type === "Ponto fixo" && (!point.assignedRoom || point.assignedRoom === room.room),
+                  );
+                  const startEdit = (point?: typeof wifiPoints[number]) => {
+                    setEditingPointId(point?.id ?? null);
+                    setEditingRoom(room.room);
+                    setDraftPoint({ name: point?.name ?? room.room, point: point?.point ?? "", rack: point?.rack ?? "", observations: point?.observations ?? "" });
+                  };
+                  return (
+                  <div
+                    key={room.room}
+                    className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm"
+                  >
+                    {room.hasWifi ? <Wifi size={16} className="shrink-0 text-[hsl(var(--primary))]" /> : <WifiOff size={16} className="shrink-0 text-[hsl(34_60%_32%)]" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{room.room}</p>
+                      {assignedPoints.map((assignedPoint) => (
+                        <div key={assignedPoint.id} className="mt-1 space-y-0.5 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+                          <p className="break-words"><span className="font-medium text-[hsl(var(--muted-foreground))]">Ponto:</span>{" "}{assignedPoint.point}</p>
+                          {assignedPoint.rack && <p className="break-words"><span className="font-medium text-[hsl(var(--muted-foreground))]">Rack:</span>{" "}{assignedPoint.rack}</p>}
+                          {assignedPoint.observations && <p className="break-words"><span className="font-medium text-[hsl(var(--muted-foreground))]">Observações:</span>{" "}{assignedPoint.observations}</p>}
+                        </div>
+                      ))}
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" disabled={readOnly} onClick={() => startEdit(assignedPoints[0])} className="shrink-0" data-testid={`button-edit-wifi-room-${room.room.replaceAll(" ", "-")}`}>
+                      <Pencil size={14} /> Editar
+                    </Button>
+                    {room.hasWifi && (
+                      <Button type="button" size="sm" variant="ghost" disabled={readOnly} onClick={() => startEdit()} className="shrink-0">
+                        <Plus size={14} /> Adicionar ponto
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="max-w-full shrink-0"
+                      disabled={readOnly}
+                      onClick={() => toggleRoomWifi(room.room)}
+                      data-testid={`button-move-wifi-room-${room.room.replaceAll(" ", "-")}`}
+                    >
+                      {room.hasWifi ? "Mover para sem cobertura" : "Mover para com Wi‑Fi"}
+                    </Button>
+                    {editingRoom === room.room && (
+                      <div className="basis-full min-w-0 border-t border-[hsl(var(--border))] pt-3">
+                        <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1.4fr_auto]">
+                        <select
+                          value={editingPointId ?? ""}
+                          onChange={(event) => {
+                            const point = wifiPoints.find((item) => item.id === event.target.value);
+                            setEditingPointId(point?.id ?? null);
+                            setDraftPoint({
+                              name: point?.name ?? room.room,
+                              point: point?.point ?? "",
+                              rack: point?.rack ?? "",
+                              observations: point?.observations ?? "",
+                            });
+                          }}
+                          className={`${inputClass} h-9 min-w-0 text-xs`}
+                          aria-label={`Selecionar ponto da ${room.room}`}
+                        >
+                          <option value="">Novo ponto</option>
+                          {availablePoints.map((point) => (
+                            <option key={point.id} value={point.id}>
+                              {point.point} · {point.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input value={draftPoint.name} onChange={(event) => setDraftPoint({ ...draftPoint, name: event.target.value })} className={`${inputClass} h-9 min-w-0 text-xs`} placeholder="Nome do ponto" />
+                        <input value={draftPoint.point} onChange={(event) => setDraftPoint({ ...draftPoint, point: event.target.value })} className={`${inputClass} h-9 min-w-0 text-xs`} placeholder="Ponto" />
+                        <input value={draftPoint.rack} onChange={(event) => setDraftPoint({ ...draftPoint, rack: event.target.value })} className={`${inputClass} h-9 min-w-0 text-xs`} placeholder="Rack (opcional)" />
+                        <input value={draftPoint.observations} onChange={(event) => setDraftPoint({ ...draftPoint, observations: event.target.value })} className={`${inputClass} h-9 min-w-0 text-xs`} placeholder="Observações: switch, ponto..." />
+                        <IconButton
+                          label="Cancelar edição do ponto"
+                          onClick={() => {
+                            setEditingRoom(null);
+                            setEditingPointId(null);
+                          }}
+                        >
+                          <X size={15} />
+                        </IconButton>
+                        <Button type="button" size="sm" className="w-full lg:w-auto" disabled={!draftPoint.name.trim() || !draftPoint.point.trim()} onClick={() => {
+                          const data = { name: draftPoint.name.trim(), point: draftPoint.point.trim(), rack: draftPoint.rack.trim() || undefined, observations: draftPoint.observations.trim() || undefined };
+                          const pointToUpdate = wifiPoints.find((point) => point.id === editingPointId);
+                          if (pointToUpdate) {
+                            updateWifiPoint(pointToUpdate.id, { ...data, assignedRoom: room.room });
+                          } else {
+                            addWifiPoint({
+                              ...data,
+                              type: "Ponto fixo",
+                              location: room.room,
+                              status: "Disponível",
+                              assignedRoom: room.room,
+                            });
+                          }
+                          setEditingRoom(null);
+                          setEditingPointId(null);
+                        }}><Save size={14} /> Salvar</Button>
+                        {editingPointId && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="w-full text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] lg:w-auto"
+                            onClick={() => {
+                              const pointToDelete = wifiPoints.find((point) => point.id === editingPointId);
+                              if (pointToDelete && window.confirm(`Excluir o ponto ${pointToDelete.point}?`)) {
+                                deleteWifiPoint(pointToDelete.id);
+                                setEditingRoom(null);
+                                setEditingPointId(null);
+                              }
+                            }}
+                          >
+                            <Trash2 size={14} /> Excluir ponto
+                          </Button>
+                        )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+                })}
               </div>
             </div>
           )}
-        </SectionCard>
+          </SectionCard>
+        </div>
       </div>
+      {(newAntennaOpen || editingAntenna) && (
+        <Modal
+          title={editingAntenna ? "Editar antena volante" : "Nova antena volante"}
+          onClose={() => {
+            setNewAntennaOpen(false);
+            setEditingAntenna(null);
+            setAntennaError("");
+          }}
+        >
+          <form className="space-y-4 p-5" onSubmit={(event) => {
+            event.preventDefault();
+            const name = newAntenna.name.trim();
+            const point = newAntenna.point.trim();
+            if (!name || !point) {
+              setAntennaError("Informe o nome da antena e a nomenclatura do ponto.");
+              return;
+            }
+            const data = {
+              name,
+              point,
+              rack: newAntenna.rack.trim() || undefined,
+              observations: newAntenna.observations.trim() || undefined,
+            };
+            if (editingAntenna) {
+              updateWifiPoint(editingAntenna, data);
+            } else {
+              addWifiPoint({ ...data, type: "Antena volante", location: "Armário de conectividade", status: "Disponível" });
+            }
+            setNewAntenna({ name: "", point: "", rack: "", observations: "" });
+            setAntennaError("");
+            setNewAntennaOpen(false);
+            setEditingAntenna(null);
+          }}>
+            <Field label="Nome da antena"><input required autoFocus value={newAntenna.name} onChange={(event) => setNewAntenna({ ...newAntenna, name: event.target.value })} className={inputClass} placeholder="Ex.: Antena volante 03" /></Field>
+            <Field label="Ponto"><input required value={newAntenna.point} onChange={(event) => setNewAntenna({ ...newAntenna, point: event.target.value })} className={inputClass} placeholder="Ex.: Antena AV-03" /></Field>
+            <Field label="Rack (opcional)"><input value={newAntenna.rack} onChange={(event) => setNewAntenna({ ...newAntenna, rack: event.target.value })} className={inputClass} placeholder="Ex.: Armário móvel · porta 03" /></Field>
+            <Field label="Observações" hint="Informe rack, switch, porta e ponto de rede."><textarea value={newAntenna.observations} onChange={(event) => setNewAntenna({ ...newAntenna, observations: event.target.value })} className={`${inputClass} h-20 resize-none py-2`} placeholder="Ex.: Switch SW-02 · porta 18 · ponto de rede P-18" /></Field>
+            {antennaError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{antennaError}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <IconButton
+                label="Cancelar cadastro da antena"
+                onClick={() => {
+                  setNewAntennaOpen(false);
+                  setEditingAntenna(null);
+                  setAntennaError("");
+                }}
+              >
+                <X size={15} />
+              </IconButton>
+              <Button type="submit"><Save size={14} /> {editingAntenna ? "Salvar alterações" : "Criar antena"}</Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2334,41 +2514,118 @@ export function HistoryPage() {
   const { movements, reservations } = useCampusData();
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
+  const [period, setPeriod] = useState("Todos");
+  const [profile, setProfile] = useState("Todos");
+  const [person, setPerson] = useState("Todos");
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [exported, setExported] = useState(false);
   const types = ["Todos", "Reserva", "Equipamento", "Wi-Fi", "Movimentação"];
-  const movementHistory = movements.flatMap((movement) => {
+  type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "TI" };
+  const reservationHistory: HistoryEvent[] = reservations.flatMap((reservation) => [{
+    id: `reservation-${reservation.id}`,
+    time: reservation.start,
+    date: reservation.date,
+    title: `Reserva ${reservation.status.toLocaleLowerCase("pt-BR")}`,
+    detail: `${reservation.className} · ${reservation.room} · ${reservation.cart} · Professor: ${reservation.teacher}`,
+    type: "Reserva",
+    tone: reservation.status === "Concluída" ? "good" : "neutral",
+    person: reservation.teacher,
+    profile: "Professor",
+  }]);
+  const movementHistory: HistoryEvent[] = movements.flatMap((movement) => {
     const reservation = reservations.find((item) => item.id === movement.reservationId);
     if (!reservation) return [];
-    const events = [];
+    const eventDate = (value?: string) => value ? dateToISO(new Date(value)) : reservation.date;
+    const eventPerson = (value?: string) => value ?? reservation.teacher;
+    const events: HistoryEvent[] = [];
     if (movement.movedAt) {
       events.push({
         id: `movement-${movement.reservationId}-moved`,
         time: new Date(movement.movedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.movedAt),
         title: movement.movedLate ? "Carrinho movido com atraso" : "Carrinho em movimentação",
         detail: `${reservation.cart} · ${reservation.room} · Movido por: ${movement.movedBy ?? "TI"}`,
         type: "Movimentação",
         tone: "warm",
+        person: eventPerson(movement.movedBy),
+        profile: "TI",
       });
     }
     if (movement.completedAt) {
       events.push({
         id: `movement-${movement.reservationId}-completed`,
         time: new Date(movement.completedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.completedAt),
         title: "Movimentação concluída",
         detail: `${reservation.cart} · ${reservation.room} · Concluído por: ${movement.completedBy ?? "TI"}`,
         type: "Movimentação",
         tone: "good",
+        person: eventPerson(movement.completedBy),
+        profile: "TI",
+      });
+    }
+    if (movement.notReceivedAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-not-received`,
+        time: new Date(movement.notReceivedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.notReceivedAt),
+        title: "Professor informou que não recebeu",
+        detail: `${reservation.cart} · ${reservation.room} · Professor: ${reservation.teacher}`,
+        type: "Movimentação",
+        tone: "bad",
+        person: reservation.teacher,
+        profile: "Professor",
+      });
+    }
+    if (movement.requestAgainAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-request-again`,
+        time: new Date(movement.requestAgainAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.requestAgainAt),
+        title: "Professor pediu nova movimentação",
+        detail: `${reservation.cart} · ${reservation.room} · Solicitação ${movement.requestCount}x`,
+        type: "Movimentação",
+        tone: "warm",
+        person: reservation.teacher,
+        profile: "Professor",
+      });
+    }
+    if (movement.confirmedAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-confirmed`,
+        time: new Date(movement.confirmedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.confirmedAt),
+        title: "Recebimento confirmado pelo professor",
+        detail: `${reservation.cart} · ${reservation.room} · Confirmado por: ${movement.confirmedBy ?? reservation.teacher}`,
+        type: "Reserva",
+        tone: "good",
+        person: eventPerson(movement.confirmedBy),
+        profile: "Professor",
       });
     }
     return events;
   });
-  const historyEvents = [...movementHistory, ...historySeed];
+  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory, ...historySeed.map((event) => ({ ...event, date: todayISO() }))];
+  const localToday = (() => {
+    const date = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  })();
+  const periodStart = (() => {
+    if (period === "Todos") return undefined;
+    const date = new Date(`${localToday}T12:00:00`);
+    if (period === "Mês") return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+    if (period === "Semana") date.setDate(date.getDate() - 6);
+    return dateToISO(date);
+  })();
   const filtered = historyEvents.filter(
     (event) =>
       (type === "Todos" || event.type === type) &&
-      `${event.title} ${event.detail}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
+      (profile === "Todos" || event.profile === profile) &&
+      (person === "Todos" || event.person === person) &&
+      (!periodStart || event.date >= periodStart) &&
+      (period !== "Dia" || event.date === localToday) &&
+      (event.person ?? "").toLowerCase().includes(query.trim().toLowerCase()),
   );
   return (
     <div className="animate-rise space-y-7">
@@ -2391,8 +2648,8 @@ export function HistoryPage() {
         }
       />
       <SectionCard>
-        <div className="flex flex-col gap-3 border-b border-[hsl(var(--border))] p-4 sm:flex-row sm:items-center sm:px-6">
-          <div className="relative flex-1">
+        <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/.18)] p-4 sm:p-5">
+          <div className="relative">
             <Search
               size={15}
               className="absolute left-3 top-3 text-[hsl(var(--muted-foreground))]"
@@ -2402,21 +2659,36 @@ export function HistoryPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className={cx(inputClass, "pl-9")}
-              placeholder="Buscar no histórico..."
+              placeholder="Buscar pelo nome da pessoa..."
               data-testid="input-search-history"
             />
           </div>
-          <div className="flex gap-1 overflow-auto">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
+              <span className="px-2 text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">Período</span>
+              {["Todos", "Dia", "Semana", "Mês"].map((item) => (
+                <button type="button" key={item} onClick={() => setPeriod(item)} className={cx("rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors", period === item ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm" : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]")} data-testid={`button-filter-period-${item.toLowerCase()}`}>{item}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
+              <span className="px-2 text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">Perfil</span>
+              {["Todos", "Professor", "TI"].map((item) => (
+                <button type="button" key={item} onClick={() => { setProfile(item); setPerson("Todos"); }} className={cx("rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors", profile === item ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm" : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]")} data-testid={`button-filter-profile-${item.toLowerCase()}`}>{item === "Professor" ? "Professores" : item}</button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">Tipo</span>
             {types.map((item) => (
               <button
                 type="button"
                 key={item}
                 onClick={() => setType(item)}
                 className={cx(
-                  "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
+                  "whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                   type === item
-                    ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
-                    : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
+                    ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm"
+                    : "border-transparent bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--border))]",
                 )}
                 data-testid={`button-filter-history-${item.toLowerCase().replaceAll("-", "")}`}
               >
@@ -2479,10 +2751,18 @@ export function HistoryPage() {
                     {event.detail}
                   </p>
                 </div>
-                <MoreHorizontal
-                  size={17}
-                  className="shrink-0 text-[hsl(var(--muted-foreground))]"
-                />
+                <div className="relative shrink-0">
+                  <button type="button" className="rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]" aria-label={`Opções de ${event.title}`} onClick={() => setActiveMenu(activeMenu === String(event.id) ? null : String(event.id))} data-testid={`button-history-menu-${event.id}`}>
+                    <MoreHorizontal size={17} />
+                  </button>
+                  {activeMenu === String(event.id) && (
+                    <div className="absolute right-0 top-9 z-10 w-44 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1.5 shadow-lg">
+                      <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setQuery(event.title); setActiveMenu(null); }}>Filtrar este evento</button>
+                      {event.person && <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setPerson(event.person ?? "Todos"); setActiveMenu(null); }}>Ver por esta pessoa</button>}
+                      <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setType(event.type); setActiveMenu(null); }}>Ver por tipo</button>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>

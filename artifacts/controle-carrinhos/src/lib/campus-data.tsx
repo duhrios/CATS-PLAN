@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -51,6 +52,10 @@ export type CartMovement = {
   movedAt?: string;
   completedAt?: string;
   movedLate?: boolean;
+  notReceivedAt?: string;
+  requestAgainAt?: string;
+  confirmedBy?: string;
+  confirmedAt?: string;
 };
 
 export const isReservationInProgress = (reservation: Reservation) => {
@@ -79,7 +84,9 @@ export type WifiPoint = {
   point: string;
   type: "Ponto fixo" | "Antena volante";
   location: string;
-  rack: string;
+  rack?: string;
+  observations?: string;
+  attendedRoom?: string;
   status: "Disponível" | "Em uso" | "Em manutenção";
   assignedRoom?: string;
 };
@@ -444,7 +451,12 @@ type CampusDataValue = {
   wifiRooms: typeof initialWifiRooms;
   toggleRoomWifi: (room: string) => void;
   updateWifiPointStatus: (id: string, status: WifiPoint["status"]) => void;
+  updateWifiPoint: (id: string, data: Partial<Pick<WifiPoint, "name" | "point" | "rack" | "observations" | "assignedRoom">>) => void;
+  addWifiPoint: (point: Omit<WifiPoint, "id">) => string;
+  deleteWifiPoint: (id: string) => void;
+  assignWifiPoint: (pointId: string, room: string | undefined) => void;
   assignMobileAntenna: (pointId: string, room: string | undefined) => void;
+  releaseMobileAntenna: (pointId: string) => void;
   reserveAvailable: number;
   teacherReserved: number;
   resetData: (kind: "reservations" | "profiles" | "history" | "teachers" | "factory") => void;
@@ -513,8 +525,37 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       movedAt: item.movedAt,
       completedAt: item.completedAt,
       movedLate: item.movedLate ?? false,
+      notReceivedAt: item.notReceivedAt,
+      requestAgainAt: item.requestAgainAt,
+      confirmedBy: item.confirmedBy,
+      confirmedAt: item.confirmedAt,
     })),
   );
+  useEffect(() => {
+    const syncMovements = (event: StorageEvent) => {
+      if (event.key !== movementsStorageKey || !event.newValue) return;
+      const parsed = JSON.parse(event.newValue) as Partial<CartMovement>[];
+      setMovements(parsed.map((item) => ({
+        reservationId: item.reservationId as number,
+        status: item.status ?? "Não movido",
+        updatedAt: item.updatedAt ?? new Date().toISOString(),
+        notReceived: item.notReceived ?? false,
+        autoCompleted: item.autoCompleted ?? false,
+        requestCount: item.requestCount ?? (item.notReceived ? 1 : 0),
+        movedBy: item.movedBy,
+        completedBy: item.completedBy,
+        movedAt: item.movedAt,
+        completedAt: item.completedAt,
+        movedLate: item.movedLate ?? false,
+        notReceivedAt: item.notReceivedAt,
+        requestAgainAt: item.requestAgainAt,
+        confirmedBy: item.confirmedBy,
+        confirmedAt: item.confirmedAt,
+      })));
+    };
+    window.addEventListener("storage", syncMovements);
+    return () => window.removeEventListener("storage", syncMovements);
+  }, []);
   const [movementSettings, setMovementSettings] = useState<MovementSettings>(() =>
     ({
       ...defaultMovementSettings,
@@ -650,17 +691,33 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       movedAt: status === "Movendo" ? new Date().toISOString() : current?.movedAt,
       completedAt: status === "Concluído" ? new Date().toISOString() : current?.completedAt,
       movedLate: movedLate ?? current?.movedLate ?? false,
+      confirmedBy: status === "Concluído" && !autoCompleted ? actor : current?.confirmedBy,
+      confirmedAt: status === "Concluído" && !autoCompleted ? new Date().toISOString() : current?.confirmedAt,
     };
     persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
   const reportNotReceived = (reservationId: number) => {
     const current = movements.find((item) => item.reservationId === reservationId);
     if (current?.status === "Concluído" && !current.autoCompleted) return;
-    const nextItem = { reservationId, status: "Não movido" as const, updatedAt: new Date().toISOString(), notReceived: true, autoCompleted: false, requestCount: (current?.requestCount ?? 0) + 1 };
+    const now = new Date().toISOString();
+    const nextItem = { reservationId, status: "Não movido" as const, updatedAt: now, notReceived: true, autoCompleted: false, requestCount: (current?.requestCount ?? 0) + 1, notReceivedAt: now };
     persistMovements([...movements.filter((item) => item.reservationId !== reservationId), { ...current, ...nextItem }]);
   };
   const requestMovementAgain = (reservationId: number) => {
-    reportNotReceived(reservationId);
+    const current = movements.find((item) => item.reservationId === reservationId);
+    const now = new Date().toISOString();
+    const nextItem = {
+      ...current,
+      reservationId,
+      status: "Não movido" as const,
+      updatedAt: now,
+      notReceived: true,
+      autoCompleted: false,
+      requestCount: (current?.requestCount ?? 0) + 1,
+      notReceivedAt: current?.notReceivedAt ?? now,
+      requestAgainAt: now,
+    };
+    persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
   const updateMovementSettings = (settings: MovementSettings) => {
     setMovementSettings(settings);
@@ -853,6 +910,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     window.localStorage.removeItem(rememberedTeacherStorageKey);
   };
   const toggleRoomWifi = (room: string) => {
+    if (!wifiRooms.some((item) => item.room === room)) {
+      persistWifiRooms([...wifiRooms, { room, hasWifi: false }]);
+      return;
+    }
     persistWifiRooms(
       wifiRooms.map((item) =>
         item.room === room ? { ...item, hasWifi: !item.hasWifi } : item,
@@ -866,24 +927,91 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       ),
     );
   };
-  const assignMobileAntenna = (pointId: string, room: string | undefined) => {
-    persistWifiPoints(
-      wifiPoints.map((point) => {
+  const updateWifiPoint = (id: string, data: Partial<Pick<WifiPoint, "name" | "point" | "rack" | "observations" | "assignedRoom">>) => {
+    const currentPoint = wifiPoints.find((point) => point.id === id);
+    const nextPoints = wifiPoints.map((point) => point.id === id ? { ...point, ...data } : point);
+    persistWifiPoints(nextPoints);
+    if (currentPoint?.type === "Ponto fixo" && data.assignedRoom !== undefined) {
+      persistWifiRooms(
+        wifiRooms.map((item) =>
+          item.room === currentPoint.assignedRoom || item.room === data.assignedRoom
+            ? {
+                ...item,
+                hasWifi: nextPoints.some(
+                  (nextPoint) =>
+                    nextPoint.type === "Ponto fixo" &&
+                    nextPoint.assignedRoom === item.room,
+                ),
+              }
+            : item,
+        ),
+      );
+    }
+  };
+  const addWifiPoint = (point: Omit<WifiPoint, "id">) => {
+    const id = `wifi-${Date.now()}`;
+    persistWifiPoints([...wifiPoints, { ...point, id }]);
+    return id;
+  };
+  const deleteWifiPoint = (id: string) => {
+    const point = wifiPoints.find((item) => item.id === id);
+    if (point?.assignedRoom) {
+      persistWifiRooms(wifiRooms.map((room) => room.room === point.assignedRoom ? { ...room, hasWifi: false } : room));
+    }
+    persistWifiPoints(wifiPoints.filter((item) => item.id !== id));
+  };
+  const assignWifiPoint = (pointId: string, room: string | undefined) => {
+    const point = wifiPoints.find((item) => item.id === pointId);
+    const previousRoom = point?.assignedRoom;
+    const nextPoints: WifiPoint[] = wifiPoints.map((point) => {
         if (point.id === pointId)
           return {
             ...point,
             assignedRoom: room,
-            status: room ? "Em uso" : "Disponível",
+            attendedRoom: room ?? point.attendedRoom,
+            status: room && point.type === "Antena volante" ? "Em uso" : "Disponível",
           };
         if (
           room &&
-          point.type === "Antena volante" &&
-          point.assignedRoom === room
+          point.id !== pointId &&
+          point.assignedRoom === room &&
+          point.type === "Antena volante"
         )
           return { ...point, assignedRoom: undefined, status: "Disponível" };
         return point;
-      }),
-    );
+      });
+    persistWifiPoints(nextPoints);
+    if (point?.type === "Ponto fixo") {
+      persistWifiRooms(
+        wifiRooms.map((item) =>
+          item.room === previousRoom || item.room === room
+            ? {
+                ...item,
+                hasWifi: nextPoints.some(
+                  (nextPoint) =>
+                    nextPoint.type === "Ponto fixo" &&
+                    nextPoint.assignedRoom === item.room,
+                ),
+              }
+            : item,
+        ),
+      );
+    }
+  };
+  const assignMobileAntenna = (pointId: string, room: string | undefined) => {
+    const point = wifiPoints.find((item) => item.id === pointId);
+    if (!room && point) {
+      persistWifiPoints(wifiPoints.map((item) => item.id === pointId
+        ? { ...item, assignedRoom: undefined, status: "Disponível" }
+        : item));
+      return;
+    }
+    assignWifiPoint(pointId, room);
+  };
+  const releaseMobileAntenna = (pointId: string) => {
+    persistWifiPoints(wifiPoints.map((point) =>
+      point.id === pointId ? { ...point, status: "Disponível" } : point,
+    ));
   };
 
   const reserveAvailable = useMemo(
@@ -945,7 +1073,12 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         wifiRooms,
         toggleRoomWifi,
         updateWifiPointStatus,
+        updateWifiPoint,
+        addWifiPoint,
+        deleteWifiPoint,
+        assignWifiPoint,
         assignMobileAntenna,
+        releaseMobileAntenna,
         reserveAvailable,
         teacherReserved,
         resetData,

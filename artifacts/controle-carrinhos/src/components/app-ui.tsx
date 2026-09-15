@@ -300,7 +300,7 @@ export function Field({
   children,
   hint,
 }: {
-  label: string;
+  label: ReactNode;
   children: ReactNode;
   hint?: string;
 }) {
@@ -333,7 +333,7 @@ export function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(187_54%_17%/.35)] p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(187_54%_17%/.28)] p-0 sm:items-center sm:p-6"
       role="dialog"
       aria-modal="true"
       data-testid="modal"

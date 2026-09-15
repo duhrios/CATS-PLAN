@@ -12,6 +12,7 @@ import { TeacherLoginPage, TeacherProfilePage } from '@/pages/profile';
 import { RoomDirectoryProvider } from '@/lib/room-directory';
 import { CampusDataProvider } from '@/lib/campus-data';
 import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
+import { OperatorSettingsPage } from '@/pages/operator-settings';
 import { AccessPage, AdminLoginPage } from '@/pages/access';
 import { ConfigurationPage } from '@/pages/configuration';
 import {
@@ -65,6 +66,7 @@ function Router() {
           <Route path="/professores"><TeacherProfilePage admin /></Route>
           <Route path="/login" component={TeacherLoginPage} />
           <Route path="/operador/login" component={OperatorLoginPage} />
+          <Route path="/operador/configuracao" component={OperatorSettingsPage} />
           <Route path="/operador" component={OperatorPage} />
           <Route path="/wifi">
             <WifiPage readOnly={operatorMode} />

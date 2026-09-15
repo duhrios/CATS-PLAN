@@ -24,6 +24,7 @@ const operatorNavItems = [
   { href: "/operador", label: "Visão do Dia", icon: LayoutDashboard },
   { href: "/reservas", label: "Reserva", icon: CalendarDays },
   { href: "/wifi", label: "Pontos - Wifi", icon: Network },
+  { href: "/operador/configuracao", label: "Configuração", icon: Settings },
 ];
 
 export function AppShell({ children, role = "admin" }: { children: React.ReactNode; role?: "admin" | "user" | "operator" }) {
