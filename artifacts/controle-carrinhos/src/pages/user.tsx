@@ -1,10 +1,23 @@
 import { CalendarDays, Clock3, Plus, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { Button, PageHeader, SectionCard, StatusPill, formatDate, fridaySabbathMessage, isFridayISO, todayISO } from "@/components/app-ui";
 import { isReservationInProgress, useCampusData } from "@/lib/campus-data";
 
 export function UserOverviewPage() {
-  const { reservations, teacher, movements, updateMovementStatus, reportNotReceived, requestMovementAgain } = useCampusData();
+  const { reservations, teacher, movements, carts, updateMovementStatus, reportNotReceived, requestMovementAgain } = useCampusData();
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  useEffect(() => { const timer = window.setInterval(() => setCurrentTime(new Date()), 30000); return () => window.clearInterval(timer); }, []);
+  const availability = useMemo(() => {
+    const time = currentTime.toTimeString().slice(0, 5);
+    return carts.reduce((summary, cart) => {
+      const unavailable = cart.unavailable ? cart.total : cart.unavailableUnits.length;
+      const inUse = reservations.filter((item) => item.date === todayISO() && item.cart === cart.name && item.status !== "Concluída" && item.start <= time && time < item.end).reduce((total, item) => total + item.quantity, 0);
+      summary.available += Math.max(0, cart.total - unavailable - inUse);
+      summary.total += cart.total;
+      return summary;
+    }, { available: 0, total: 0 });
+  }, [carts, reservations, currentTime]);
   const todayReservations = reservations
     .filter((item) => item.date === todayISO() && item.teacher === teacher.name)
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -20,6 +33,21 @@ export function UserOverviewPage() {
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Próxima aula</p><p className="mt-4 font-display text-3xl font-semibold">{nextReservation?.start ?? "—"}</p><p className="mt-1 truncate text-xs text-[hsl(var(--muted-foreground))]">{nextReservation?.className ?? "Nenhuma aula agendada"}</p></div>
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Regra de alteração</p><p className="mt-4 font-display text-3xl font-semibold">D−1 / D+1</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">No dia, a reserva fica bloqueada</p></div>
       </div>
+      <Link href="/usuario/reservas" className="block rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5 transition hover:border-[hsl(var(--primary)/.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Disponibilidade em tempo real</p>
+            <p className="mt-3 font-display text-2xl font-semibold">{availability.available} de {availability.total} Chromebooks disponíveis</p>
+          </div>
+          <span className="font-data text-xs font-bold text-[hsl(var(--primary))]">
+            {availability.total > 0 ? `${Math.round((availability.available / availability.total) * 100)}%` : "0%"}
+          </span>
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[hsl(var(--muted))]">
+          <div className="h-full rounded-full bg-[hsl(var(--primary))] transition-[width] duration-500" style={{ width: `${availability.total > 0 ? (availability.available / availability.total) * 100 : 0}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">Considera agenda em andamento e unidades indisponíveis.</p>
+      </Link>
       <SectionCard title="Agenda do dia" eyebrow="Aulas e carrinhos reservados" action={<Link href="/usuario/reservas" className="text-xs font-bold text-[hsl(var(--primary))] hover:underline" data-testid="link-user-view-reservations">Minhas reservas</Link>}>
         {todayReservations.length === 0 ? <div className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Nenhuma reserva para hoje.</div> : <div className="divide-y divide-[hsl(var(--border))]">{todayReservations.map((item) => { const movement = movements.find((entry) => entry.reservationId === item.id); const classInProgress = isReservationInProgress(item); const canReportNotReceived = classInProgress && (!movement || movement.status !== "Concluído" || movement.autoCompleted); const canRequestAgain = classInProgress && movement?.notReceived === true; return <div key={item.id} className="space-y-3 px-5 py-4 sm:px-6" data-testid={`row-user-today-${item.id}`}><div className="flex items-center gap-4"><div className="w-14 shrink-0"><p className="font-data text-sm font-semibold">{item.start}</p><p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">{item.end}</p></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{item.className}</p><p className="mt-1 truncate text-xs text-[hsl(var(--muted-foreground))]">{item.room} · {item.teacher}</p></div><div className="hidden items-center gap-2 text-xs font-semibold sm:flex"><Clock3 size={14} className="text-[hsl(var(--primary))]" /> {item.cart}</div><StatusPill status={movement?.status ?? item.status} /></div><div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={!classInProgress || movement?.status === "Concluído"} onClick={() => updateMovementStatus(item.id, "Concluído", false, teacher.name)}>Concluído</Button><Button size="sm" variant="secondary" disabled={!canReportNotReceived} onClick={() => reportNotReceived(item.id)}>Não Recebi</Button><Button size="sm" variant="secondary" disabled={!canRequestAgain} onClick={() => requestMovementAgain(item.id)}>Pedir novamente</Button>{!classInProgress && <span className="text-xs text-[hsl(var(--muted-foreground))]">Disponível somente no horário da aula.</span>}</div></div>; })}</div>}      </SectionCard>
       <div className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.12)] p-4"><ShieldCheck size={18} className="mt-0.5 shrink-0 text-[hsl(34_60%_32%)]" /><div><p className="text-sm font-semibold">Reservas do dia não podem ser modificadas</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Para uma reserva de hoje, procure a coordenação. Novas reservas podem ser adicionadas para outras datas.</p></div></div>

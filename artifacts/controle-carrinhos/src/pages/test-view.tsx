@@ -67,7 +67,7 @@ const sections = [
   },
   {
     href: "/operador",
-    label: "TI / Operador",
+    label: "TI",
     summary: "Visão do dia do TI, alarme e movimentação em andamento.",
     icon: BadgeCheck,
     status: "TI",

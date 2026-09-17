@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -298,7 +298,7 @@ function ProgressBar({
 }
 
 export function OverviewPage() {
-  const { adminAccounts, operatorAccounts } = useCampusData();
+  const { adminAccounts, operatorAccounts, carts, reservations } = useCampusData();
   const storedAdminName = typeof window !== "undefined"
     ? window.localStorage.getItem("controle-carrinhos-admin-name")
     : null;
@@ -314,6 +314,36 @@ export function OverviewPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState("06:55");
   const [loading, setLoading] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const liveCartAvailability = useMemo(() => {
+    const today = todayISO();
+    const time = currentTime.toTimeString().slice(0, 5);
+    return carts.reduce(
+      (summary, cart) => {
+        const unavailableUnits = cart.unavailable ? cart.total : cart.unavailableUnits.length;
+        const reservedUnits = reservations
+          .filter((reservation) =>
+            reservation.date === today &&
+            reservation.cart === cart.name &&
+            reservation.status !== "Concluída" &&
+            reservation.start <= time &&
+            time < reservation.end,
+          )
+          .reduce((total, reservation) => total + reservation.quantity, 0);
+        const available = Math.max(0, cart.total - unavailableUnits - reservedUnits);
+        summary.total += cart.total;
+        summary.available += available;
+        summary.inUse += reservedUnits;
+        summary.unavailable += unavailableUnits;
+        return summary;
+      },
+      { total: 0, available: 0, inUse: 0, unavailable: 0 },
+    );
+  }, [carts, reservations, currentTime]);
   const refresh = () => {
     setRefreshing(true);
     setLoading(true);
@@ -522,21 +552,30 @@ export function OverviewPage() {
           eyebrow="Checklist de abertura"
         >
           <div className="space-y-5 p-5 sm:p-6">
-            <div className="flex items-center gap-3">
+            <Link href="/carrinhos" className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]">
+            <div className="flex items-center gap-3 transition-colors hover:text-[hsl(var(--primary))]">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]">
                 <Check size={18} />
               </span>
               <div className="flex-1">
                 <p className="text-sm font-semibold">Carrinhos conferidos</p>
                 <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  86 unidades disponíveis
+                  {liveCartAvailability.available} de {liveCartAvailability.total} Chromebooks disponíveis agora
                 </p>
               </div>
               <span className="font-data text-xs font-bold text-[hsl(var(--primary))]">
-                100%
+                {liveCartAvailability.total > 0
+                  ? `${Math.round((liveCartAvailability.available / liveCartAvailability.total) * 100)}%`
+                  : "0%"}
               </span>
             </div>
-            <ProgressBar value={100} />
+            <ProgressBar value={liveCartAvailability.total > 0 ? (liveCartAvailability.available / liveCartAvailability.total) * 100 : 0} />
+            </Link>
+            <div className="grid grid-cols-3 gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
+              <span><strong className="text-[hsl(var(--foreground))]">{liveCartAvailability.available}</strong> disponíveis</span>
+              <span><strong className="text-[hsl(var(--foreground))]">{liveCartAvailability.inUse}</strong> em agenda</span>
+              <span><strong className="text-[hsl(var(--foreground))]">{liveCartAvailability.unavailable}</strong> indisponíveis</span>
+            </div>
             <Link
               href="/wifi"
               className="flex items-center justify-between rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 py-3 text-xs font-semibold transition hover:border-[hsl(var(--primary)/.4)]"
