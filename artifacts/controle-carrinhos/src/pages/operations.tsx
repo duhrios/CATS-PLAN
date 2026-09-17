@@ -24,7 +24,6 @@ import {
   Trash2,
   Settings2,
   ShieldCheck,
-  Signal,
   SignalHigh,
   Wifi,
   WifiOff,
@@ -299,6 +298,19 @@ function ProgressBar({
 }
 
 export function OverviewPage() {
+  const { adminAccounts, operatorAccounts } = useCampusData();
+  const storedAdminName = typeof window !== "undefined"
+    ? window.localStorage.getItem("controle-carrinhos-admin-name")
+    : null;
+  const storedOperatorName = typeof window !== "undefined"
+    ? window.localStorage.getItem("controle-carrinhos-operator-name")
+    : null;
+  const userName =
+    adminAccounts.find((account) => account.name === storedAdminName)?.name ??
+    operatorAccounts.find((account) => account.name === storedOperatorName)?.name ??
+    storedAdminName ??
+    storedOperatorName ??
+    "Administrador";
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState("06:55");
   const [loading, setLoading] = useState(false);
@@ -321,7 +333,7 @@ export function OverviewPage() {
       <div className="space-y-6">
         <PageHeader
           eyebrow="Quarta-feira, 19 de março"
-          title="Bom dia, equipe."
+          title={`Bom dia, ${userName}.`}
           description="Preparando o pulso operacional do Campus Vila Nova."
         />
         <SectionCard>
@@ -340,7 +352,7 @@ export function OverviewPage() {
     <div className="animate-rise space-y-7">
       <PageHeader
         eyebrow="Quarta-feira, 19 de março · turno da manhã"
-        title="Bom dia, equipe."
+        title={`Bom dia, ${userName}.`}
         description="O essencial para colocar a primeira aula em movimento, sem surpresas."
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -525,21 +537,6 @@ export function OverviewPage() {
               </span>
             </div>
             <ProgressBar value={100} />
-            <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[hsl(var(--accent)/.18)] text-[hsl(34_60%_32%)]">
-                <Signal size={18} />
-              </span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold">Sinal verificado</p>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  1 ponto em observação
-                </p>
-              </div>
-              <span className="font-data text-xs font-bold text-[hsl(34_60%_32%)]">
-                80%
-              </span>
-            </div>
-            <ProgressBar value={80} tone="gold" />
             <Link
               href="/wifi"
               className="flex items-center justify-between rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 py-3 text-xs font-semibold transition hover:border-[hsl(var(--primary)/.4)]"
@@ -1093,6 +1090,7 @@ export function ReservationsPage({
 }: {
   mode?: "admin" | "user" | "operator";
 }) {
+  const { floorForRoom } = useRoomDirectory();
   const {
     reservations,
     saveReservation,
@@ -1104,7 +1102,42 @@ export function ReservationsPage({
     reportNotReceived,
     requestMovementAgain,
     deleteReservation,
+    carts,
   } = useCampusData();
+  const recommendCart = (data: Omit<Reservation, "id" | "status">) => {
+    if (data.kind !== "Aula" || data.cart === "Reservas") return data.cart;
+    const floor = floorForRoom(data.room);
+    const candidates = ["Carrinho A", "Carrinho B", "Carrinho C"].filter((cart) => {
+      const matchingCart = carts.find((item) => item.name === cart);
+      return !matchingCart?.unavailable;
+    });
+    const available = candidates.filter((cart) =>
+      !reservations.some((item) =>
+        item.id !== modal.reservation?.id &&
+        item.date === data.date &&
+        item.cart === cart &&
+        item.start < data.end &&
+        data.start < item.end,
+      ),
+    );
+    // Never assign a conflicting cart just to satisfy the preference; keeping
+    // the original assignment is safer when every candidate is occupied.
+    if (available.length === 0) return data.cart;
+    const pool = available;
+    const floorHistory = reservations.filter((item) =>
+      item.date === data.date &&
+      item.kind === "Aula" &&
+      floorForRoom(item.room) === floor &&
+      pool.includes(item.cart),
+    );
+    return [...pool].sort((first, second) => {
+      const firstLast = floorHistory.filter((item) => item.cart === first).sort((a, b) => b.start.localeCompare(a.start))[0];
+      const secondLast = floorHistory.filter((item) => item.cart === second).sort((a, b) => b.start.localeCompare(a.start))[0];
+      if (firstLast && !secondLast) return -1;
+      if (secondLast && !firstLast) return 1;
+      return first === data.cart ? -1 : second === data.cart ? 1 : first.localeCompare(second);
+    })[0] ?? data.cart;
+  };
   const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("Todos");
   const [conflictOnly, setConflictOnly] = useState(
@@ -1134,6 +1167,22 @@ export function ReservationsPage({
       ),
     [conflictDetails],
   );
+  const floorSuggestions = useMemo(() => {
+    const suggestions: Array<{ current: Reservation; previous: Reservation; floor: string }> = [];
+    const ordered = [...reservations].filter((item) => item.kind === "Aula").sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
+    ordered.forEach((current, index) => {
+      const previous = ordered.slice(0, index).reverse().find((item) =>
+        item.date === current.date &&
+        item.cart !== current.cart &&
+        item.start < current.start &&
+        floorForRoom(item.room) === floorForRoom(current.room),
+      );
+      if (previous && !suggestions.some((item) => item.current.id === current.id)) {
+        suggestions.push({ current, previous, floor: floorForRoom(current.room) });
+      }
+    });
+    return suggestions;
+  }, [floorForRoom, reservations]);
   const visibleReservations = useMemo(
     () =>
       mode === "user"
@@ -1198,7 +1247,7 @@ export function ReservationsPage({
     setDateFilter("Calendário");
   };
   const handleSaveReservation = (data: Omit<Reservation, "id" | "status">) => {
-    saveReservation(data, modal.reservation?.id);
+    saveReservation({ ...data, cart: recommendCart(data) }, modal.reservation?.id);
     setModal({ open: false });
   };
   return (
@@ -1267,6 +1316,21 @@ export function ReservationsPage({
           tone="red"
         />
       </div>
+      {mode !== "user" && floorSuggestions.length > 0 && (
+        <SectionCard title="Otimização por piso" eyebrow="Sugestões para reduzir trocas de andar">
+          <div className="divide-y divide-[hsl(var(--border))]">
+            {floorSuggestions.slice(0, 5).map(({ current, previous, floor }) => (
+              <div key={current.id} className="flex flex-wrap items-center justify-between gap-3 p-4 sm:px-6">
+                <div>
+                  <p className="text-sm font-semibold">{current.date} · {current.start} · {current.room} ({floor})</p>
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">O {previous.cart} já estará no mesmo piso às {previous.start} em {previous.room}.</p>
+                </div>
+                <span className="rounded-full bg-[hsl(var(--accent)/.18)] px-3 py-1 text-xs font-bold text-[hsl(34_60%_32%)]">Sugestão: {previous.cart}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
       <div className="grid gap-6 xl:grid-cols-[20rem_1fr]">
         <SectionCard title="Calendário" eyebrow="Agendamentos por dia">
           <div className="p-3">
@@ -1470,7 +1534,7 @@ export function ReservationsPage({
                                   {item.className}
                                 </p>
                               </td>
-                              <td className="px-3 py-4 text-sm">{item.room}</td>
+                              <td className="px-3 py-4 text-sm"><p>{item.room}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{floorForRoom(item.room)}</p></td>
                               <td className="px-3 py-4 text-sm">{item.cart}</td>
                               <td className="px-3 py-4">
                                 <StatusPill
@@ -1555,19 +1619,21 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     carts,
     addCart,
+    deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
     toggleCartMaintenance,
     reservations,
     reserveAvailable,
-    movementSettings,
-    updateMovementSettings,
   } = useCampusData();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [modalOpen, setModalOpen] = useState(false);
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
+  const isSuperAdmin =
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
   const filtered = carts.filter(
     (cart) =>
       (filter === "Todos" || filter === "Reservas"
@@ -1624,90 +1690,6 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
           tone={reserveAvailable > 0 ? "gold" : "red"}
         />
       </div>
-      <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
-        <div className="grid max-w-2xl gap-3 p-4 sm:grid-cols-2 sm:p-5">
-          <Field label="Intervalo do alerta (minutos)">
-            <input
-              type="number"
-              min="1"
-              max="60"
-              value={movementSettings.alertIntervalMinutes}
-              onChange={(event) =>
-                updateMovementSettings({
-                  ...movementSettings,
-                  alertIntervalMinutes: Math.max(
-                    1,
-                    Number(event.target.value),
-                  ),
-                })
-              }
-              className={`${inputClass} h-9`}
-            />
-          </Field>
-          <Field label="Repetições do alerta">
-            <input
-              type="number"
-              min="1"
-              max="10"
-              value={movementSettings.alertRepeat}
-              onChange={(event) =>
-                updateMovementSettings({
-                  ...movementSettings,
-                  alertRepeat: Math.max(1, Number(event.target.value)),
-                })
-              }
-              className={`${inputClass} h-9`}
-            />
-          </Field>
-          <Field label="Aviso de movimentação antecipada (minutos)">
-            <input
-              type="number"
-              min="1"
-              max="120"
-              disabled={!movementSettings.earlyWarningEnabled}
-              value={movementSettings.earlyWarningMinutes}
-              onChange={(event) =>
-                updateMovementSettings({
-                  ...movementSettings,
-                  earlyWarningMinutes: Math.min(
-                    120,
-                    Math.max(1, Number(event.target.value)),
-                  ),
-                })
-              }
-              className={`${inputClass} h-9`}
-            />
-          </Field>
-          <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
-            <input
-              type="checkbox"
-              checked={movementSettings.autoComplete}
-              onChange={(event) =>
-                updateMovementSettings({
-                  ...movementSettings,
-                  autoComplete: event.target.checked,
-                })
-              }
-              className="h-4 w-4 accent-[hsl(var(--primary))]"
-            />
-            Concluir automaticamente após o intervalo
-          </label>
-          <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
-            <input
-              type="checkbox"
-              checked={movementSettings.earlyWarningEnabled}
-              onChange={(event) =>
-                updateMovementSettings({
-                  ...movementSettings,
-                  earlyWarningEnabled: event.target.checked,
-                })
-              }
-              className="h-4 w-4 accent-[hsl(var(--primary))]"
-            />
-            Avisar quando o TI movimentar o carrinho antecipadamente
-          </label>
-        </div>
-      </SectionCard>
       <SectionCard
         title="Inventário operacional"
         eyebrow="Cada Chromebook tem um código próprio: A1, A2, B1..."
@@ -1905,17 +1887,35 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         ? "Disponibilizar carrinho inteiro"
                         : "Indisponibilizar carrinho inteiro"}
                     </button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={readOnly}
-                      onClick={() => toggleCartMaintenance(cart.id)}
-                      data-testid={`button-toggle-cart-${cart.id}`}
-                    >
-                      {cart.status === "Manutenção"
-                        ? "Marcar pronto"
-                        : "Enviar manutenção"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={readOnly}
+                        onClick={() => toggleCartMaintenance(cart.id)}
+                        data-testid={`button-toggle-cart-${cart.id}`}
+                      >
+                        {cart.status === "Manutenção"
+                          ? "Marcar pronto"
+                          : "Enviar manutenção"}
+                      </Button>
+                      {isSuperAdmin && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => {
+                            const used = reservations.some((item) => item.cart === cart.name);
+                            const warning = used
+                              ? `Este carrinho aparece em agendamentos existentes. Excluir ${cart.name} mesmo assim?`
+                              : `Excluir ${cart.name}? Esta ação não pode ser desfeita.`;
+                            if (window.confirm(warning)) deleteCart(cart.id);
+                          }}
+                          data-testid={`button-delete-cart-${cart.id}`}
+                        >
+                          Excluir
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -2575,6 +2575,19 @@ export function HistoryPage() {
         tone: "bad",
         person: reservation.teacher,
         profile: "Professor",
+      });
+    }
+    if (movement.notAttendedAt) {
+      events.push({
+        id: `movement-${movement.reservationId}-not-attended`,
+        time: new Date(movement.notAttendedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        date: eventDate(movement.notAttendedAt),
+        title: "Movimentação não atendida",
+        detail: `${reservation.cart} · ${reservation.room} · O carrinho não foi movimentado no horário da aula.`,
+        type: "Movimentação",
+        tone: "bad",
+        person: reservation.teacher,
+        profile: "TI",
       });
     }
     if (movement.requestAgainAt) {

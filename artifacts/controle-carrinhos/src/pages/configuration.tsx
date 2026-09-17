@@ -1,10 +1,10 @@
 import { AlertTriangle, CalendarX, Database, Factory, History, Trash2, Users, UserRound } from "lucide-react";
-import { PageHeader, SectionCard, Button } from "@/components/app-ui";
+import { PageHeader, SectionCard, Button, Field, Modal, inputClass } from "@/components/app-ui";
+import { useState, type FormEvent } from "react";
 import { useCampusData } from "@/lib/campus-data";
 import TestViewPage from "@/pages/test-view";
 
 export function ConfigurationPage() {
-  const { resetData } = useCampusData();
   const actions = [
     ["reservations", "Redefinir Agenda", "Apagar todos os agendamentos.", CalendarX],
     ["profiles", "Apagar todos os perfis", "Remover professores e usuários TI.", Users],
@@ -12,11 +12,54 @@ export function ConfigurationPage() {
     ["teachers", "Apagar professores", "Remover apenas os perfis de professores.", UserRound],
     ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando este Super administrador.", Factory],
   ] as const;
-  const run = (kind: typeof actions[number][0], label: string) => {
-    if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) resetData(kind);
+  const { resetData, movementSettings, updateMovementSettings, authenticateAdmin } = useCampusData();
+  const [pendingAction, setPendingAction] = useState<typeof actions[number] | null>(null);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const run = (action: typeof actions[number]) => {
+    setPendingAction(action);
+    setPassword("");
+    setPasswordError("");
+  };
+  const confirmAction = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pendingAction) return;
+    const currentAdminName = window.localStorage.getItem("controle-carrinhos-admin-name") ?? "";
+    const account = authenticateAdmin(currentAdminName, password);
+    if (!account?.isSuperAdmin) {
+      setPasswordError("Senha incorreta. Informe novamente a senha do administrador.");
+      return;
+    }
+    const [, label] = pendingAction;
+    if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) {
+      resetData(pendingAction[0]);
+      setPendingAction(null);
+      setPassword("");
+    }
   };
   return <div className="animate-rise space-y-7">
     <PageHeader eyebrow="Acesso exclusivo · Super administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
+      <div className="grid max-w-2xl gap-3 p-4 sm:grid-cols-2 sm:p-5">
+        <Field label="Intervalo do alerta (minutos)">
+          <input type="number" min="1" max="60" value={movementSettings.alertIntervalMinutes} onChange={(event) => updateMovementSettings({ ...movementSettings, alertIntervalMinutes: Math.max(1, Number(event.target.value)) })} className={`${inputClass} h-9`} />
+        </Field>
+        <Field label="Repetições do alerta">
+          <input type="number" min="1" max="10" value={movementSettings.alertRepeat} onChange={(event) => updateMovementSettings({ ...movementSettings, alertRepeat: Math.max(1, Number(event.target.value)) })} className={`${inputClass} h-9`} />
+        </Field>
+        <Field label="Aviso de movimentação antecipada (minutos)">
+          <input type="number" min="1" max="120" disabled={!movementSettings.earlyWarningEnabled} value={movementSettings.earlyWarningMinutes} onChange={(event) => updateMovementSettings({ ...movementSettings, earlyWarningMinutes: Math.min(120, Math.max(1, Number(event.target.value))) })} className={`${inputClass} h-9`} />
+        </Field>
+        <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
+          <input type="checkbox" checked={movementSettings.autoComplete} onChange={(event) => updateMovementSettings({ ...movementSettings, autoComplete: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
+          Concluir automaticamente após o intervalo
+        </label>
+        <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold">
+          <input type="checkbox" checked={movementSettings.earlyWarningEnabled} onChange={(event) => updateMovementSettings({ ...movementSettings, earlyWarningEnabled: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
+          Avisar quando o TI movimentar o carrinho antecipadamente
+        </label>
+      </div>
+    </SectionCard>
     <SectionCard title="Validação do projeto" eyebrow="Teste de navegação">
       <div className="p-4">
         <TestViewPage compact />
@@ -26,9 +69,22 @@ export function ConfigurationPage() {
       <div className="p-5">
         <div className="mb-4 flex items-start gap-3 rounded-2xl border border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.06)] p-4 text-sm"><AlertTriangle size={18} className="mt-0.5 text-[hsl(var(--destructive))]" /><p>As ações abaixo apagam dados locais permanentemente. Confirme somente quando necessário.</p></div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {actions.map(([kind, label, description, Icon]) => <div key={kind} className="flex items-center justify-between gap-4 rounded-xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><Icon size={19} className="text-[hsl(var(--primary))]" /><div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{description}</p></div></div><Button size="sm" variant={kind === "factory" ? "danger" : "secondary"} onClick={() => run(kind, label)}><Trash2 size={14} /> Executar</Button></div>)}
+          {actions.map((action) => { const [kind, label, description, Icon] = action; return <div key={kind} className="flex items-center justify-between gap-4 rounded-xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><Icon size={19} className="text-[hsl(var(--primary))]" /><div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{description}</p></div></div><Button size="sm" variant={kind === "factory" ? "danger" : "secondary"} onClick={() => run(action)}><Trash2 size={14} /> Executar</Button></div>; })}
         </div>
       </div>
     </SectionCard>
+    {pendingAction && <Modal title="Confirmar ação protegida" onClose={() => setPendingAction(null)}>
+      <form className="space-y-5 p-5 sm:p-6" onSubmit={confirmAction}>
+        <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">Digite novamente a senha do administrador para executar <strong>{pendingAction[1]}</strong>.</p>
+        <Field label="Senha do administrador">
+          <input autoFocus required type="password" value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError(""); }} className={inputClass} />
+        </Field>
+        {passwordError && <p role="alert" className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{passwordError}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => setPendingAction(null)}>Cancelar</Button>
+          <Button type="submit" variant={pendingAction[0] === "factory" ? "danger" : "primary"}><Trash2 size={14} /> Confirmar e executar</Button>
+        </div>
+      </form>
+    </Modal>}
   </div>;
 }

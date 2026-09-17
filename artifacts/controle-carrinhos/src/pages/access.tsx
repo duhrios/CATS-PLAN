@@ -70,6 +70,7 @@ export function AdminLoginPage() {
         }
         window.localStorage.setItem("controle-carrinhos-role", "admin");
         window.localStorage.setItem("controle-carrinhos-super-admin", account.isSuperAdmin ? "true" : "false");
+        window.localStorage.setItem("controle-carrinhos-admin-name", account.name);
         setLocation("/admin");
       }}>
         <div className="flex items-center gap-3">

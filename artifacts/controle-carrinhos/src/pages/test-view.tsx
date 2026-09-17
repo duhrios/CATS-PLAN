@@ -103,13 +103,13 @@ const sections = [
 ];
 
 const checks = [
-  "Visão administrativa",
-  "Reservas e filtros",
-  "Movimentação de carrinhos",
-  "Pontos Wi‑Fi e salas",
-  "Usuários e perfis",
-  "Operação do TI e alarme",
-  "Histórico e manutenção",
+  { label: "Visão administrativa", href: "/admin" },
+  { label: "Reservas e filtros", href: "/reservas" },
+  { label: "Movimentação de carrinhos", href: "/carrinhos" },
+  { label: "Pontos Wi‑Fi e salas", href: "/wifi" },
+  { label: "Usuários e perfis", href: "/professores" },
+  { label: "Operação do TI e alarme", href: "/operador" },
+  { label: "Histórico e manutenção", href: "/historico" },
 ];
 
 export default function TestViewPage({ compact = false }: { compact?: boolean }) {
@@ -160,13 +160,13 @@ export default function TestViewPage({ compact = false }: { compact?: boolean })
 
       <SectionCard title="Checklist de validação" eyebrow="Fluxos críticos">
         <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
-          {checks.map((item) => (
-            <div key={item} className="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-3 text-sm">
+          {checks.map(({ label, href }) => (
+            <Link key={label} href={href} className="group flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-3 text-sm transition-colors hover:border-[hsl(var(--primary)/.45)] hover:bg-[hsl(var(--primary)/.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]">
               <span className="grid h-6 w-6 place-items-center rounded-full bg-[hsl(var(--primary)/.14)] text-[hsl(var(--primary))]">
                 <BadgeCheck size={14} />
               </span>
-              <span>{item}</span>
-            </div>
+              <span className="group-hover:text-[hsl(var(--primary))]">{label}</span>
+            </Link>
           ))}
         </div>
       </SectionCard>

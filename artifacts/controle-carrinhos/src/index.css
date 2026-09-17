@@ -486,3 +486,14 @@
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
 }
+
+/* Keep operational metadata visible without competing with the movement action. */
+[class*="border-[#d8be5f]"] { border-color: #d8e3f1 !important; }
+[class*="bg-[linear-gradient(135deg,#fff6d7_0%,#fbe6a1_100%)]"] { background: #f4f7fb !important; }
+[class*="text-[#745510]"] { color: #856b2b !important; }
+[class*="border-[#e7d28c]"] { border-color: #dce5f0 !important; }
+[class*="bg-[#fff9e9]"] { background: #f6f8fb !important; }
+[class*="text-[#8a641d]"] { color: #856b2b !important; }
+[class*="bg-[hsl(var(--accent)/.12)]"] { background: #f8fafc !important; }
+[class*="text-[hsl(34_60%_32%)]"] { color: #806b3b !important; }
+[class*="shadow-[0_22px_48px_rgba(15,53,94,0.12)]"] { box-shadow: none !important; }

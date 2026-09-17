@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { type Segment } from "@/lib/campus-data";
 
 export const periods = ["Manhã", "Tarde"] as const;
@@ -7,6 +7,7 @@ export type Period = (typeof periods)[number];
 export type Room = {
   id: string;
   number: string;
+  floor: string;
   segment: Segment;
   morningClasses: string[];
   afternoonClasses: string[];
@@ -17,6 +18,7 @@ export type ClassRoomEntry = {
   room: string;
   period: Period;
   segment: Segment;
+  floor: string;
 };
 
 type RoomDirectoryValue = {
@@ -30,16 +32,17 @@ type RoomDirectoryValue = {
   deleteRooms: (ids: string[]) => void;
   roomForClass: (className: string, period?: Period, segment?: Segment) => string;
   classesForRoom: (room: string, period: Period) => string[];
+  floorForRoom: (room: string) => string;
 };
 
 const storageKey = "controle-carrinhos-rooms";
 
 const defaultRooms: Room[] = [
-  { id: "room-08", number: "08", segment: "Fundamental 2", morningClasses: ["8º ano C · Artes"], afternoonClasses: ["6º ano A · Português"] },
-  { id: "room-14", number: "14", segment: "Fundamental 2", morningClasses: ["7º ano A · Matemática"], afternoonClasses: ["7º ano B · Matemática"] },
-  { id: "room-18", number: "18", segment: "Fundamental 2", morningClasses: ["8º ano A · História"], afternoonClasses: ["8º ano D · História"] },
-  { id: "room-02", number: "02", segment: "Fundamental 2", morningClasses: ["8º ano B · Ciências"], afternoonClasses: ["9º ano A · Ciências"] },
-  { id: "room-21", number: "21", segment: "Fundamental 2", morningClasses: ["9º ano C · Geografia"], afternoonClasses: ["9º ano B · Geografia"] },
+  { id: "room-08", number: "08", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["8º ano C · Artes"], afternoonClasses: ["6º ano A · Português"] },
+  { id: "room-14", number: "14", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["7º ano A · Matemática"], afternoonClasses: ["7º ano B · Matemática"] },
+  { id: "room-18", number: "18", floor: "2º andar", segment: "Fundamental 2", morningClasses: ["8º ano A · História"], afternoonClasses: ["8º ano D · História"] },
+  { id: "room-02", number: "02", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["8º ano B · Ciências"], afternoonClasses: ["9º ano A · Ciências"] },
+  { id: "room-21", number: "21", floor: "3º andar", segment: "Fundamental 2", morningClasses: ["9º ano C · Geografia"], afternoonClasses: ["9º ano B · Geografia"] },
 ];
 
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -50,7 +53,7 @@ function readRooms() {
   if (typeof window === "undefined") return defaultRooms;
   try {
     const saved = window.localStorage.getItem(storageKey);
-    return saved ? (JSON.parse(saved) as Room[]).map((room) => ({ ...room, segment: room.segment ?? "Fundamental 2" })) : defaultRooms;
+    return saved ? (JSON.parse(saved) as Room[]).map((room) => ({ ...room, floor: room.floor ?? "Térreo", segment: room.segment ?? "Fundamental 2" })) : defaultRooms;
   } catch {
     return defaultRooms;
   }
@@ -60,9 +63,17 @@ const RoomDirectoryContext = createContext<RoomDirectoryValue | null>(null);
 
 export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
   const [rooms, setRooms] = useState<Room[]>(readRooms);
+  useEffect(() => {
+    const clearRooms = () => {
+      setRooms([]);
+      window.localStorage.removeItem(storageKey);
+    };
+    window.addEventListener("controle-carrinhos-clear-rooms", clearRooms);
+    return () => window.removeEventListener("controle-carrinhos-clear-rooms", clearRooms);
+  }, []);
   const classEntries = useMemo(() => rooms.flatMap((room) => [
-     ...room.morningClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Manhã" as Period, segment: room.segment })),
-     ...room.afternoonClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Tarde" as Period, segment: room.segment })),
+     ...room.morningClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Manhã" as Period, segment: room.segment, floor: room.floor })),
+     ...room.afternoonClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Tarde" as Period, segment: room.segment, floor: room.floor })),
   ]), [rooms]);
   const roomOptions = useMemo(() => [...rooms]
     .sort((first, second) => Number(first.number) - Number(second.number))
@@ -115,8 +126,10 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
   const classesForRoom = (room: string, period: Period) => classEntries
     .filter((item) => item.period === period && normalizeRoom(item.room) === normalizeRoom(room))
     .map((item) => item.className);
+  const floorForRoom = (room: string) =>
+    rooms.find((item) => normalizeRoom(roomLabel(item.number)) === normalizeRoom(room))?.floor ?? "Piso não informado";
 
-  return <RoomDirectoryContext.Provider value={{ rooms, classEntries, roomOptions, roomOptionsForSegment, addRoom, updateRoom, deleteRoom, deleteRooms, roomForClass, classesForRoom }}>{children}</RoomDirectoryContext.Provider>;
+  return <RoomDirectoryContext.Provider value={{ rooms, classEntries, roomOptions, roomOptionsForSegment, addRoom, updateRoom, deleteRoom, deleteRooms, roomForClass, classesForRoom, floorForRoom }}>{children}</RoomDirectoryContext.Provider>;
 }
 
 export function useRoomDirectory() {
