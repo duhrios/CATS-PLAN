@@ -58,6 +58,10 @@ export function ConfigurationPage() {
           <input type="checkbox" checked={movementSettings.earlyWarningEnabled} onChange={(event) => updateMovementSettings({ ...movementSettings, earlyWarningEnabled: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
           Avisar quando o TI movimentar o carrinho antecipadamente
         </label>
+        <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold sm:col-span-2">
+          <input type="checkbox" checked={movementSettings.allowCartATransitionScheduling} onChange={(event) => updateMovementSettings({ ...movementSettings, allowCartATransitionScheduling: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
+          Permitir agendar o Carrinho A nos horários de transição (11:50 e 12:00)
+        </label>
       </div>
     </SectionCard>
     <SectionCard title="Validação do projeto" eyebrow="Teste de navegação">

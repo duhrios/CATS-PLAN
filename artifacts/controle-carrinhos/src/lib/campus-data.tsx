@@ -124,6 +124,26 @@ export type Cart = {
   reserveCapacity: number;
 };
 
+export const reservationsOverlap = (
+  first: Pick<Reservation, "date" | "start" | "end" | "cart" | "kind">,
+  second: Pick<Reservation, "date" | "start" | "end" | "cart" | "kind">,
+) =>
+  first.kind === "Aula" &&
+  second.kind === "Aula" &&
+  first.date === second.date &&
+  first.cart === second.cart &&
+  first.start < second.end &&
+  second.start < first.end;
+
+export const isCartTransitionConflict = (
+  reservation: Pick<Reservation, "cart" | "start" | "kind">,
+  allowCartA = false,
+) =>
+  reservation.kind === "Aula" &&
+  (reservation.start === "11:50" || reservation.start === "12:00") &&
+  reservation.cart === "Carrinho A" &&
+  !allowCartA;
+
 const teacherStorageKey = "controle-carrinhos-teacher";
 const reservationStorageKey = "controle-carrinhos-reservations";
 const cartStorageKey = "controle-carrinhos-carts";
@@ -374,6 +394,7 @@ export type MovementSettings = {
   autoComplete: boolean;
   earlyWarningMinutes: number;
   earlyWarningEnabled: boolean;
+  allowCartATransitionScheduling: boolean;
 };
 export const defaultMovementSettings: MovementSettings = {
   alertIntervalMinutes: 10,
@@ -381,6 +402,7 @@ export const defaultMovementSettings: MovementSettings = {
   autoComplete: true,
   earlyWarningMinutes: 10,
   earlyWarningEnabled: true,
+  allowCartATransitionScheduling: false,
 };
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -441,7 +463,7 @@ type CampusDataValue = {
   saveReservation: (
     data: Omit<Reservation, "id" | "status">,
     id?: number,
-  ) => void;
+  ) => boolean;
   deleteReservation: (id: number) => void;
   carts: Cart[];
   addCart: (cart: Omit<Cart, "id">) => void;
@@ -770,7 +792,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const saveReservation = (
     data: Omit<Reservation, "id" | "status">,
     id?: number,
-  ) => {
+  ): boolean => {
+    if (isCartTransitionConflict(data, movementSettings.allowCartATransitionScheduling)) return false;
+    const selectedCart = carts.find((cart) => cart.name === data.cart);
+    if (data.kind === "Aula" && selectedCart?.unavailable) return false;
+    const duplicate = reservations.find(
+      (item) => item.id !== id && reservationsOverlap(item, data),
+    );
+    if (duplicate) return false;
     const next = id
       ? reservations.map((item) =>
           item.id === id ? { ...item, ...data } : item,
@@ -784,6 +813,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           ...reservations,
         ];
     persistReservations(next);
+    return true;
   };
   const deleteReservation = (id: number) => {
     persistReservations(reservations.filter((item) => item.id !== id));

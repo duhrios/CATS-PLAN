@@ -54,6 +54,8 @@ import {
   type Reservation,
   type ReservationKind,
   type Segment,
+  isCartTransitionConflict,
+  reservationsOverlap,
   useCampusData,
 } from "@/lib/campus-data";
 
@@ -344,6 +346,11 @@ export function OverviewPage() {
       { total: 0, available: 0, inUse: 0, unavailable: 0 },
     );
   }, [carts, reservations, currentTime]);
+  const overviewConflicts = useMemo(
+    () => reservationConflictDetails(reservations),
+    [reservations],
+  );
+  const nextOverviewConflict = overviewConflicts[0];
   const refresh = () => {
     setRefreshing(true);
     setLoading(true);
@@ -445,8 +452,10 @@ export function OverviewPage() {
         />
         <Metric
           label="Conflitos"
-          value="1"
-          detail="Requer decisão até 11:50"
+          value={String(overviewConflicts.length)}
+          detail={nextOverviewConflict
+            ? `Requer decisão até ${nextOverviewConflict.reservation.start}`
+            : "Nenhuma sobreposição de carrinhos"}
           icon={AlertTriangle}
           tone="red"
           href="/reservas?conflitos=1"
@@ -492,8 +501,10 @@ export function OverviewPage() {
                 title: "9º ano C · Geografia",
                 owner: "Bianca Reis",
                 cart: "Carrinho A",
-                state: "Conflito",
-                dot: "bg-[hsl(var(--destructive))]",
+                state: overviewConflicts.length > 0 ? "Conflito" : "Mais tarde",
+                dot: overviewConflicts.length > 0
+                  ? "bg-[hsl(var(--destructive))]"
+                  : "bg-[hsl(var(--muted-foreground))]",
               },
               {
                 time: "13:30",
@@ -647,14 +658,14 @@ function ReservationModal({
   initialDate?: string;
   mode?: "admin" | "user" | "operator";
   onClose: () => void;
-  onSave: (value: Omit<Reservation, "id" | "status">) => void;
+  onSave: (value: Omit<Reservation, "id" | "status">) => boolean;
   teacher: { name: string; segment: Segment; subject: string };
   reserveAvailable: number;
   teacherReserved: number;
 }) {
   const { classEntries, roomForClass, classesForRoom, roomOptionsForSegment } =
     useRoomDirectory();
-  const { carts, wifiRooms, wifiPoints } = useCampusData();
+  const { carts, reservations, wifiRooms, wifiPoints, movementSettings } = useCampusData();
   const [error, setError] = useState("");
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialCart = reservation?.cart ?? "Carrinho A";
@@ -746,7 +757,14 @@ function ReservationModal({
     mode === "user" && form.kind === "Aula" && isWeekendISO(form.date);
   const availableSchedule = isReserve
     ? []
-    : scheduleFor(form.cart, form.period, form.date);
+    : scheduleFor(form.cart, form.period, form.date).filter(
+        (slot) =>
+          !isCartTransitionConflict({
+            cart: form.cart,
+            start: slot.start,
+            kind: form.kind,
+          }, movementSettings.allowCartATransitionScheduling),
+      );
   const selectedScheduleSlot = availableSchedule.find(
     (slot) => slot.start === form.start && slot.end === form.end,
   );
@@ -794,19 +812,31 @@ function ReservationModal({
             );
             return;
           }
-          if (!sameDayBlocked)
-            onSave({
-              ...form,
-              quantity,
-              segment: form.segment,
-              subject: form.subject,
-              kind: form.kind,
-              className: isReserve
-                ? "Chromebooks de reserva"
-                : form.className || form.room,
-              room: isReserve ? "Reserva" : form.room,
-              cart: isReserve ? "Reservas" : form.cart,
-            });
+          const reservationData = {
+            ...form,
+            quantity,
+            segment: form.segment,
+            subject: form.subject,
+            kind: form.kind,
+            className: isReserve
+              ? "Chromebooks de reserva"
+              : form.className || form.room,
+            room: isReserve ? "Reserva" : form.room,
+            cart: isReserve ? "Reservas" : form.cart,
+          };
+          if (!isReserve && isCartTransitionConflict(reservationData, movementSettings.allowCartATransitionScheduling)) {
+            setError("O horário de transição entre turnos (11:50–12:45 ou 12:00–12:45) está indisponível para todos os carrinhos.");
+            return;
+          }
+          if (!isReserve && reservations.some(
+            (item) => item.id !== reservation?.id && reservationsOverlap(item, reservationData),
+          )) {
+            setError("Este carrinho já está reservado nesse horário. Escolha outro horário ou carrinho.");
+            return;
+          }
+          if (!sameDayBlocked && !onSave(reservationData)) {
+            setError("Este carrinho acabou de ser reservado nesse horário. Escolha outro horário ou carrinho.");
+          }
         }}
         data-testid="form-reservation"
       >
@@ -1142,13 +1172,15 @@ export function ReservationsPage({
     requestMovementAgain,
     deleteReservation,
     carts,
+    movementSettings,
   } = useCampusData();
   const recommendCart = (data: Omit<Reservation, "id" | "status">) => {
     if (data.kind !== "Aula" || data.cart === "Reservas") return data.cart;
     const floor = floorForRoom(data.room);
     const candidates = ["Carrinho A", "Carrinho B", "Carrinho C"].filter((cart) => {
       const matchingCart = carts.find((item) => item.name === cart);
-      return !matchingCart?.unavailable;
+      return !matchingCart?.unavailable &&
+        !isCartTransitionConflict({ cart, start: data.start, kind: data.kind }, movementSettings.allowCartATransitionScheduling);
     });
     const available = candidates.filter((cart) =>
       !reservations.some((item) =>
@@ -1159,8 +1191,8 @@ export function ReservationsPage({
         data.start < item.end,
       ),
     );
-    // Never assign a conflicting cart just to satisfy the preference; keeping
-    // the original assignment is safer when every candidate is occupied.
+    // Keep the requested cart when every candidate is occupied so the save
+    // layer can reject the request instead of creating a duplicate booking.
     if (available.length === 0) return data.cart;
     const pool = available;
     const floorHistory = reservations.filter((item) =>
@@ -1286,8 +1318,9 @@ export function ReservationsPage({
     setDateFilter("Calendário");
   };
   const handleSaveReservation = (data: Omit<Reservation, "id" | "status">) => {
-    saveReservation({ ...data, cart: recommendCart(data) }, modal.reservation?.id);
-    setModal({ open: false });
+    const saved = saveReservation({ ...data, cart: recommendCart(data) }, modal.reservation?.id);
+    if (saved) setModal({ open: false });
+    return saved;
   };
   return (
     <div className="animate-rise space-y-7">
