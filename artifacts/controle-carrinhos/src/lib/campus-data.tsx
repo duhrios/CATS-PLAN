@@ -106,6 +106,7 @@ export type Reservation = {
   status: "Confirmada" | "Aguardando" | "Concluída";
   kind: ReservationKind;
   quantity: number;
+  reservedChromebooks?: string[];
 };
 
 export type Cart = {
@@ -396,6 +397,22 @@ export type MovementSettings = {
   earlyWarningEnabled: boolean;
   allowCartATransitionScheduling: boolean;
 };
+export type CampusSettings = {
+  campusName: string;
+  coordinatorName: string;
+  agendaLabel: string;
+  reservationsEnabled: boolean;
+  reservationLimit: number;
+  reserveUnits: string[];
+};
+export const defaultCampusSettings: CampusSettings = {
+  campusName: "Campus Vila Nova",
+  coordinatorName: "",
+  agendaLabel: "Agenda",
+  reservationsEnabled: true,
+  reservationLimit: 10,
+  reserveUnits: [],
+};
 export const defaultMovementSettings: MovementSettings = {
   alertIntervalMinutes: 10,
   alertRepeat: 2,
@@ -459,6 +476,8 @@ type CampusDataValue = {
   requestMovementAgain: (reservationId: number) => void;
   movementSettings: MovementSettings;
   updateMovementSettings: (settings: MovementSettings) => void;
+  campusSettings: CampusSettings;
+  updateCampusSettings: (settings: CampusSettings) => void;
   reservations: Reservation[];
   saveReservation: (
     data: Omit<Reservation, "id" | "status">,
@@ -508,6 +527,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         }) as Reservation,
     ),
   );
+  const [campusSettings, setCampusSettings] = useState<CampusSettings>(() => ({
+    ...defaultCampusSettings,
+    ...readStorage<Partial<CampusSettings>>("controle-carrinhos-campus-settings", {}),
+  }));
   const [carts, setCarts] = useState<Cart[]>(() =>
     readStorage<Partial<Cart>[]>(cartStorageKey, initialCarts).map(
       (cart) =>
@@ -788,11 +811,30 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     setMovementSettings(settings);
     window.localStorage.setItem(movementSettingsStorageKey, JSON.stringify(settings));
   };
+  const updateCampusSettings = (settings: CampusSettings) => {
+    const next = { ...defaultCampusSettings, ...settings, reservationLimit: Math.max(1, settings.reservationLimit) };
+    setCampusSettings(next);
+    window.localStorage.setItem("controle-carrinhos-campus-settings", JSON.stringify(next));
+  };
 
   const saveReservation = (
     data: Omit<Reservation, "id" | "status">,
     id?: number,
   ): boolean => {
+    if (data.kind === "Reserva" && !campusSettings.reservationsEnabled) return false;
+    if (data.kind === "Reserva" && data.quantity > campusSettings.reservationLimit) return false;
+    const assignedReserveUnits =
+      data.kind === "Reserva" && (!data.reservedChromebooks || data.reservedChromebooks.length === 0)
+        ? carts
+            .filter((cart) => cart.reserveCapacity > 0)
+            .flatMap((cart) =>
+              Array.from({ length: cart.total }, (_, index) => `${cart.prefix}${index + 1}`)
+                .filter((unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit)),
+            )
+            .filter((unit) => !reservations.some((item) => item.kind === "Reserva" && item.id !== id && item.reservedChromebooks?.includes(unit)))
+            .slice(-data.quantity)
+        : data.reservedChromebooks;
+    if (data.kind === "Reserva" && (!assignedReserveUnits || assignedReserveUnits.length < data.quantity)) return false;
     if (isCartTransitionConflict(data, movementSettings.allowCartATransitionScheduling)) return false;
     const selectedCart = carts.find((cart) => cart.name === data.cart);
     if (data.kind === "Aula" && selectedCart?.unavailable) return false;
@@ -802,11 +844,12 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     if (duplicate) return false;
     const next = id
       ? reservations.map((item) =>
-          item.id === id ? { ...item, ...data } : item,
+          item.id === id ? { ...item, ...data, reservedChromebooks: assignedReserveUnits } : item,
         )
       : [
           {
             ...data,
+            reservedChromebooks: assignedReserveUnits,
             id: Math.max(...reservations.map((item) => item.id), 0) + 1,
             status: "Aguardando" as const,
           },
@@ -1142,6 +1185,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         requestMovementAgain,
         movementSettings,
         updateMovementSettings,
+        campusSettings,
+        updateCampusSettings,
         reservations,
         saveReservation,
         deleteReservation,

@@ -665,7 +665,7 @@ function ReservationModal({
 }) {
   const { classEntries, roomForClass, classesForRoom, roomOptionsForSegment } =
     useRoomDirectory();
-  const { carts, reservations, wifiRooms, wifiPoints, movementSettings } = useCampusData();
+  const { carts, reservations, wifiRooms, wifiPoints, movementSettings, campusSettings } = useCampusData();
   const [error, setError] = useState("");
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialCart = reservation?.cart ?? "Carrinho A";
@@ -687,6 +687,7 @@ function ReservationModal({
     end: initialSlot?.end ?? reservation?.end ?? "07:45",
     cart: initialCart,
     quantity: String(reservation?.quantity ?? 1),
+    reservedChromebooks: reservation?.reservedChromebooks?.join(", ") ?? "",
   });
   const eligibleEntries = classEntries.filter(
     (item) => item.segment === form.segment,
@@ -770,7 +771,7 @@ function ReservationModal({
   );
   const maxForTeacher = Math.max(
     0,
-    10 -
+    campusSettings.reservationLimit -
       teacherReserved +
       (reservation?.kind === "Reserva" ? reservation.quantity : 0),
   );
@@ -785,6 +786,10 @@ function ReservationModal({
         onSubmit={(event) => {
           event.preventDefault();
           const quantity = Math.max(1, Number(form.quantity) || 1);
+          if (isReserve && !campusSettings.reservationsEnabled) {
+            setError("As reservas de Chromebooks estão desativadas pelo administrador.");
+            return;
+          }
           if (isReserve && quantity > maxForTeacher) {
             setError(
               `Você pode reservar no máximo ${maxForTeacher} Chromebook(s).`,
@@ -815,6 +820,7 @@ function ReservationModal({
           const reservationData = {
             ...form,
             quantity,
+            reservedChromebooks: form.reservedChromebooks.split(",").map((item) => item.trim()).filter(Boolean).slice(0, quantity),
             segment: form.segment,
             subject: form.subject,
             kind: form.kind,
@@ -1072,12 +1078,17 @@ function ReservationModal({
                 required
                 type="number"
                 min={1}
-                max={10}
+                max={Math.min(campusSettings.reservationLimit, maxForTeacher)}
                 value={form.quantity}
                 onChange={(event) => update("quantity", event.target.value)}
                 className={inputClass}
                 data-testid="input-reservation-quantity"
               />
+            </Field>
+          )}
+          {isReserve && (
+            <Field label="Códigos opcionais" hint="Informe códigos separados por vírgula. Sem códigos, os últimos disponíveis serão separados automaticamente.">
+              <input value={form.reservedChromebooks} onChange={(event) => update("reservedChromebooks", event.target.value)} className={inputClass} placeholder="B51, B52, C49" />
             </Field>
           )}
         </div>
@@ -1694,13 +1705,15 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
     deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
-    toggleCartMaintenance,
     reservations,
     reserveAvailable,
+    campusSettings,
+    updateCampusSettings,
   } = useCampusData();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [modalOpen, setModalOpen] = useState(false);
+  const [reserveCategoryOpen, setReserveCategoryOpen] = useState(false);
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
   const isSuperAdmin =
@@ -1757,7 +1770,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         <Metric
           label="Reservas"
           value={`${reserveAvailable}`}
-          detail={`${reserveUsed} Chromebooks solicitados · limite 10 por professor`}
+          detail={`${reserveUsed} Chromebooks solicitados`}
           icon={Settings2}
           tone={reserveAvailable > 0 ? "gold" : "red"}
         />
@@ -1800,10 +1813,10 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
       >
         {filter === "Reservas" && (
           <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--accent)/.1)] px-5 py-4 text-xs leading-5 text-[hsl(34_60%_32%)] sm:px-6">
-            <strong>Categoria Reservas:</strong> 10 Chromebooks foram separados
-            dos carrinhos B e C. Professores podem solicitar até 10 no total, em
-            qualquer horário. Disponíveis agora:{" "}
-            <strong>{reserveAvailable}</strong>.
+            <button type="button" className="w-full text-left" onClick={() => setFilter("Reservas")}>
+              <strong>Categoria Reservas</strong>
+              <span className="ml-2">· Últimos Chromebooks adicionados automaticamente · Disponíveis agora: <strong>{reserveAvailable}</strong>.</span>
+            </button>
           </div>
         )}
         {filtered.length === 0 ? (
@@ -1819,7 +1832,10 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 { length: cart.total },
                 (_, index) => `${cart.prefix}${index + 1}`,
               );
-              const visibleUnits = expanded ? units : units.slice(0, 12);
+              const reserveUnits = units.slice(-Math.max(1, cart.reserveCapacity));
+              const visibleUnits = filter === "Reservas"
+                ? reserveUnits
+                : expanded ? units : units.slice(0, 12);
               return (
                 <div
                   key={cart.id}
@@ -1881,7 +1897,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                     </span>
                   </div>
                   <div
-                    className="mt-5 rounded-xl bg-[hsl(var(--muted)/.55)] p-3"
+                    className="mt-5 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3"
                     data-testid={`list-chromebooks-${cart.id}`}
                   >
                     <div className="mb-2 flex items-center justify-between">
@@ -1939,9 +1955,8 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                     )}
                   </div>
                   {cart.reserveCapacity > 0 && (
-                    <p className="mt-3 rounded-lg bg-[hsl(var(--accent)/.12)] px-3 py-2 text-[11px] font-semibold text-[hsl(34_60%_32%)]">
-                      Categoria Reservas · até {cart.reserveCapacity}{" "}
-                      Chromebooks
+                    <p className="mt-3 rounded-lg bg-[hsl(var(--card))] px-3 py-2 text-[11px] font-semibold text-[hsl(var(--muted-foreground))]">
+                      Categoria Reservas
                     </p>
                   )}
                   <div className="mt-5 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4">
@@ -1960,17 +1975,6 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         : "Indisponibilizar carrinho inteiro"}
                     </button>
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={readOnly}
-                        onClick={() => toggleCartMaintenance(cart.id)}
-                        data-testid={`button-toggle-cart-${cart.id}`}
-                      >
-                        {cart.status === "Manutenção"
-                          ? "Marcar pronto"
-                          : "Enviar manutenção"}
-                      </Button>
                       {isSuperAdmin && (
                         <Button
                           size="sm"
@@ -1984,7 +1988,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           }}
                           data-testid={`button-delete-cart-${cart.id}`}
                         >
-                          Excluir
+                          <Trash2 size={14} /> Excluir carrinho
                         </Button>
                       )}
                     </div>
@@ -1992,6 +1996,56 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 </div>
               );
             })}
+          </div>
+        )}
+      </SectionCard>
+      <SectionCard
+        title="Categoria Reservas"
+        eyebrow="Configuração operacional"
+        action={
+          <button
+            type="button"
+            onClick={() => setReserveCategoryOpen((open) => !open)}
+            aria-expanded={reserveCategoryOpen}
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-[hsl(var(--primary))] transition hover:bg-[hsl(var(--muted))]"
+          >
+            {reserveCategoryOpen ? "Recolher" : "Abrir"}
+            <ChevronRight size={15} className={reserveCategoryOpen ? "rotate-90 transition-transform" : "transition-transform"} />
+          </button>
+        }
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setReserveCategoryOpen((open) => !open)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") setReserveCategoryOpen((open) => !open);
+          }}
+          className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-[hsl(var(--muted)/.35)] sm:px-6"
+          aria-expanded={reserveCategoryOpen}
+        >
+          <span>
+            <span className="block text-sm font-semibold">Disponibilizar reservas</span>
+            <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">A reserva usa os carrinhos B e C. Sem códigos escolhidos, os últimos disponíveis serão separados.</span>
+          </span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              updateCampusSettings({ ...campusSettings, reservationsEnabled: !campusSettings.reservationsEnabled });
+            }}
+            aria-pressed={campusSettings.reservationsEnabled}
+            className="ml-4 shrink-0 rounded-full border border-[hsl(var(--border))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))] transition hover:border-[hsl(var(--primary)/.55)] hover:bg-[hsl(var(--primary)/.06)]"
+          >
+            {campusSettings.reservationsEnabled ? "Ativa" : "Desativada"}
+          </button>
+        </div>
+        {reserveCategoryOpen && (
+          <div className="grid gap-3 border-t border-[hsl(var(--border))] p-5 sm:grid-cols-[1fr_180px_auto] sm:items-end">
+            <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">Os códigos podem ser escolhidos na reserva. Quando não forem informados, o sistema adiciona automaticamente os últimos disponíveis.</p>
+            <Field label="Limite por professor">
+              <input type="number" min="1" value={campusSettings.reservationLimit} onChange={(event) => updateCampusSettings({ ...campusSettings, reservationLimit: Math.max(1, Number(event.target.value) || 1) })} className={`${inputClass} h-9`} />
+            </Field>
           </div>
         )}
       </SectionCard>

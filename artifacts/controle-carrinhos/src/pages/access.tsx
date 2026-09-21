@@ -19,6 +19,7 @@ const accessCards = [
 ];
 
 export function AccessPage() {
+  const { campusSettings } = useCampusData();
   return (
     <main className="min-h-[100dvh] bg-[hsl(var(--background))] px-5 py-10 text-[hsl(var(--foreground))] sm:px-8">
       <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-4xl flex-col justify-center">
@@ -26,7 +27,7 @@ export function AccessPage() {
           <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-lg">
             <Router size={30} />
           </div>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-[.2em] text-[hsl(var(--primary))]">Campus Vila Nova</p>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[.2em] text-[hsl(var(--primary))]">{campusSettings.campusName}</p>
           <h1 className="font-display text-3xl font-semibold tracking-[-.04em] sm:text-4xl">Controle de Carrinhos</h1>
           <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">Escolha seu perfil para continuar.</p>
         </div>

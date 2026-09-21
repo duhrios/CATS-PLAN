@@ -12,7 +12,7 @@ export function ConfigurationPage() {
     ["teachers", "Apagar professores", "Remover apenas os perfis de professores.", UserRound],
     ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando este Super administrador.", Factory],
   ] as const;
-  const { resetData, movementSettings, updateMovementSettings, authenticateAdmin } = useCampusData();
+  const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, authenticateAdmin } = useCampusData();
   const [pendingAction, setPendingAction] = useState<typeof actions[number] | null>(null);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -62,6 +62,27 @@ export function ConfigurationPage() {
           <input type="checkbox" checked={movementSettings.allowCartATransitionScheduling} onChange={(event) => updateMovementSettings({ ...movementSettings, allowCartATransitionScheduling: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
           Permitir agendar o Carrinho A nos horários de transição (11:50 e 12:00)
         </label>
+      </div>
+    </SectionCard>
+    <SectionCard title="Identidade e reservas" eyebrow="Configurações operacionais">
+      <div className="grid max-w-2xl gap-3 p-4 sm:grid-cols-2 sm:p-5">
+        <Field label="Nome do campus">
+          <input value={campusSettings.campusName} onChange={(event) => updateCampusSettings({ ...campusSettings, campusName: event.target.value })} className={`${inputClass} h-9`} />
+        </Field>
+        <Field label="Nome do administrador">
+          <input value={campusSettings.coordinatorName} onChange={(event) => updateCampusSettings({ ...campusSettings, coordinatorName: event.target.value })} className={`${inputClass} h-9`} placeholder="Nome da pessoa responsável" />
+        </Field>
+        <Field label="Nome da seção">
+          <input value={campusSettings.agendaLabel} onChange={(event) => updateCampusSettings({ ...campusSettings, agendaLabel: event.target.value })} className={`${inputClass} h-9`} />
+        </Field>
+        <Field label="Limite de Chromebooks por reserva">
+          <input type="number" min="1" value={campusSettings.reservationLimit} onChange={(event) => updateCampusSettings({ ...campusSettings, reservationLimit: Math.max(1, Number(event.target.value) || 1) })} className={`${inputClass} h-9`} />
+        </Field>
+        <label className="flex h-fit items-center gap-2 rounded-lg border border-[hsl(var(--border))] p-2 text-xs font-semibold sm:col-span-2">
+          <input type="checkbox" checked={campusSettings.reservationsEnabled} onChange={(event) => updateCampusSettings({ ...campusSettings, reservationsEnabled: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
+          Permitir reservas de Chromebooks
+        </label>
+        <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))] sm:col-span-2">Quando a seleção dos códigos não for informada, o sistema separa automaticamente os últimos Chromebooks disponíveis.</p>
       </div>
     </SectionCard>
     <SectionCard title="Validação do projeto" eyebrow="Teste de navegação">
