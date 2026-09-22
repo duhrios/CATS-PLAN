@@ -23,6 +23,7 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const {
     teacher,
     updateTeacher,
+    updateTeacherPassword,
     teacherAccounts,
     addTeacherAccounts,
     deleteTeacherAccount,
@@ -36,7 +37,9 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     deleteAdminAccount,
   } = useCampusData();
   const [form, setForm] = useState({ ...teacher });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [saved, setSaved] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [error, setError] = useState("");
@@ -193,16 +196,54 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   };
 
   if (!admin) {
+    const handleProfileSubmit = (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const hasPasswordChange = Object.values(passwordForm).some((value) => value.trim().length > 0);
+      if (hasPasswordChange) {
+        if (!passwordForm.currentPassword.trim()) {
+          setPasswordMessage("Informe a senha atual para alterar a senha.");
+          return;
+        }
+        if (passwordForm.newPassword.length < 6) {
+          setPasswordMessage("A nova senha deve ter pelo menos 6 caracteres.");
+          return;
+        }
+        if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+          setPasswordMessage("A confirmação da nova senha não confere.");
+          return;
+        }
+        const updatedPassword = updateTeacherPassword(passwordForm.currentPassword, passwordForm.newPassword);
+        if (!updatedPassword) {
+          setPasswordMessage("A senha atual informada está incorreta.");
+          return;
+        }
+        setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+        setPasswordMessage("Senha atualizada com sucesso.");
+      }
+      updateTeacher(form);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
+    };
+
     return (
       <div className="animate-rise space-y-7">
         <PageHeader eyebrow="Área do professor · Perfil" title="Meu perfil" description="Mantenha seu e-mail e segmento atualizados. Eles são usados para liberar o acesso e filtrar as salas disponíveis nas reservas." />
         <SectionCard title="Dados do professor" eyebrow="Cadastro pessoal">
-          <form className="max-w-xl space-y-5 p-5 sm:p-6" onSubmit={(event) => { event.preventDefault(); updateTeacher(form); setSaved(true); window.setTimeout(() => setSaved(false), 2200); }} data-testid="form-teacher-profile">
+          <form className="max-w-xl space-y-5 p-5 sm:p-6" onSubmit={handleProfileSubmit} data-testid="form-teacher-profile">
             <div className="flex items-center gap-3 rounded-xl bg-[hsl(var(--muted)/.45)] p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"><UserRound size={19} /></span><div><p className="text-sm font-semibold">Perfil usado nas reservas</p><p className="text-xs text-[hsl(var(--muted-foreground))]">O nome abaixo será preenchido automaticamente.</p></div></div>
             <Field label="Nome do professor"><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={inputClass} placeholder="Ex.: Marina Lopes" data-testid="input-teacher-name" /></Field>
             <Field label="E-mail de acesso" hint="Use o mesmo e-mail cadastrado pela coordenação."><input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className={inputClass} placeholder="professor@escola.com.br" data-testid="input-teacher-email" /></Field>
             <Field label="Seguimento"><select value={form.segment} onChange={(event) => setForm({ ...form, segment: event.target.value as Segment, subject: "" })} className={inputClass} data-testid="select-teacher-segment">{segments.map((segment) => <option key={segment} value={segment}>{segment}</option>)}</select></Field>
             {showSubject ? <Field label="Matéria" hint="Obrigatória para Fundamental 2 e Ensino Médio."><input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} className={inputClass} placeholder="Ex.: Ciências" data-testid="input-teacher-subject" /></Field> : <p className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.3)] p-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Para Educação Infantil e Fundamental 1, a sala cadastrada pela administração será exibida diretamente na reserva.</p>}
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.2)] p-4">
+              <p className="mb-3 text-sm font-semibold text-[hsl(var(--foreground))]">Alterar senha</p>
+              <div className="space-y-3">
+                <Field label="Senha atual"><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} className={inputClass} placeholder="Digite sua senha atual" /></Field>
+                <Field label="Nova senha"><input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} className={inputClass} placeholder="Mínimo de 6 caracteres" /></Field>
+                <Field label="Confirmar nova senha"><input type="password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} className={inputClass} placeholder="Repita a nova senha" /></Field>
+              </div>
+            </div>
+            {passwordMessage && <p className="rounded-lg bg-[hsl(var(--muted)/.5)] p-3 text-xs font-semibold text-[hsl(var(--muted-foreground))]">{passwordMessage}</p>}
             <div className="flex justify-end border-t border-[hsl(var(--border))] pt-4"><Button type="submit" data-testid="button-save-teacher-profile"><Check size={15} /> {saved ? "Cadastro salvo" : "Salvar cadastro"}</Button></div>
           </form>
         </SectionCard>

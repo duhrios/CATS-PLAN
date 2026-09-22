@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, ChevronRight, DoorOpen, LayoutDashboard, LogOut, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X, Settings } from "lucide-react";
+import { Activity, CalendarDays, ChevronRight, Clock3, DoorOpen, LayoutDashboard, LogOut, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X, Settings } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { cx } from "@/components/app-ui";
@@ -13,7 +13,10 @@ const adminNavItems = [
   { href: "/wifi", label: "Pontos Wi-Fi", icon: Network },
   { href: "/historico", label: "Histórico", icon: Activity },
 ];
-const superAdminNavItem = { href: "/configuracao", label: "Configuração", icon: Settings };
+const superAdminNavItems = [
+  { href: "/configuracao", label: "Configuração", icon: Settings },
+  { href: "/configuracao/horarios", label: "Horários", icon: Clock3 },
+];
 
 const userNavItems = [
   { href: "/usuario", label: "Visão do dia", icon: LayoutDashboard },
@@ -36,7 +39,7 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
   const userMode = role === "user";
   const operatorMode = role === "operator";
   const isSuperAdmin = !operatorMode && !userMode && window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
-  const navItems = operatorMode ? operatorNavItems : userMode ? userNavItems : (isSuperAdmin ? [...adminNavItems, superAdminNavItem] : adminNavItems);
+  const navItems = operatorMode ? operatorNavItems : userMode ? userNavItems : (isSuperAdmin ? [...adminNavItems, ...superAdminNavItems] : adminNavItems);
   const signOut = () => {
     clearRememberedTeacher();
     window.localStorage.removeItem("controle-carrinhos-role");

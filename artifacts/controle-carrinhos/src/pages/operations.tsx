@@ -29,7 +29,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   Button,
   EmptyState,
@@ -66,75 +66,6 @@ const isWeekendISO = (value: string) =>
 
 type ScheduleSlot = { start: string; end: string; label?: string };
 
-const campusSchedule: Record<
-  string,
-  Record<"Manhã" | "Tarde", ScheduleSlot[]>
-> = {
-  "Carrinho A": {
-    Manhã: [
-      { start: "07:00", end: "07:45" },
-      { start: "07:45", end: "08:30" },
-      { start: "08:30", end: "09:35" },
-      { start: "09:35", end: "10:20" },
-      { start: "10:20", end: "11:05" },
-      { start: "11:05", end: "11:50" },
-      {
-        start: "11:50",
-        end: "12:45",
-        label: "Faixa protegida para conflito entre turnos",
-      },
-    ],
-    Tarde: [
-      { start: "12:45", end: "13:30" },
-      { start: "13:30", end: "14:15" },
-      { start: "14:15", end: "15:00" },
-      { start: "15:00", end: "16:05" },
-      { start: "16:05", end: "16:50" },
-      { start: "16:50", end: "17:35" },
-    ],
-  },
-  "Carrinho B": {
-    Manhã: [
-      { start: "07:00", end: "07:45" },
-      { start: "07:45", end: "08:30" },
-      { start: "08:30", end: "09:15" },
-      { start: "09:15", end: "10:20" },
-      { start: "10:20", end: "11:05" },
-      { start: "11:05", end: "11:50" },
-      { start: "11:50", end: "12:35" },
-    ],
-    Tarde: [
-      { start: "12:00", end: "12:45" },
-      { start: "12:45", end: "13:30" },
-      { start: "13:30", end: "14:15" },
-      { start: "14:15", end: "15:20" },
-      { start: "15:20", end: "16:05" },
-      { start: "16:05", end: "16:50" },
-      { start: "16:50", end: "17:35" },
-    ],
-  },
-  "Carrinho C": {
-    Manhã: [
-      { start: "07:00", end: "07:45" },
-      { start: "07:45", end: "08:30" },
-      { start: "08:30", end: "09:15" },
-      { start: "09:15", end: "10:20" },
-      { start: "10:20", end: "11:05" },
-      { start: "11:05", end: "11:50" },
-      { start: "11:50", end: "12:35" },
-    ],
-    Tarde: [
-      { start: "12:00", end: "12:45" },
-      { start: "12:45", end: "13:30" },
-      { start: "13:30", end: "14:15" },
-      { start: "14:15", end: "15:20" },
-      { start: "15:20", end: "16:05" },
-      { start: "16:05", end: "16:50" },
-      { start: "16:50", end: "17:35" },
-    ],
-  },
-};
-
 const fridayAfternoonSchedule: ScheduleSlot[] = [
   { start: "12:00", end: "12:45" },
   { start: "12:45", end: "13:25" },
@@ -144,15 +75,6 @@ const fridayAfternoonSchedule: ScheduleSlot[] = [
   { start: "15:45", end: "16:20" },
   { start: "16:20", end: "17:00" },
 ];
-
-const scheduleFor = (
-  cart: string,
-  period: "Manhã" | "Tarde",
-  date?: string,
-) =>
-  date && period === "Tarde" && isFridayISO(date)
-    ? fridayAfternoonSchedule
-    : campusSchedule[cart]?.[period] ?? [];
 
 const reservationConflictDetails = (reservations: Reservation[]) => {
   const conflicts: Array<{ reservation: Reservation; other: Reservation }> = [];
@@ -326,7 +248,9 @@ export function OverviewPage() {
     const time = currentTime.toTimeString().slice(0, 5);
     return carts.reduce(
       (summary, cart) => {
-        const unavailableUnits = cart.unavailable ? cart.total : cart.unavailableUnits.length;
+        const unavailableUnits = cart.unavailable
+          ? cart.total
+          : cart.unavailableUnits.length + cart.reservedUnits.length;
         const reservedUnits = reservations
           .filter((reservation) =>
             reservation.date === today &&
@@ -371,7 +295,7 @@ export function OverviewPage() {
         <PageHeader
           eyebrow="Quarta-feira, 19 de março"
           title={`Bom dia, ${userName}.`}
-          description="Preparando o pulso operacional do Campus Vila Nova."
+          description="Preparando o pulso operacional do Colégio Vila Nova."
         />
         <SectionCard>
           <div className="p-6">
@@ -665,8 +589,12 @@ function ReservationModal({
 }) {
   const { classEntries, roomForClass, classesForRoom, roomOptionsForSegment } =
     useRoomDirectory();
-  const { carts, reservations, wifiRooms, wifiPoints, movementSettings, campusSettings } = useCampusData();
+  const { carts, reservations, wifiRooms, wifiPoints, movementSettings, campusSettings, cartSchedules } = useCampusData();
   const [error, setError] = useState("");
+  const scheduleFor = (cart: string, period: "Manhã" | "Tarde", date?: string) => {
+    if (date && period === "Tarde" && isFridayISO(date)) return fridayAfternoonSchedule;
+    return cartSchedules[cart]?.[period] ?? [];
+  };
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialCart = reservation?.cart ?? "Carrinho A";
   const selectedInitialDate = reservation?.date ?? initialDateValue ?? todayISO();
@@ -1086,11 +1014,6 @@ function ReservationModal({
               />
             </Field>
           )}
-          {isReserve && (
-            <Field label="Códigos opcionais" hint="Informe códigos separados por vírgula. Sem códigos, os últimos disponíveis serão separados automaticamente.">
-              <input value={form.reservedChromebooks} onChange={(event) => update("reservedChromebooks", event.target.value)} className={inputClass} placeholder="B51, B52, C49" />
-            </Field>
-          )}
         </div>
         {mode === "user" && (
           <div
@@ -1170,6 +1093,7 @@ export function ReservationsPage({
 }: {
   mode?: "admin" | "user" | "operator";
 }) {
+  const [location] = useLocation();
   const { floorForRoom } = useRoomDirectory();
   const {
     reservations,
@@ -1235,6 +1159,19 @@ export function ReservationsPage({
     open: boolean;
     reservation?: Reservation;
   }>({ open: false });
+  useEffect(() => {
+    const params = new URLSearchParams(
+      typeof window !== "undefined" ? window.location.search : "",
+    );
+    if (params.get("nova") === "1") {
+      setModal({ open: true, reservation: undefined });
+      if (location.startsWith("/usuario/reservas")) {
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.delete("nova");
+        window.history.replaceState({}, "", nextUrl);
+      }
+    }
+  }, [location]);
   const conflictDetails = useMemo(
     () => reservationConflictDetails(reservations),
     [reservations],
@@ -1334,7 +1271,7 @@ export function ReservationsPage({
     return saved;
   };
   return (
-    <div className="animate-rise space-y-7">
+    <div className="animate-rise space-y-4">
       <PageHeader
         eyebrow={mode === "user" ? "Área do professor" : mode === "operator" ? "Área do TI" : "Agenda compartilhada"}
         title="Reservas"
@@ -1387,17 +1324,19 @@ export function ReservationsPage({
           icon={Laptop}
           tone={reserveAvailable > 0 ? "green" : "red"}
         />
-        <Metric
-          label="Próximo conflito"
-          value={nextConflict?.reservation.start ?? "—"}
-          detail={
-            nextConflict
-              ? `${nextConflict.reservation.cart} · ${nextConflict.reservation.room}`
-              : "Nenhum conflito"
-          }
-          icon={AlertTriangle}
-          tone="red"
-        />
+        {mode !== "user" && (
+          <Metric
+            label="Próximo conflito"
+            value={nextConflict?.reservation.start ?? "—"}
+            detail={
+              nextConflict
+                ? `${nextConflict.reservation.cart} · ${nextConflict.reservation.room}`
+                : "Nenhum conflito"
+            }
+            icon={AlertTriangle}
+            tone="red"
+          />
+        )}
       </div>
       {mode !== "user" && floorSuggestions.length > 0 && (
         <SectionCard title="Otimização por piso" eyebrow="Sugestões para reduzir trocas de andar">
@@ -1468,7 +1407,9 @@ export function ReservationsPage({
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   className={cx(inputClass, "pl-9")}
-                  placeholder="Buscar professor, sala..."
+                  placeholder={
+                    mode === "user" ? "Buscar em minhas reservas..." : "Buscar professor, sala..."
+                  }
                   data-testid="input-search-reservations"
                 />
               </div>
@@ -1498,51 +1439,53 @@ export function ReservationsPage({
                 ))}
               </div>
             </div>
-            <div className="flex gap-1 overflow-auto">
-              {["Todos", ...segments].map((segment) => (
+            {mode !== "user" && (
+              <div className="flex gap-1 overflow-auto">
+                {["Todos", ...segments].map((segment) => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => setSegmentFilter(segment)}
+                    className={cx(
+                      "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
+                      segmentFilter === segment
+                        ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
+                        : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
+                    )}
+                  >
+                    {segment}
+                  </button>
+                ))}
                 <button
-                  key={segment}
                   type="button"
-                  onClick={() => setSegmentFilter(segment)}
+                  onClick={() => {
+                    setKindFilter(kindFilter === "Reserva" ? "Todos" : "Reserva");
+                    setConflictOnly(false);
+                  }}
                   className={cx(
                     "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
-                    segmentFilter === segment
-                      ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
+                    kindFilter === "Reserva"
+                      ? "bg-[hsl(var(--accent))] text-[hsl(34_60%_25%)]"
                       : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
                   )}
                 >
-                  {segment}
+                  Reservas
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setKindFilter(kindFilter === "Reserva" ? "Todos" : "Reserva");
-                  setConflictOnly(false);
-                }}
-                className={cx(
-                  "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
-                  kindFilter === "Reserva"
-                    ? "bg-[hsl(var(--accent))] text-[hsl(34_60%_25%)]"
-                    : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
-                )}
-              >
-                Reservas
-              </button>
-              <button
-                type="button"
-                onClick={() => setConflictOnly((value) => !value)}
-                className={cx(
-                  "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
-                  conflictOnly
-                    ? "bg-[hsl(var(--destructive))] text-white"
-                    : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
-                )}
-                data-testid="button-filter-conflicts"
-              >
-                Conflitos
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setConflictOnly((value) => !value)}
+                  className={cx(
+                    "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold",
+                    conflictOnly
+                      ? "bg-[hsl(var(--destructive))] text-white"
+                      : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
+                  )}
+                  data-testid="button-filter-conflicts"
+                >
+                  Conflitos
+                </button>
+              </div>
+            )}
           </div>
           {conflictDetails.length > 0 && (
             <div className="m-4 rounded-xl border border-[hsl(var(--destructive)/.45)] bg-[hsl(var(--destructive)/.07)] p-4 text-xs">
@@ -1705,6 +1648,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
     deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
+    toggleCartUnitReserved,
     reservations,
     reserveAvailable,
     campusSettings,
@@ -1716,6 +1660,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [reserveCategoryOpen, setReserveCategoryOpen] = useState(false);
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
+  const [unitSelectionMode, setUnitSelectionMode] = useState<
+    "unavailable" | "reserved"
+  >("unavailable");
   const isSuperAdmin =
     typeof window !== "undefined" &&
     window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
@@ -1736,7 +1683,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
       <PageHeader
         eyebrow="Ativos e disponibilidade"
         title="Carrinhos"
-        description="Clique no código de cada Chromebook para marcar apenas a unidade quebrada ou indisponível. A categoria Reservas fica separada para solicitações de professores."
+        description="Clique em cada Chromebook para marcar apenas a unidade quebrada ou indisponível. A categoria Reservas fica separada para solicitações de professores."
         action={
           !readOnly && (
           <Button
@@ -1759,7 +1706,11 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
           label="Disponíveis agora"
           value={String(
             carts.reduce(
-              (total, cart) => total + (cart.unavailable ? 0 : cart.available),
+              (total, cart) =>
+                total +
+                (cart.unavailable
+                  ? 0
+                  : Math.max(0, cart.available - cart.reservedUnits.length)),
               0,
             ),
           )}
@@ -1777,7 +1728,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
       </div>
       <SectionCard
         title="Inventário operacional"
-        eyebrow="Cada Chromebook tem um código próprio: A1, A2, B1..."
+        eyebrow="Cada Chromebook é identificado individualmente: A1, A2, B1..."
         action={
           <div className="flex items-center gap-2">
             <select
@@ -1822,7 +1773,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         {filtered.length === 0 ? (
           <EmptyState
             title="Nenhum carrinho encontrado"
-            message="Tente outra letra, código ou localização."
+            message="Tente outra letra, Chromebook ou localização."
           />
         ) : (
           <div className="grid gap-px bg-[hsl(var(--border))] sm:grid-cols-2">
@@ -1872,7 +1823,10 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           Chromebooks disponíveis
                         </span>
                         <span className="font-data font-semibold">
-                          {cart.unavailable ? 0 : cart.available}/{cart.total}
+                          {cart.unavailable
+                            ? 0
+                            : Math.max(0, cart.available - cart.reservedUnits.length)}
+                          /{cart.total}
                         </span>
                       </div>
                       <ProgressBar
@@ -1900,11 +1854,39 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                     className="mt-5 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3"
                     data-testid={`list-chromebooks-${cart.id}`}
                   >
-                    <div className="mb-2 flex items-center justify-between">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <span className="text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">
                         Identificação dos Chromebooks
                       </span>
-                      <span className="font-data text-[11px] font-semibold">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => setUnitSelectionMode("unavailable")}
+                          className={cx(
+                            "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
+                            unitSelectionMode === "unavailable"
+                              ? "bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))]"
+                              : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
+                          )}
+                        >
+                          <ShieldCheck size={12} /> Indisponível
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => setUnitSelectionMode("reserved")}
+                          className={cx(
+                            "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
+                            unitSelectionMode === "reserved"
+                              ? "bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"
+                              : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
+                          )}
+                        >
+                          Reserva
+                        </button>
+                      </div>
+                      <span className="shrink-0 font-data text-[11px] font-semibold">
                         {cart.prefix}1–{cart.prefix}
                         {cart.total}
                       </span>
@@ -1914,21 +1896,30 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         const unavailable =
                           cart.unavailable ||
                           cart.unavailableUnits.includes(unit);
+                        const reserved = cart.reservedUnits.includes(unit);
                         return (
                           <button
                             type="button"
                             key={unit}
                             disabled={readOnly}
-                            onClick={() =>
-                              toggleCartUnitUnavailable(cart.id, unit)
-                            }
+                            onClick={() => {
+                              if (unitSelectionMode === "reserved") {
+                                if (!unavailable) {
+                                  toggleCartUnitReserved(cart.id, unit);
+                                }
+                              } else {
+                                toggleCartUnitUnavailable(cart.id, unit);
+                              }
+                            }}
                             className={cx(
                               "rounded-md border px-2 py-1 font-data text-[11px] transition-colors",
                               unavailable
                                 ? "border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))] line-through"
+                                : reserved
+                                  ? "border-[hsl(var(--primary)/.55)] bg-[hsl(var(--primary)/.08)] text-[hsl(var(--primary))] line-through"
                                 : "border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/.6)]",
                             )}
-                            aria-label={`${unit}: ${unavailable ? "marcar disponível" : "marcar indisponível"}`}
+                            aria-label={`${unit}: ${unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "marcar disponível" : "marcar indisponível"}`}
                             data-testid={`button-unit-${unit}`}
                           >
                             {unit}
@@ -1950,7 +1941,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                       >
                         {expanded
                           ? "Mostrar menos"
-                          : `Ver todos os ${cart.total} códigos`}
+                          : `Ver todos os ${cart.total} Chromebooks`}
                       </button>
                     )}
                   </div>
@@ -2026,7 +2017,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         >
           <span>
             <span className="block text-sm font-semibold">Disponibilizar reservas</span>
-            <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">A reserva usa os carrinhos B e C. Sem códigos escolhidos, os últimos disponíveis serão separados.</span>
+            <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">A reserva usa os carrinhos B e C. Sem Chromebooks escolhidos, os últimos disponíveis serão separados.</span>
           </span>
           <button
             type="button"
@@ -2041,8 +2032,8 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
           </button>
         </div>
         {reserveCategoryOpen && (
-          <div className="grid gap-3 border-t border-[hsl(var(--border))] p-5 sm:grid-cols-[1fr_180px_auto] sm:items-end">
-            <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">Os códigos podem ser escolhidos na reserva. Quando não forem informados, o sistema adiciona automaticamente os últimos disponíveis.</p>
+          <div className="grid gap-3 border-t border-[hsl(var(--border))] p-5 sm:grid-cols-[1fr_180px] sm:items-end">
+            <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">Os Chromebooks podem ser escolhidos na reserva; quando não forem informados, o sistema adiciona automaticamente os últimos disponíveis.</p>
             <Field label="Limite por professor">
               <input type="number" min="1" value={campusSettings.reservationLimit} onChange={(event) => updateCampusSettings({ ...campusSettings, reservationLimit: Math.max(1, Number(event.target.value) || 1) })} className={`${inputClass} h-9`} />
             </Field>
@@ -2069,6 +2060,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 accent: "bg-[hsl(var(--primary))]",
                 unavailable: false,
                 unavailableUnits: [],
+                reservedUnits: [],
                 reserveCapacity: 0,
               });
               setNewCart({ letter: "", location: "" });
@@ -2161,7 +2153,7 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
-        eyebrow="Conectividade do campus"
+        eyebrow="Conectividade do colégio"
         title="Pontos Wi‑Fi"
         description="Cadastre os pontos físicos e identifique as salas sem cobertura fixa. Quando uma sala sem Wi‑Fi receber um agendamento, a reserva avisará que será preciso levar uma antena volante."
         action={
@@ -2771,7 +2763,7 @@ export function HistoryPage() {
       <PageHeader
         eyebrow="Rastro da operação"
         title="Histórico"
-        description="Tudo que aconteceu com as reservas, equipamentos e conectividade do campus."
+        description="Tudo que aconteceu com as reservas, equipamentos e conectividade do colégio."
         action={
           <Button
             variant="secondary"

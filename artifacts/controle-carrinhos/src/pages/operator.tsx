@@ -134,7 +134,9 @@ export function OperatorPage() {
   const liveAvailability = useMemo(() => {
     const time = new Date(now).toTimeString().slice(0, 5);
     return carts.reduce((summary, cart) => {
-      const unavailable = cart.unavailable ? cart.total : cart.unavailableUnits.length;
+      const unavailable = cart.unavailable
+        ? cart.total
+        : cart.unavailableUnits.length + cart.reservedUnits.length;
       const inUse = reservations.filter((item) => item.date === todayISO() && item.cart === cart.name && item.status !== "Concluída" && item.start <= time && time < item.end).reduce((total, item) => total + item.quantity, 0);
       summary.available += Math.max(0, cart.total - unavailable - inUse);
       summary.total += cart.total;

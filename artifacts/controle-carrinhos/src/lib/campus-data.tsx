@@ -122,7 +122,134 @@ export type Cart = {
   accent: string;
   unavailable: boolean;
   unavailableUnits: string[];
+  reservedUnits: string[];
   reserveCapacity: number;
+};
+
+export type CartSchedulePeriod = "Manhã" | "Tarde";
+export type LegacyCartSchedulePeriod = "Manha" | "Tarde";
+export type CartScheduleSlot = {
+  id: string;
+  start: string;
+  end: string;
+  label?: string;
+};
+export type CartScheduleTemplate = Record<CartSchedulePeriod, CartScheduleSlot[]>;
+
+const normalizeSchedulePeriod = (period: unknown): CartSchedulePeriod => {
+  if (period === "Manhã" || period === "Tarde") return period;
+  if (period === "Manha") return "Manhã";
+  return "Manhã";
+};
+
+export const defaultCartSchedules: Record<string, CartScheduleTemplate> = {
+  "Carrinho A": {
+    "Manhã": [
+      { id: "a-manha-1", start: "07:00", end: "07:45" },
+      { id: "a-manha-2", start: "07:45", end: "08:30" },
+      { id: "a-manha-3", start: "08:30", end: "09:35" },
+      { id: "a-manha-4", start: "09:35", end: "10:20" },
+      { id: "a-manha-5", start: "10:20", end: "11:05" },
+      { id: "a-manha-6", start: "11:05", end: "11:50" },
+      { id: "a-manha-7", start: "11:50", end: "12:45", label: "Faixa protegida para conflito entre turnos" },
+    ],
+    "Tarde": [
+      { id: "a-tarde-1", start: "12:45", end: "13:30" },
+      { id: "a-tarde-2", start: "13:30", end: "14:15" },
+      { id: "a-tarde-3", start: "14:15", end: "15:00" },
+      { id: "a-tarde-4", start: "15:00", end: "16:05" },
+      { id: "a-tarde-5", start: "16:05", end: "16:50" },
+      { id: "a-tarde-6", start: "16:50", end: "17:35" },
+    ],
+  },
+  "Carrinho B": {
+    "Manhã": [
+      { id: "b-manha-1", start: "07:00", end: "07:45" },
+      { id: "b-manha-2", start: "07:45", end: "08:30" },
+      { id: "b-manha-3", start: "08:30", end: "09:15" },
+      { id: "b-manha-4", start: "09:15", end: "10:20" },
+      { id: "b-manha-5", start: "10:20", end: "11:05" },
+      { id: "b-manha-6", start: "11:05", end: "11:50" },
+      { id: "b-manha-7", start: "11:50", end: "12:35" },
+    ],
+    "Tarde": [
+      { id: "b-tarde-1", start: "12:00", end: "12:45" },
+      { id: "b-tarde-2", start: "12:45", end: "13:30" },
+      { id: "b-tarde-3", start: "13:30", end: "14:15" },
+      { id: "b-tarde-4", start: "14:15", end: "15:20" },
+      { id: "b-tarde-5", start: "15:20", end: "16:05" },
+      { id: "b-tarde-6", start: "16:05", end: "16:50" },
+      { id: "b-tarde-7", start: "16:50", end: "17:35" },
+    ],
+  },
+  "Carrinho C": {
+    "Manhã": [
+      { id: "c-manha-1", start: "07:00", end: "07:45" },
+      { id: "c-manha-2", start: "07:45", end: "08:30" },
+      { id: "c-manha-3", start: "08:30", end: "09:15" },
+      { id: "c-manha-4", start: "09:15", end: "10:20" },
+      { id: "c-manha-5", start: "10:20", end: "11:05" },
+      { id: "c-manha-6", start: "11:05", end: "11:50" },
+      { id: "c-manha-7", start: "11:50", end: "12:35" },
+    ],
+    "Tarde": [
+      { id: "c-tarde-1", start: "12:00", end: "12:45" },
+      { id: "c-tarde-2", start: "12:45", end: "13:30" },
+      { id: "c-tarde-3", start: "13:30", end: "14:15" },
+      { id: "c-tarde-4", start: "14:15", end: "15:20" },
+      { id: "c-tarde-5", start: "15:20", end: "16:05" },
+      { id: "c-tarde-6", start: "16:05", end: "16:50" },
+      { id: "c-tarde-7", start: "16:50", end: "17:35" },
+    ],
+  },
+};
+
+const normalizeScheduleSlot = (slot: Partial<CartScheduleSlot> | undefined): CartScheduleSlot | null => {
+  if (!slot || typeof slot !== "object") return null;
+  const start = typeof slot.start === "string" ? slot.start : "";
+  const end = typeof slot.end === "string" ? slot.end : "";
+  if (!start || !end || start >= end) return null;
+  return {
+    id: typeof slot.id === "string" && slot.id ? slot.id : `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    start,
+    end,
+    label: typeof slot.label === "string" ? slot.label : undefined,
+  };
+};
+
+export const buildCartSchedule = (cartName: string): CartScheduleTemplate => {
+  const source = defaultCartSchedules[cartName] ?? defaultCartSchedules["Carrinho A"];
+  return {
+    "Manhã": source["Manhã"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+    "Tarde": source["Tarde"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+  };
+};
+
+export const normalizeCartSchedules = (value: unknown): Record<string, CartScheduleTemplate> => {
+  const fallback = { ...defaultCartSchedules };
+  if (!value || typeof value !== "object") return fallback;
+  const entries = value as Record<string, unknown>;
+  Object.entries(entries).forEach(([cartName, scheduleValue]) => {
+    if (!scheduleValue || typeof scheduleValue !== "object") return;
+    const schedule = scheduleValue as Record<string, unknown>;
+    const morning = Array.isArray(schedule["Manhã"] ?? schedule.Manha)
+      ? ((schedule["Manhã"] ?? schedule.Manha) as Array<Partial<CartScheduleSlot>>) 
+          .map((slot) => normalizeScheduleSlot(slot))
+          .filter((slot): slot is CartScheduleSlot => slot !== null)
+      : [];
+    const afternoon = Array.isArray(schedule["Tarde"] ?? schedule.Tarde)
+      ? ((schedule["Tarde"] ?? schedule.Tarde) as Array<Partial<CartScheduleSlot>>) 
+          .map((slot) => normalizeScheduleSlot(slot))
+          .filter((slot): slot is CartScheduleSlot => slot !== null)
+      : [];
+    if (morning.length || afternoon.length) {
+      fallback[cartName] = {
+        "Manhã": morning,
+        "Tarde": afternoon,
+      };
+    }
+  });
+  return fallback;
 };
 
 export const reservationsOverlap = (
@@ -156,6 +283,7 @@ const operatorAccountsStorageKey = "controle-carrinhos-operator-accounts";
 const movementsStorageKey = "controle-carrinhos-movements";
 const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
 const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
+const cartSchedulesStorageKey = "controle-carrinhos-cart-schedules";
 
 export const addDaysISO = (days: number) => {
   const date = new Date();
@@ -267,6 +395,7 @@ export const initialCarts: Cart[] = [
     accent: "bg-[hsl(var(--primary))]",
     unavailable: false,
     unavailableUnits: ["A3", "A12", "A27", "A44", "A58"],
+    reservedUnits: [],
     reserveCapacity: 0,
   },
   {
@@ -282,6 +411,7 @@ export const initialCarts: Cart[] = [
     accent: "bg-[hsl(var(--accent))]",
     unavailable: false,
     unavailableUnits: ["B8", "B19", "B37", "B51"],
+    reservedUnits: [],
     reserveCapacity: 10,
   },
   {
@@ -297,6 +427,7 @@ export const initialCarts: Cart[] = [
     accent: "bg-[hsl(var(--primary))]",
     unavailable: false,
     unavailableUnits: ["C4", "C16", "C33", "C48"],
+    reservedUnits: [],
     reserveCapacity: 10,
   },
 ];
@@ -406,7 +537,7 @@ export type CampusSettings = {
   reserveUnits: string[];
 };
 export const defaultCampusSettings: CampusSettings = {
-  campusName: "Campus Vila Nova",
+  campusName: "Colégio Vila Nova",
   coordinatorName: "",
   agendaLabel: "Agenda",
   reservationsEnabled: true,
@@ -435,6 +566,7 @@ function readStorage<T>(key: string, fallback: T): T {
 type CampusDataValue = {
   teacher: TeacherProfile;
   updateTeacher: (profile: TeacherProfile) => void;
+  updateTeacherPassword: (currentPassword: string, nextPassword: string) => boolean;
   teacherAccounts: TeacherAccount[];
   addTeacherAccounts: (
     entries: Array<Omit<TeacherAccount, "id" | "password" | "mustSetPassword">>,
@@ -485,10 +617,14 @@ type CampusDataValue = {
   ) => boolean;
   deleteReservation: (id: number) => void;
   carts: Cart[];
+  cartSchedules: Record<string, CartScheduleTemplate>;
+  updateCartSchedules: (cartName: string, next: CartScheduleTemplate) => void;
+  syncCartSchedules: (sourceCartNames: string[], targetCartNames: string[]) => void;
   addCart: (cart: Omit<Cart, "id">) => void;
   deleteCart: (id: string) => boolean;
   toggleCartUnavailable: (id: string) => void;
   toggleCartUnitUnavailable: (cartId: string, unit: string) => void;
+  toggleCartUnitReserved: (cartId: string, unit: string) => void;
   toggleCartMaintenance: (id: string) => void;
   wifiPoints: WifiPoint[];
   wifiRooms: typeof initialWifiRooms;
@@ -538,12 +674,42 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           ...cart,
           unavailable: cart.unavailable ?? false,
           unavailableUnits: cart.unavailableUnits ?? [],
+          reservedUnits: cart.reservedUnits ?? [],
           reserveCapacity:
             cart.reserveCapacity ??
             (cart.code === "B" || cart.code === "C" ? 10 : 0),
         }) as Cart,
     ),
   );
+  const [cartSchedules, setCartSchedules] = useState<Record<string, CartScheduleTemplate>>(() =>
+    normalizeCartSchedules(readStorage(cartSchedulesStorageKey, defaultCartSchedules)),
+  );
+  const updateCartSchedules = (cartName: string, next: CartScheduleTemplate) => {
+    const normalized = {
+      "Manhã": (next["Manhã"] ?? []).map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
+      "Tarde": (next["Tarde"] ?? []).map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
+    };
+    persistCartSchedules({ ...cartSchedules, [cartName]: normalized });
+  };
+  const syncCartSchedules = (sourceCartNames: string[], targetCartNames: string[]) => {
+    const cartNames = Object.keys(cartSchedules).length > 0 ? Object.keys(cartSchedules) : carts.map((cart) => cart.name);
+    const sources = sourceCartNames.length ? sourceCartNames : cartNames;
+    const targets = targetCartNames.length ? targetCartNames : cartNames;
+    const nextSchedules = { ...cartSchedules };
+    const sourceTemplates = sources
+      .map((name) => [name, nextSchedules[name] ?? defaultCartSchedules[name] ?? buildCartSchedule(name)] as const)
+      .filter((entry): entry is readonly [string, CartScheduleTemplate] => Boolean(entry[1]));
+    if (!sourceTemplates.length) return;
+    const baseTemplate = sourceTemplates[0][1];
+    targets.forEach((cartName) => {
+      const source = sourceTemplates.find(([name]) => name === cartName)?.[1] ?? baseTemplate;
+      nextSchedules[cartName] = {
+        "Manhã": source["Manhã"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+        "Tarde": source["Tarde"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+      };
+    });
+    persistCartSchedules(nextSchedules);
+  };
   const [teacherAccounts, setTeacherAccounts] = useState<TeacherAccount[]>(() =>
     readStorage(teacherAccountsStorageKey, initialTeacherAccounts),
   );
@@ -626,6 +792,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const persistCarts = (next: Cart[]) => {
     setCarts(next);
     window.localStorage.setItem(cartStorageKey, JSON.stringify(next));
+  };
+  const persistCartSchedules = (next: Record<string, CartScheduleTemplate>) => {
+    const normalized = normalizeCartSchedules(next);
+    setCartSchedules(normalized);
+    window.localStorage.setItem(cartSchedulesStorageKey, JSON.stringify(normalized));
   };
   const persistTeacherAccounts = (next: TeacherAccount[]) => {
     setTeacherAccounts(next);
@@ -728,6 +899,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     }
     if (kind === "factory") {
       persistCarts([]);
+      persistCartSchedules(defaultCartSchedules);
       persistWifiPoints([]);
       persistWifiRooms([]);
       window.localStorage.removeItem(movementSettingsStorageKey);
@@ -825,14 +997,21 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     if (data.kind === "Reserva" && data.quantity > campusSettings.reservationLimit) return false;
     const assignedReserveUnits =
       data.kind === "Reserva" && (!data.reservedChromebooks || data.reservedChromebooks.length === 0)
-        ? carts
+        ? (() => {
+            const candidates = carts
             .filter((cart) => cart.reserveCapacity > 0)
             .flatMap((cart) =>
               Array.from({ length: cart.total }, (_, index) => `${cart.prefix}${index + 1}`)
                 .filter((unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit)),
             )
             .filter((unit) => !reservations.some((item) => item.kind === "Reserva" && item.id !== id && item.reservedChromebooks?.includes(unit)))
-            .slice(-data.quantity)
+            .reverse();
+            const reserved = candidates.filter((unit) =>
+              carts.some((cart) => cart.reservedUnits.includes(unit)),
+            );
+            const fallback = candidates.filter((unit) => !reserved.includes(unit));
+            return [...reserved, ...fallback].slice(0, data.quantity);
+          })()
         : data.reservedChromebooks;
     if (data.kind === "Reserva" && (!assignedReserveUnits || assignedReserveUnits.length < data.quantity)) return false;
     if (isCartTransitionConflict(data, movementSettings.allowCartATransitionScheduling)) return false;
@@ -886,7 +1065,15 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         return {
           ...cart,
           unavailableUnits,
-          available: Math.max(0, cart.total - unavailableUnits.length),
+          reservedUnits: unavailableUnits.includes(unit)
+            ? cart.reservedUnits.filter((item) => item !== unit)
+            : cart.reservedUnits,
+          available: Math.max(
+            0,
+            cart.total -
+              unavailableUnits.length -
+              cart.reservedUnits.filter((item) => !unavailableUnits.includes(item)).length,
+          ),
           status:
             unavailableUnits.length >= cart.total
               ? "Indisponível"
@@ -897,16 +1084,42 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       }),
     );
   };
+  const toggleCartUnitReserved = (cartId: string, unit: string) => {
+    persistCarts(
+      carts.map((cart) => {
+        if (cart.id !== cartId) return cart;
+        const reservedUnits = cart.reservedUnits.includes(unit)
+          ? cart.reservedUnits.filter((item) => item !== unit)
+          : [...cart.reservedUnits, unit];
+        return {
+          ...cart,
+          reservedUnits,
+          unavailableUnits: cart.unavailableUnits.filter((item) => item !== unit),
+          available: Math.max(
+            0,
+            cart.total -
+              cart.unavailableUnits.length -
+              reservedUnits.filter((item) => !cart.unavailableUnits.includes(item)).length,
+          ),
+        };
+      }),
+    );
+  };
   const addCart = (cart: Omit<Cart, "id">) => {
-    persistCarts([
-      ...carts,
-      { ...cart, id: `cart-${cart.code.toLowerCase()}-${carts.length + 1}` },
-    ]);
+    const nextCart = { ...cart, id: `cart-${cart.code.toLowerCase()}-${carts.length + 1}` };
+    persistCarts([...carts, nextCart]);
+    persistCartSchedules({
+      ...cartSchedules,
+      [nextCart.name]: buildCartSchedule(nextCart.name),
+    });
   };
   const deleteCart = (id: string) => {
     if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return false;
     const cart = carts.find((item) => item.id === id);
     if (!cart) return false;
+    const nextSchedules = { ...cartSchedules };
+    delete nextSchedules[cart.name];
+    persistCartSchedules(nextSchedules);
     persistCarts(carts.filter((item) => item.id !== id));
     return true;
   };
@@ -992,6 +1205,26 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       teacherAccounts.map((account) => (account.id === id ? updated : account)),
     );
     return updated;
+  };
+  const updateTeacherPassword = (currentPassword: string, nextPassword: string) => {
+    const trimmedPassword = nextPassword.trim();
+    if (trimmedPassword.length < 6) return false;
+    const currentAccount = teacherAccounts.find(
+      (account) => account.name === teacher.name && account.email === teacher.email,
+    ) ?? teacherAccounts.find((account) => account.name === teacher.name)
+      ?? teacherAccounts.find((account) => account.email === teacher.email);
+    if (!currentAccount) return false;
+    if (currentAccount.password !== undefined && currentAccount.password !== currentPassword) {
+      return false;
+    }
+    persistTeacherAccounts(
+      teacherAccounts.map((account) =>
+        account.id === currentAccount.id
+          ? { ...account, password: trimmedPassword, mustSetPassword: false }
+          : account,
+      ),
+    );
+    return true;
   };
   const authenticateTeacher = (
     name: string,
@@ -1160,6 +1393,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       value={{
         teacher,
         updateTeacher: persistTeacher,
+        updateTeacherPassword,
         teacherAccounts,
         addTeacherAccounts,
         deleteTeacherAccount,
@@ -1191,10 +1425,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         saveReservation,
         deleteReservation,
         carts,
+        cartSchedules,
+        updateCartSchedules,
+        syncCartSchedules,
         addCart,
         deleteCart,
         toggleCartUnavailable,
         toggleCartUnitUnavailable,
+        toggleCartUnitReserved,
         toggleCartMaintenance,
         wifiPoints,
         wifiRooms,
