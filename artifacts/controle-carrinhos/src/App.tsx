@@ -16,6 +16,7 @@ import { OperatorSettingsPage } from '@/pages/operator-settings';
 import { AccessPage, AdminLoginPage } from '@/pages/access';
 import { ConfigurationPage, ScheduleManagementPage } from '@/pages/configuration';
 import TestViewPage from '@/pages/test-view';
+import { ReservationNotifications } from '@/components/reservation-notifications';
 import {
   Route,
   Switch,
@@ -111,6 +112,7 @@ function App() {
               <Router />
             </WouterRouter>
           </RoomDirectoryProvider>
+          <ReservationNotifications />
         </CampusDataProvider>
         <Toaster />
       </TooltipProvider>

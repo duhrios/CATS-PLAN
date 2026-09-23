@@ -1,8 +1,44 @@
-import { AlertTriangle, CalendarX, Clock3, Database, Factory, History, Plus, Trash2, Users, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarX, Clock3, Database, Download, Factory, History, Plus, Trash2, Upload, Users, UserRound } from "lucide-react";
 import { PageHeader, SectionCard, Button, Field, Modal, inputClass } from "@/components/app-ui";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { buildCartSchedule, useCampusData, type CartScheduleTemplate } from "@/lib/campus-data";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { buildCartSchedule, segments, useCampusData, type CartScheduleTemplate, type Reservation } from "@/lib/campus-data";
 import TestViewPage from "@/pages/test-view";
+import * as XLSX from "xlsx";
+
+const normalizeSpreadsheetHeader = (value: unknown) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const spreadsheetTime = (value: unknown) => {
+  if (typeof value === "number" && value >= 0 && value < 1) {
+    const totalMinutes = Math.round(value * 24 * 60);
+    return `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+  }
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{1,2})[:h](\d{2})/i);
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours <= 23 && minutes <= 59 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}` : "";
+};
+
+const spreadsheetDate = (value: unknown) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const text = String(value ?? "").trim();
+  const brDate = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (brDate) return `${brDate[3]}-${brDate[2].padStart(2, "0")}-${brDate[1].padStart(2, "0")}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+};
+
+const spreadsheetSegment = (value: unknown) => {
+  const normalized = normalizeSpreadsheetHeader(value);
+  return segments.find((segment) => normalizeSpreadsheetHeader(segment) === normalized) ?? "Fundamental 2";
+};
 
 export function ScheduleManagementPage() {
   const { carts, cartSchedules, updateCartSchedules, syncCartSchedules } = useCampusData();
@@ -63,6 +99,7 @@ export function ScheduleManagementPage() {
     const nextValues = Object.fromEntries(cartNames.map((name) => [name, checked]));
     if (kind === "source") setSyncSource(nextValues); else setSyncTarget(nextValues);
   };
+
 
   return (
     <div className="animate-rise space-y-7">
@@ -181,6 +218,7 @@ export function ScheduleManagementPage() {
           </div>
         </div>
       </SectionCard>
+
     </div>
   );
 }
@@ -193,7 +231,8 @@ export function ConfigurationPage() {
     ["teachers", "Apagar professores", "Remover apenas os perfis de professores.", UserRound],
     ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando este Super administrador.", Factory],
   ] as const;
-  const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, authenticateAdmin } = useCampusData();
+  const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, authenticateAdmin, reservations, replaceReservations, carts } = useCampusData();
+  const scheduleFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingAction, setPendingAction] = useState<typeof actions[number] | null>(null);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -218,8 +257,112 @@ export function ConfigurationPage() {
       setPassword("");
     }
   };
+  const exportAppointments = () => {
+    const rows = reservations
+      .filter((reservation) => reservation.kind === "Aula")
+      .map((reservation) => ({
+        Data: reservation.date,
+        Professor: reservation.teacher,
+        Segmento: reservation.segment,
+        Disciplina: reservation.subject,
+        Turma: reservation.className,
+        Sala: reservation.room,
+        Período: reservation.period,
+        Início: reservation.start,
+        Fim: reservation.end,
+        Carrinho: reservation.cart,
+        Quantidade: reservation.quantity,
+      }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet["!cols"] = [
+      { wch: 13 }, { wch: 24 }, { wch: 18 }, { wch: 22 }, { wch: 24 },
+      { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 12 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Agendamentos");
+    XLSX.writeFile(workbook, `agendamentos-carrinhos-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+  const importAppointments = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!sheet) throw new Error("A planilha não possui uma aba válida.");
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as unknown[][];
+      const headers = (rows.shift() ?? []).map(normalizeSpreadsheetHeader);
+      const column = (names: string[]) => headers.findIndex((header) => names.includes(header));
+      const dateColumn = column(["data", "date"]);
+      const teacherColumn = column(["professor", "docente", "teacher"]);
+      const subjectColumn = column(["disciplina", "materia", "subject"]);
+      const classColumn = column(["turma", "classe", "class", "classname"]);
+      const roomColumn = column(["sala", "ambiente", "room"]);
+      const periodColumn = column(["periodo", "turno", "period"]);
+      const startColumn = column(["inicio", "horainicio", "start", "horario"]);
+      const endColumn = column(["fim", "horafim", "end"]);
+      const cartColumn = column(["carrinho", "cart", "veiculo"]);
+      const segmentColumn = column(["segmento", "etapa", "segment"]);
+      const quantityColumn = column(["quantidade", "qtd", "alunos", "quantity"]);
+      if ([dateColumn, teacherColumn, subjectColumn, classColumn, roomColumn, startColumn, endColumn, cartColumn].some((item) => item < 0)) {
+        throw new Error("Use as colunas Data, Professor, Disciplina, Turma, Sala, Início, Fim e Carrinho.");
+      }
+      const validCarts = carts.map((cart) => cart.name);
+      const imported: Reservation[] = [];
+      const errors: string[] = [];
+      rows.forEach((row, index) => {
+        if (row.every((cell) => String(cell ?? "").trim() === "")) return;
+        const date = spreadsheetDate(row[dateColumn]);
+        const start = spreadsheetTime(row[startColumn]);
+        const end = spreadsheetTime(row[endColumn]);
+        const cartValue = String(row[cartColumn] ?? "").trim();
+        const cart = validCarts.find((name) => normalizeSpreadsheetHeader(name) === normalizeSpreadsheetHeader(cartValue))
+          ?? validCarts.find((name) => normalizeSpreadsheetHeader(name).endsWith(normalizeSpreadsheetHeader(cartValue)));
+        const periodValue = periodColumn >= 0 ? normalizeSpreadsheetHeader(row[periodColumn]) : "";
+        const period = periodValue.includes("tarde") ? "Tarde" : "Manhã";
+        if (!date || !start || !end || start >= end || !cart) {
+          errors.push(`linha ${index + 2}`);
+          return;
+        }
+        imported.push({
+          id: 0,
+          teacher: String(row[teacherColumn] ?? "").trim(),
+          segment: segmentColumn >= 0 ? spreadsheetSegment(row[segmentColumn]) : "Fundamental 2",
+          subject: String(row[subjectColumn] ?? "").trim(),
+          className: String(row[classColumn] ?? "").trim(),
+          room: String(row[roomColumn] ?? "").trim(),
+          period,
+          date,
+          start,
+          end,
+          cart,
+          status: "Aguardando",
+          kind: "Aula",
+          quantity: Math.max(1, Number(row[quantityColumn] ?? 30) || 30),
+        });
+      });
+      if (!imported.length) throw new Error("Nenhum agendamento válido foi encontrado.");
+      const nextId = Math.max(...reservations.map((reservation) => reservation.id), 0);
+      const withIds = imported.map((reservation, index) => ({ ...reservation, id: nextId + index + 1 }));
+      replaceReservations([...reservations.filter((reservation) => reservation.kind !== "Aula"), ...withIds]);
+      const suffix = errors.length ? ` Linhas ignoradas: ${errors.join(", ")}.` : "";
+      window.alert(`${withIds.length} agendamento(s) importado(s).${suffix}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Não foi possível importar a planilha.");
+    }
+  };
   return <div className="animate-rise space-y-7">
     <PageHeader eyebrow="Acesso exclusivo · Super administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <SectionCard title="Agendamentos dos carrinhos" eyebrow="Planilha de professores">
+      <div className="flex flex-col gap-3 p-4 text-sm text-[hsl(var(--muted-foreground))] sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <p>Use o modelo com Data, Professor, Disciplina, Turma, Sala, Período, Início, Fim, Carrinho e Quantidade.</p>
+        <div className="flex shrink-0 gap-2">
+          <Button type="button" variant="secondary" onClick={exportAppointments}><span className="inline-flex items-center gap-2"><Download size={14} /> Exportar agendamentos</span></Button>
+          <Button type="button" onClick={() => scheduleFileInputRef.current?.click()}><span className="inline-flex items-center gap-2"><Upload size={14} /> Importar planilha</span></Button>
+          <input ref={scheduleFileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={importAppointments} className="hidden" />
+        </div>
+      </div>
+    </SectionCard>
     <SectionCard title="Movimentação dos carrinhos" eyebrow="Configurações operacionais">
       <div className="grid max-w-2xl gap-3 p-4 sm:grid-cols-2 sm:p-5">
         <Field label="Intervalo do alerta (minutos)">

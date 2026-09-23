@@ -297,10 +297,27 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
         </div>
       </SectionCard>
       {editingOperatorId && <Modal title="Editar usuário TI" onClose={() => setEditingOperatorId(null)}><form className="space-y-4 p-5 sm:p-6" onSubmit={saveOperatorEdit}><Field label="Nome do usuário TI"><input required minLength={3} value={editingOperatorForm.name} onChange={(event) => setEditingOperatorForm({ ...editingOperatorForm, name: event.target.value })} className={inputClass} /></Field><Field label="Nova senha" hint="Use pelo menos 6 caracteres."><input required minLength={6} type="password" value={editingOperatorForm.password} onChange={(event) => setEditingOperatorForm({ ...editingOperatorForm, password: event.target.value })} className={inputClass} placeholder="Nova senha" /></Field><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditingOperatorId(null)}>Cancelar</Button><Button type="submit"><Check size={15} /> Salvar alterações</Button></div></form></Modal>}
-      <SectionCard title="Administradores" eyebrow="Perfil administrador e super administrador">
+      <SectionCard eyebrow="Perfil administrador">
         <div className="space-y-4 p-5 sm:p-6">
-          {adminAccounts.map((account) => <div key={account.id} className="flex items-center justify-between rounded-xl border border-[hsl(var(--border))] p-4"><div><p className="font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{account.isSuperAdmin ? "Super administrador (não pode ser removido)" : "Administrador"}</p></div><div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => openAdminEditor(account)}><Pencil size={14} /> Editar</Button><Button size="sm" variant="ghost" disabled={adminAccounts.length <= 1} onClick={() => deleteAdminAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
-          <Button size="sm" variant="secondary" onClick={() => setAdminModalOpen(true)}><Pencil size={14} /> Atualizar acesso</Button>
+          {adminAccounts.map((account) => (
+            <div key={account.id} className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.18)] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-lg font-semibold">{account.name}</p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {account.isSuperAdmin ? "Acesso total · não pode ser removido" : "Administrador"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => openAdminEditor(account)}><Pencil size={14} /> Editar</Button>
+                  <Button size="sm" variant="ghost" disabled={adminAccounts.length <= 1} onClick={() => deleteAdminAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button>
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="flex justify-end">
+            <Button size="sm" variant="secondary" onClick={() => setAdminModalOpen(true)}><Pencil size={14} /> Atualizar acesso</Button>
+          </div>
         </div>
       </SectionCard>
       {operatorModalOpen && <Modal title="Criar usuário TI" onClose={() => setOperatorModalOpen(false)}><form className="space-y-4 p-5 sm:p-6" onSubmit={saveOperator} data-testid="form-operator-account"><Field label="Nome do usuário TI"><input required minLength={3} value={operatorForm.name} onChange={(event) => setOperatorForm({ ...operatorForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Carlos Souza" data-testid="input-new-operator-name" /></Field><Field label="Senha" hint="Use pelo menos 6 caracteres."><input required minLength={6} type="password" value={operatorForm.password} onChange={(event) => setOperatorForm({ ...operatorForm, password: event.target.value })} className={inputClass} placeholder="Senha de acesso" data-testid="input-new-operator-password" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={operatorForm.isAdmin} onChange={(event) => setOperatorForm({ ...operatorForm, isAdmin: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Associar como administrador</label>{operatorError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]">{operatorError}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOperatorModalOpen(false)}>Cancelar</Button><Button type="submit"><Plus size={15} /> Criar usuário TI</Button></div></form></Modal>}

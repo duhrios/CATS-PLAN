@@ -274,6 +274,8 @@ export const isCartTransitionConflict = (
 
 const teacherStorageKey = "controle-carrinhos-teacher";
 const reservationStorageKey = "controle-carrinhos-reservations";
+export const reservationChangeStorageKey = "controle-carrinhos-reservation-change";
+export const reservationChangeEventName = "controle-carrinhos-reservation-change";
 const cartStorageKey = "controle-carrinhos-carts";
 const teacherAccountsStorageKey = "controle-carrinhos-teacher-accounts";
 const rememberedTeacherStorageKey = "controle-carrinhos-remembered-teacher";
@@ -281,6 +283,7 @@ const wifiPointsStorageKey = "controle-carrinhos-wifi-points";
 const wifiRoomsStorageKey = "controle-carrinhos-wifi-rooms";
 const operatorAccountsStorageKey = "controle-carrinhos-operator-accounts";
 const movementsStorageKey = "controle-carrinhos-movements";
+export const movementChangeEventName = "controle-carrinhos-movement-change";
 const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
 const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
 const cartSchedulesStorageKey = "controle-carrinhos-cart-schedules";
@@ -611,6 +614,7 @@ type CampusDataValue = {
   campusSettings: CampusSettings;
   updateCampusSettings: (settings: CampusSettings) => void;
   reservations: Reservation[];
+  replaceReservations: (next: Reservation[]) => void;
   saveReservation: (
     data: Omit<Reservation, "id" | "status">,
     id?: number,
@@ -619,6 +623,7 @@ type CampusDataValue = {
   carts: Cart[];
   cartSchedules: Record<string, CartScheduleTemplate>;
   updateCartSchedules: (cartName: string, next: CartScheduleTemplate) => void;
+  replaceCartSchedules: (next: Record<string, CartScheduleTemplate>) => void;
   syncCartSchedules: (sourceCartNames: string[], targetCartNames: string[]) => void;
   addCart: (cart: Omit<Cart, "id">) => void;
   deleteCart: (id: string) => boolean;
@@ -690,6 +695,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       "Tarde": (next["Tarde"] ?? []).map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
     };
     persistCartSchedules({ ...cartSchedules, [cartName]: normalized });
+  };
+  const replaceCartSchedules = (next: Record<string, CartScheduleTemplate>) => {
+    persistCartSchedules(next);
   };
   const syncCartSchedules = (sourceCartNames: string[], targetCartNames: string[]) => {
     const cartNames = Object.keys(cartSchedules).length > 0 ? Object.keys(cartSchedules) : carts.map((cart) => cart.name);
@@ -768,8 +776,34 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         confirmedAt: item.confirmedAt,
       })));
     };
+    const syncMovementEvent = (event: Event) => {
+      const parsed = (event as CustomEvent<Partial<CartMovement>[]>).detail;
+      if (!Array.isArray(parsed)) return;
+      setMovements(parsed.map((item) => ({
+        reservationId: item.reservationId as number,
+        status: item.status ?? "Não movido",
+        updatedAt: item.updatedAt ?? new Date().toISOString(),
+        notReceived: item.notReceived ?? false,
+        autoCompleted: item.autoCompleted ?? false,
+        requestCount: item.requestCount ?? (item.notReceived ? 1 : 0),
+        movedBy: item.movedBy,
+        completedBy: item.completedBy,
+        movedAt: item.movedAt,
+        completedAt: item.completedAt,
+        movedLate: item.movedLate ?? false,
+        notReceivedAt: item.notReceivedAt,
+        notAttendedAt: item.notAttendedAt,
+        requestAgainAt: item.requestAgainAt,
+        confirmedBy: item.confirmedBy,
+        confirmedAt: item.confirmedAt,
+      })));
+    };
     window.addEventListener("storage", syncMovements);
-    return () => window.removeEventListener("storage", syncMovements);
+    window.addEventListener(movementChangeEventName, syncMovementEvent);
+    return () => {
+      window.removeEventListener("storage", syncMovements);
+      window.removeEventListener(movementChangeEventName, syncMovementEvent);
+    };
   }, []);
   const [movementSettings, setMovementSettings] = useState<MovementSettings>(() =>
     ({
@@ -785,10 +819,42 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     setTeacher(next);
     window.localStorage.setItem(teacherStorageKey, JSON.stringify(next));
   };
-  const persistReservations = (next: Reservation[]) => {
+  const persistReservations = (
+    next: Reservation[],
+    change?: { type: "created" | "updated" | "deleted"; reservation?: Reservation },
+  ) => {
     setReservations(next);
     window.localStorage.setItem(reservationStorageKey, JSON.stringify(next));
+    if (change) {
+      const event = {
+        ...change,
+        reservation: change.reservation,
+        timestamp: new Date().toISOString(),
+        source: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      };
+      window.localStorage.setItem(reservationChangeStorageKey, JSON.stringify(event));
+      window.dispatchEvent(new CustomEvent(reservationChangeEventName, { detail: event }));
+    }
   };
+  useEffect(() => {
+    const syncReservations = (event: StorageEvent) => {
+      if (event.key !== reservationStorageKey || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue) as Partial<Reservation>[];
+        setReservations(parsed.map((item) => ({
+          ...item,
+          segment: item.segment ?? "Fundamental 2",
+          subject: item.subject ?? "",
+          kind: item.kind ?? "Aula",
+          quantity: item.quantity ?? 1,
+        })) as Reservation[]);
+      } catch {
+        // Ignore malformed data written by an older or interrupted session.
+      }
+    };
+    window.addEventListener("storage", syncReservations);
+    return () => window.removeEventListener("storage", syncReservations);
+  }, []);
   const persistCarts = (next: Cart[]) => {
     setCarts(next);
     window.localStorage.setItem(cartStorageKey, JSON.stringify(next));
@@ -911,6 +977,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const persistMovements = (next: CartMovement[]) => {
     setMovements(next);
     window.localStorage.setItem(movementsStorageKey, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent(movementChangeEventName, {
+      detail: next,
+    }));
   };
   const updateMovementStatus = (
     reservationId: number,
@@ -1034,11 +1103,21 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           },
           ...reservations,
         ];
-    persistReservations(next);
+    persistReservations(next, {
+      type: id ? "updated" : "created",
+      reservation: next.find((item) => item.id === (id ?? next[0]?.id)),
+    });
     return true;
   };
+  const replaceReservations = (next: Reservation[]) => {
+    persistReservations(next, {
+      type: "updated",
+      reservation: next[0],
+    });
+  };
   const deleteReservation = (id: number) => {
-    persistReservations(reservations.filter((item) => item.id !== id));
+    const reservation = reservations.find((item) => item.id === id);
+    persistReservations(reservations.filter((item) => item.id !== id), { type: "deleted", reservation });
     persistMovements(movements.filter((item) => item.reservationId !== id));
   };
 
@@ -1422,11 +1501,13 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         campusSettings,
         updateCampusSettings,
         reservations,
+        replaceReservations,
         saveReservation,
         deleteReservation,
         carts,
         cartSchedules,
         updateCartSchedules,
+        replaceCartSchedules,
         syncCartSchedules,
         addCart,
         deleteCart,

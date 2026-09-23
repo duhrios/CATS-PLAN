@@ -83,7 +83,7 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
         <div className={cx("mt-auto p-4", collapsed && "md:p-3")}>
           <div className={cx("rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.65)] p-4", collapsed && "md:hidden")}>
             <div className="mb-2 flex items-center gap-2 text-[hsl(var(--sidebar-primary))]"><span className="h-2 w-2 rounded-full bg-[hsl(var(--sidebar-primary))]" /><span className="text-[10px] font-bold uppercase tracking-[.14em]">Central de operação</span></div>
-             <p className="text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">{operatorMode ? "Mova os carrinhos e confirme cada entrega." : userMode ? "Consulte sua agenda e reserve um carrinho para outra data." : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}</p>
+             <p className="text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">{operatorMode ? "Mova os carrinhos e confirme cada entrega." : userMode ? "Consulte sua agenda e reserve um carrinho antecipadamente." : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}</p>
           </div>
            <Link href={operatorMode || userMode ? "/admin" : "/usuario"} onClick={() => setMobileOpen(false)} className={cx("mt-4 flex items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]", collapsed && "md:hidden")} data-testid="link-switch-role">
              {operatorMode || userMode ? "Ir para administração" : "Visão do professor"}
@@ -98,7 +98,7 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
           <button type="button" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] md:hidden" aria-label="Abrir menu" data-testid="button-open-menu"><Menu size={21} /></button>
           <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex"><span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" /> {campusSettings.agendaLabel} <span className="mx-1 text-[hsl(var(--border))]">/</span> {campusSettings.campusName}</div>
           <div className="ml-auto flex items-center gap-3">
-             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{operatorMode ? "TI" : userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{operatorMode ? "Área do TI" : userMode ? "Área do usuário" : isSuperAdmin ? "Super administrador" : "Administrador"}</p></div>
+             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{operatorMode ? "TI" : userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{operatorMode ? "Área do TI" : userMode ? "Área do usuário" : "Administrador"}</p></div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="text-user-avatar">CM</div>
             {(userMode || operatorMode) && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
           </div>

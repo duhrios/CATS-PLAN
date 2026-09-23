@@ -105,12 +105,15 @@ export function StatusPill({
     normalized.includes("completed")
       ? "good"
       : normalized.includes("use") ||
+          normalized.includes("movendo") ||
           normalized.includes("aten") ||
           normalized.includes("attention")
         ? "warm"
         : normalized.includes("cancel") ||
             normalized.includes("offline") ||
-            normalized.includes("maintenance")
+            normalized.includes("maintenance") ||
+            normalized.includes("não atendida") ||
+            normalized.includes("nao atendida")
           ? "bad"
           : "neutral";
   return (

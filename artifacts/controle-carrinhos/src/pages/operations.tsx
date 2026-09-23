@@ -1567,7 +1567,7 @@ export function ReservationsPage({
                                   status={
                                     conflictIds.has(item.id)
                                       ? "Conflito: carrinho ocupado"
-                                      : movements.find((entry) => entry.reservationId === item.id)?.status ?? item.status
+                                      : movements.find((entry) => entry.reservationId === item.id)?.status ?? "Não movido"
                                   }
                                 />
                               </td>
@@ -1576,7 +1576,25 @@ export function ReservationsPage({
                                   <span className="text-[11px] font-semibold text-[hsl(var(--primary))]">
                                     {expandedReservationId === item.id ? "Fechar" : "Ver agendamento"}
                                   </span>
-                                ) : mode === "operator" ? null : (
+                                ) : mode === "operator" ? (
+                                  <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+                                    <Button
+                                      size="sm"
+                                      variant={movements.find((entry) => entry.reservationId === item.id)?.status === "Movendo" ? "primary" : "secondary"}
+                                      disabled={!isReservationInProgress(item) || ["Concluído", "Não atendida"].includes(movements.find((entry) => entry.reservationId === item.id)?.status ?? "")}
+                                      onClick={() => updateMovementStatus(item.id, "Movendo")}
+                                    >
+                                      Movendo
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      disabled={!isReservationInProgress(item) || movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído"}
+                                      onClick={() => updateMovementStatus(item.id, "Concluído")}
+                                    >
+                                      <Check size={14} /> Concluído
+                                    </Button>
+                                  </div>
+                                ) : (
                                   <IconButton
                                     label={`Editar reserva ${item.id}`}
                                     onClick={() =>
