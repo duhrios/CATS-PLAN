@@ -2,7 +2,6 @@ import { AlertTriangle, CalendarX, Clock3, Database, Download, Factory, History,
 import { PageHeader, SectionCard, Button, Field, Modal, inputClass } from "@/components/app-ui";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { buildCartSchedule, segments, useCampusData, type CartScheduleTemplate, type Reservation } from "@/lib/campus-data";
-import TestViewPage from "@/pages/test-view";
 import * as XLSX from "xlsx";
 
 const normalizeSpreadsheetHeader = (value: unknown) =>
@@ -399,11 +398,6 @@ export function ConfigurationPage() {
         <Field label="Nome da seção">
           <input value={campusSettings.agendaLabel} onChange={(event) => updateCampusSettings({ ...campusSettings, agendaLabel: event.target.value })} className={`${inputClass} h-9`} />
         </Field>
-      </div>
-    </SectionCard>
-    <SectionCard title="Validação do projeto" eyebrow="Teste de navegação">
-      <div className="p-4">
-        <TestViewPage compact />
       </div>
     </SectionCard>
     <SectionCard title="Manutenção de dados" eyebrow="Operações irreversíveis">

@@ -15,7 +15,6 @@ import { OperatorLoginPage, OperatorPage } from '@/pages/operator';
 import { OperatorSettingsPage } from '@/pages/operator-settings';
 import { AccessPage, AdminLoginPage } from '@/pages/access';
 import { ConfigurationPage, ScheduleManagementPage } from '@/pages/configuration';
-import TestViewPage from '@/pages/test-view';
 import { ReservationNotifications } from '@/components/reservation-notifications';
 import {
   Route,
@@ -76,7 +75,6 @@ function Router() {
           <Route path="/historico" component={HistoryPage} />
           <Route path="/configuracao" component={ConfigurationPage} />
           <Route path="/configuracao/horarios" component={ScheduleManagementPage} />
-          <Route path="/teste"><TestViewPage /></Route>
           <Route path="/usuario" component={UserOverviewPage} />
           <Route path="/usuario/reservas">
             <ReservationsPage mode="user" />

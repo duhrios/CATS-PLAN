@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+import React from 'react';
 import type { ReactNode } from 'react';
 import {
   CampusDataProvider,
@@ -54,8 +55,8 @@ describe('Campus data core logic', () => {
     let createdId = 0;
     act(() => {
       expect(result.current.saveReservation(created)).toBe(true);
-      createdId = result.current.reservations[0].id;
     });
+    createdId = result.current.reservations.find((item) => item.teacher === created.teacher)?.id ?? 0;
 
     act(() => {
       expect(
@@ -116,7 +117,83 @@ describe('Campus data core logic', () => {
 
     expect(result.current.teacherAccounts).toHaveLength(initialTeacherAccounts.length);
     expect(result.current.authenticateTeacher('Marina Lopes', '1234')).toBe('first-access');
-    expect(result.current.authenticateTeacher('Rafael Nunes', '1234')?.id).toBe('teacher-rafael');
-    expect(result.current.completeTeacherRegistration('teacher-marina', 'Marina Lopes', 'novaSenha123')).toBeTruthy();
+    const authenticatedTeacher = result.current.authenticateTeacher('Rafael Nunes', '1234');
+    expect(authenticatedTeacher).not.toBe('first-access');
+    expect(authenticatedTeacher && authenticatedTeacher !== 'first-access' ? authenticatedTeacher.id : undefined).toBe('teacher-rafael');
+    act(() => {
+      expect(result.current.completeTeacherRegistration('teacher-marina', 'Marina Lopes', 'novaSenha123')).toBeTruthy();
+    });
+  });
+
+  it('blocks the Carrinho A transition slot unless the setting explicitly allows it', () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const base = initialReservations[0];
+
+    expect(result.current.saveReservation({
+      teacher: 'Professor Transição',
+      segment: 'Fundamental 2',
+      subject: 'Robótica',
+      className: '8º ano C',
+      room: 'Sala 30',
+      period: 'Manhã',
+      date: base.date,
+      start: '11:50',
+      end: '12:35',
+      cart: 'Carrinho A',
+      kind: 'Aula',
+      quantity: 20,
+    })).toBe(false);
+  });
+
+  it('does not allow an aula on an unavailable cart', () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const base = initialReservations[0];
+
+    act(() => {
+      result.current.toggleCartUnavailable('b');
+    });
+
+    expect(result.current.saveReservation({
+      teacher: 'Professor Carrinho Indisponível',
+      segment: 'Fundamental 1',
+      subject: 'História',
+      className: '5º ano A',
+      room: 'Sala 12',
+      period: 'Tarde',
+      date: base.date,
+      start: '15:00',
+      end: '15:45',
+      cart: 'Carrinho B',
+      kind: 'Aula',
+      quantity: 20,
+    })).toBe(false);
+  });
+
+  it('automatically assigns available units to a reserve request', () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const base = initialReservations[0];
+    const before = result.current.reservations.length;
+
+    act(() => {
+      expect(result.current.saveReservation({
+        teacher: 'Professor Reserva',
+        segment: 'Fundamental 2',
+        subject: 'Tecnologia',
+        className: '7º ano B',
+        room: 'Sala 16',
+        period: 'Tarde',
+        date: base.date,
+        start: '16:00',
+        end: '16:45',
+        cart: 'Carrinho C',
+        kind: 'Reserva',
+        quantity: 3,
+      })).toBe(true);
+    });
+
+    const created = result.current.reservations.find((item) => item.teacher === 'Professor Reserva');
+    expect(result.current.reservations).toHaveLength(before + 1);
+    expect(created?.reservedChromebooks).toHaveLength(3);
+    expect(new Set(created?.reservedChromebooks).size).toBe(3);
   });
 });
