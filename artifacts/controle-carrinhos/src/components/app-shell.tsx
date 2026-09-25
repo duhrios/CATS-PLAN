@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, ChevronRight, Clock3, DoorOpen, LayoutDashboard, LogOut, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X, Settings } from "lucide-react";
+import { Activity, CalendarDays, ChevronRight, Clock3, DoorOpen, GripVertical, LayoutDashboard, LogOut, Menu, Network, PanelLeftClose, PanelLeftOpen, Router, UserRound, X, Settings } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { cx } from "@/components/app-ui";
@@ -34,16 +34,59 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
   const [location] = useLocation();
   const [, setLocation] = useLocation();
   const { teacher, campusSettings, clearRememberedTeacher } = useCampusData();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem("controle-carrinhos-sidebar-collapsed") === "true");
   const [mobileOpen, setMobileOpen] = useState(false);
   const userMode = role === "user";
   const operatorMode = role === "operator";
   const isSuperAdmin = !operatorMode && !userMode && window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
   const navItems = operatorMode ? operatorNavItems : userMode ? userNavItems : (isSuperAdmin ? [...adminNavItems, ...superAdminNavItems] : adminNavItems);
+  const navOrderKey = `controle-carrinhos-menu-order:${role}`;
+  const [menuOrder, setMenuOrder] = useState<string[]>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem(navOrderKey) ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+  const [draggedMenuItem, setDraggedMenuItem] = useState<string | null>(null);
+  const orderedNavItems = [...navItems].sort((a, b) => {
+    const aIndex = menuOrder.indexOf(a.href);
+    const bIndex = menuOrder.indexOf(b.href);
+    return (aIndex < 0 ? navItems.length : aIndex) - (bIndex < 0 ? navItems.length : bIndex);
+  });
+  const moveMenuItem = (targetHref: string) => {
+    if (!draggedMenuItem || draggedMenuItem === targetHref) return;
+    const current = orderedNavItems.map((item) => item.href);
+    const sourceIndex = current.indexOf(draggedMenuItem);
+    const targetIndex = current.indexOf(targetHref);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    current.splice(sourceIndex, 1);
+    current.splice(targetIndex, 0, draggedMenuItem);
+    setMenuOrder(current);
+    window.localStorage.setItem(navOrderKey, JSON.stringify(current));
+    setDraggedMenuItem(null);
+  };
   const signOut = () => {
     clearRememberedTeacher();
     window.localStorage.removeItem("controle-carrinhos-role");
     setLocation("/login");
+  };
+  const switchRole = (nextRole: "admin" | "operator") => {
+    window.localStorage.setItem("controle-carrinhos-role", nextRole);
+    if (nextRole === "admin") {
+      window.localStorage.setItem("controle-carrinhos-super-admin", "true");
+      setLocation("/admin");
+    } else {
+      window.localStorage.setItem("controle-carrinhos-super-admin", "false");
+      setLocation("/operador");
+    }
+  };
+  const toggleCollapsed = () => {
+    setCollapsed((value) => {
+      const next = !value;
+      window.localStorage.setItem("controle-carrinhos-sidebar-collapsed", String(next));
+      return next;
+    });
   };
   return (
     <div className="min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
@@ -64,16 +107,17 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
         <div className="px-3 py-6">
            <p className={cx("mb-3 px-3 text-[10px] font-bold uppercase tracking-[.18em] text-[hsl(var(--sidebar-foreground)/.42)]", collapsed && "md:hidden")}>{operatorMode ? "Área do TI" : userMode ? "Área do professor" : "Administração"}</p>
           <nav className="space-y-1">
-             {navItems.map(({ href, label, icon: Icon }) => {
+             {orderedNavItems.map(({ href, label, icon: Icon }) => {
               const active = href === "/" ? location === "/" : location.startsWith(href);
               return (
-                <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`link-nav-${label.toLowerCase().replaceAll(" ", "-")}`} className={cx(
+                <Link key={href} href={href} onClick={() => setMobileOpen(false)} draggable onDragStart={() => setDraggedMenuItem(href)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveMenuItem(href)} data-testid={`link-nav-${label.toLowerCase().replaceAll(" ", "-")}`} className={cx(
                   "group flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
                   active ? "bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-foreground))]" : "text-[hsl(var(--sidebar-foreground)/.67)] hover:bg-[hsl(var(--sidebar-accent)/.7)] hover:text-[hsl(var(--sidebar-foreground))]",
                   collapsed && "md:justify-center",
                 )}>
                   <Icon size={18} strokeWidth={active ? 2.2 : 1.8} className={active ? "text-[hsl(var(--sidebar-primary))]" : ""} />
                   <span className={cx(collapsed && "md:hidden")}>{label}</span>
+                  {!collapsed && <GripVertical size={13} className="ml-auto opacity-40" aria-hidden="true" />}
                   {active && <ChevronRight size={14} className={cx("ml-auto text-[hsl(var(--sidebar-primary))]", collapsed && "md:hidden")} />}
                 </Link>
               );
@@ -85,10 +129,10 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
             <div className="mb-2 flex items-center gap-2 text-[hsl(var(--sidebar-primary))]"><span className="h-2 w-2 rounded-full bg-[hsl(var(--sidebar-primary))]" /><span className="text-[10px] font-bold uppercase tracking-[.14em]">Central de operação</span></div>
              <p className="text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">{operatorMode ? "Mova os carrinhos e confirme cada entrega." : userMode ? "Consulte sua agenda e reserve um carrinho antecipadamente." : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}</p>
           </div>
-           <Link href={operatorMode || userMode ? "/admin" : "/usuario"} onClick={() => setMobileOpen(false)} className={cx("mt-4 flex items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]", collapsed && "md:hidden")} data-testid="link-switch-role">
-             {operatorMode || userMode ? "Ir para administração" : "Visão do professor"}
-           </Link>
-          <button type="button" onClick={() => setCollapsed((value) => !value)} className="mt-4 hidden w-full items-center justify-center gap-2 text-xs text-[hsl(var(--sidebar-foreground)/.46)] hover:text-[hsl(var(--sidebar-foreground))] md:flex" data-testid="button-collapse-sidebar">
+           <button type="button" onClick={() => operatorMode ? switchRole("admin") : userMode ? setLocation("/usuario") : switchRole("operator")} className={cx("mt-4 flex w-full items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]", collapsed && "md:hidden")} data-testid="button-switch-role">
+             {operatorMode ? "Ir para administração" : userMode ? "Visão do professor" : "Visão do TI"}
+           </button>
+          <button type="button" onClick={toggleCollapsed} aria-expanded={!collapsed} className="mt-4 hidden w-full items-center justify-center gap-2 text-xs text-[hsl(var(--sidebar-foreground)/.46)] hover:text-[hsl(var(--sidebar-foreground))] md:flex" data-testid="button-collapse-sidebar">
             {collapsed ? <PanelLeftOpen size={16} /> : <><PanelLeftClose size={16} /> Recolher menu</>}
           </button>
         </div>
@@ -96,11 +140,20 @@ export function AppShell({ children, role = "admin" }: { children: React.ReactNo
       <div className={cx("min-h-[100dvh] transition-[padding] duration-300 md:pl-[248px]", collapsed && "md:pl-[76px]")}>
         <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--background)/.9)] px-5 backdrop-blur-md sm:px-8">
           <button type="button" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] md:hidden" aria-label="Abrir menu" data-testid="button-open-menu"><Menu size={21} /></button>
-          <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex"><span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" /> {campusSettings.agendaLabel} <span className="mx-1 text-[hsl(var(--border))]">/</span> {campusSettings.campusName}</div>
+          <div className="hidden items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] md:flex">
+            <span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" />{" "}
+            {campusSettings.agendaLabel}
+            {campusSettings.campusName && (
+              <>
+                <span className="mx-1 text-[hsl(var(--border))]">/</span>
+                {campusSettings.campusName}
+              </>
+            )}
+          </div>
           <div className="ml-auto flex items-center gap-3">
-             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{operatorMode ? "TI" : userMode ? teacher.name : "Coordenação"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{operatorMode ? "Área do TI" : userMode ? "Área do usuário" : "Administrador"}</p></div>
+             <div className="hidden text-right sm:block"><p className="text-xs font-semibold">{operatorMode ? "TI" : userMode ? teacher.name : "Administrador"}</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">{operatorMode ? "Área do TI" : userMode ? "Área do usuário" : "Administrador"}</p></div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="text-user-avatar">CM</div>
-            {(userMode || operatorMode) && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
+            {!userMode && <button type="button" onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" data-testid="button-logout"><LogOut size={15} /> Sair</button>}
           </div>
         </header>
         <main className="app-grid min-h-[calc(100dvh-76px)] px-5 py-7 sm:px-8 lg:px-10">{children}</main>

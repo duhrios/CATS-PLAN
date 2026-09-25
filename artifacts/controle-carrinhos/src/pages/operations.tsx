@@ -50,6 +50,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { type Period, useRoomDirectory } from "@/lib/room-directory";
 import {
   isReservationInProgress,
+  canCancelReservation,
   segments,
   type Reservation,
   type ReservationKind,
@@ -93,49 +94,6 @@ const reservationConflictDetails = (reservations: Reservation[]) => {
   );
   return conflicts;
 };
-
-const historySeed = [
-  {
-    id: 1,
-    time: "06:52",
-    title: "Checklist concluído",
-    detail: "Carrinho A · 55 Chromebooks disponíveis",
-    type: "Equipamento",
-    tone: "good",
-  },
-  {
-    id: 2,
-    time: "06:48",
-    title: "Reserva confirmada",
-    detail: "Rafael Nunes · 7º ano A · Carrinho B",
-    type: "Reserva",
-    tone: "good",
-  },
-  {
-    id: 3,
-    time: "06:41",
-    title: "Carrinho retirado",
-    detail: "Carrinho C · Laboratório 01",
-    type: "Movimentação",
-    tone: "warm",
-  },
-  {
-    id: 4,
-    time: "06:35",
-    title: "Sinal em observação",
-    detail: "AP-03 · Laboratórios do Bloco 2",
-    type: "Wi-Fi",
-    tone: "warm",
-  },
-  {
-    id: 5,
-    time: "Ontem, 16:32",
-    title: "Equipamento enviado à manutenção",
-    detail: "C-04 · 4 Chromebooks com bateria baixa",
-    type: "Equipamento",
-    tone: "bad",
-  },
-];
 
 function Metric({
   label,
@@ -191,12 +149,12 @@ function Metric({
     </div>
   );
   return href ? (
-    <Link href={href} onClick={onClick} aria-label={`Abrir ${label}`}>
-      {content}
-    </Link>
-  ) : (
-    content
-  );
+        <Link href={href} onClick={onClick} aria-label={`Abrir ${label}`}>
+          {content}
+        </Link>
+      ) : (
+        content
+      );
 }
 
 function ProgressBar({
@@ -222,7 +180,7 @@ function ProgressBar({
 }
 
 export function OverviewPage() {
-  const { adminAccounts, operatorAccounts, carts, reservations } = useCampusData();
+  const { adminAccounts, operatorAccounts, carts, reservations, campusSettings } = useCampusData();
   const storedAdminName = typeof window !== "undefined"
     ? window.localStorage.getItem("controle-carrinhos-admin-name")
     : null;
@@ -274,6 +232,12 @@ export function OverviewPage() {
     () => reservationConflictDetails(reservations),
     [reservations],
   );
+  const todayReservations = useMemo(
+    () => reservations
+      .filter((reservation) => reservation.date === todayISO())
+      .sort((a, b) => a.start.localeCompare(b.start)),
+    [reservations],
+  );
   const nextOverviewConflict = overviewConflicts[0];
   const refresh = () => {
     setRefreshing(true);
@@ -295,7 +259,11 @@ export function OverviewPage() {
         <PageHeader
           eyebrow="Quarta-feira, 19 de março"
           title={`Bom dia, ${userName}.`}
-          description="Preparando o pulso operacional do Colégio Vila Nova."
+          description={
+            campusSettings.campusName
+              ? `Preparando o pulso operacional do ${campusSettings.campusName}.`
+              : ""
+          }
         />
         <SectionCard>
           <div className="p-6">
@@ -352,24 +320,24 @@ export function OverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="Reservas hoje"
-          value="12"
-          detail="3 acontecendo agora"
+          value={String(todayReservations.length)}
+          detail={`${todayReservations.filter((reservation) => reservation.status !== "Concluída").length} pendentes`}
           icon={CalendarDays}
           tone="teal"
           href="/reservas?hoje=1"
         />
         <Metric
           label="Chromebooks prontos"
-          value="160 / 173"
-          detail="3 carrinhos cadastrados"
+          value={`${liveCartAvailability.available} / ${liveCartAvailability.total}`}
+          detail={`${carts.length} carrinhos cadastrados`}
           icon={Laptop}
           tone="gold"
           href="/carrinhos"
         />
         <Metric
           label="Wi-Fi saudável"
-          value="4 / 5"
-          detail="AP-03 pede atenção"
+          value="0 / 0"
+          detail="Nenhum ponto cadastrado"
           icon={SignalHigh}
           tone="green"
           href="/wifi"
@@ -400,78 +368,43 @@ export function OverviewPage() {
           }
         >
           <div className="divide-y divide-[hsl(var(--border))]">
-            {[
-              {
-                time: "07:00",
-                room: "Laboratório 02",
-                title: "8º ano B · Ciências",
-                owner: "Marina Lopes",
-                cart: "Carrinho A",
-                state: "Em andamento",
-                dot: "bg-[hsl(var(--primary))]",
-              },
-              {
-                time: "09:15",
-                room: "Sala 14",
-                title: "7º ano A · Matemática",
-                owner: "Rafael Nunes",
-                cart: "Carrinho B",
-                state: "Próxima",
-                dot: "bg-[hsl(var(--accent))]",
-              },
-              {
-                time: "11:50",
-                room: "Sala 21",
-                title: "9º ano C · Geografia",
-                owner: "Bianca Reis",
-                cart: "Carrinho A",
-                state: overviewConflicts.length > 0 ? "Conflito" : "Mais tarde",
-                dot: overviewConflicts.length > 0
-                  ? "bg-[hsl(var(--destructive))]"
-                  : "bg-[hsl(var(--muted-foreground))]",
-              },
-              {
-                time: "13:30",
-                room: "Sala 08",
-                title: "6º ano A · Português",
-                owner: "Caio Martins",
-                cart: "Carrinho C",
-                state: "Mais tarde",
-                dot: "bg-[hsl(var(--muted-foreground))]",
-              },
-            ].map((item, index) => (
+            {todayReservations.map((reservation, index) => {
+              const hasConflict = overviewConflicts.some(
+                (conflict) => conflict.reservation.id === reservation.id,
+              );
+              return (
               <Link
-                key={item.time}
+                key={reservation.id}
                 href={
-                  item.state === "Conflito"
+                  hasConflict
                     ? "/reservas?conflitos=1"
                     : `/reservas?hoje=1`
                 }
                 className={cx(
                   "flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[hsl(var(--muted)/.45)] sm:px-6",
-                  index === 2 && "bg-[hsl(var(--accent)/.07)]",
+                  hasConflict && "bg-[hsl(var(--accent)/.07)]",
                 )}
-                data-testid={`row-timeline-${item.time.replace(":", "")}`}
+                data-testid={`row-timeline-${reservation.start.replace(":", "")}`}
               >
                 <div className="w-12 shrink-0">
-                  <p className="font-data text-sm font-semibold">{item.time}</p>
+                  <p className="font-data text-sm font-semibold">{reservation.start}</p>
                   <span
                     className={cx(
                       "mt-1 block h-1.5 w-1.5 rounded-full",
-                      item.dot,
+                      hasConflict ? "bg-[hsl(var(--destructive))]" : "bg-[hsl(var(--primary))]",
                     )}
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{item.title}</p>
+                  <p className="truncate text-sm font-semibold">{reservation.className} · {reservation.subject}</p>
                   <p className="mt-0.5 truncate text-xs text-[hsl(var(--muted-foreground))]">
-                    {item.owner} · {item.room}
+                    {reservation.teacher} · {reservation.room}
                   </p>
                 </div>
                 <div className="hidden text-right sm:block">
-                  <p className="text-xs font-semibold">{item.cart}</p>
+                  <p className="text-xs font-semibold">{reservation.cart}</p>
                   <p className="mt-0.5 text-[11px] text-[hsl(var(--muted-foreground))]">
-                    {item.state}
+                    {hasConflict ? "Conflito" : reservation.status}
                   </p>
                 </div>
                 <ChevronRight
@@ -479,7 +412,13 @@ export function OverviewPage() {
                   className="text-[hsl(var(--muted-foreground))]"
                 />
               </Link>
-            ))}
+              );
+            })}
+            {!todayReservations.length && (
+              <div className="p-8 text-center text-sm text-[hsl(var(--muted-foreground))]">
+                Nenhum agendamento para hoje.
+              </div>
+            )}
           </div>
         </SectionCard>
         <SectionCard
@@ -535,33 +474,8 @@ export function OverviewPage() {
           </Link>
         }
       >
-        <div className="grid gap-px bg-[hsl(var(--border))] sm:grid-cols-3">
-          {historySeed.slice(0, 3).map((event) => (
-            <div
-              key={event.id}
-              className="bg-[hsl(var(--card))] p-5"
-              data-testid={`card-activity-${event.id}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-data text-[11px] text-[hsl(var(--muted-foreground))]">
-                  {event.time}
-                </span>
-                <StatusPill
-                  status={
-                    event.tone === "bad"
-                      ? "Atenção"
-                      : event.tone === "warm"
-                        ? "Em uso"
-                        : "Concluída"
-                  }
-                />
-              </div>
-              <p className="mt-4 text-sm font-semibold">{event.title}</p>
-              <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">
-                {event.detail}
-              </p>
-            </div>
-          ))}
+        <div className="p-8 text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Nenhuma movimentação registrada.
         </div>
       </SectionCard>
     </div>
@@ -998,9 +912,14 @@ function ReservationModal({
             )}
           </Field>
           {isReserve && (
+            <div className="rounded-xl border border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.1)] px-3 py-3 text-xs leading-5 text-[hsl(34_60%_32%)]">
+              As reservas são priorizadas nos carrinhos B e C. O Carrinho A só será usado se você marcar unidades dele no Bloco Reservas.
+            </div>
+          )}
+          {isReserve && (
             <Field
               label="Quantidade"
-              hint={`Limite por professor: 10. Disponíveis agora: ${Math.max(0, reserveAvailable)}.`}
+              hint={`Limite por professor: ${campusSettings.reservationLimit}. Disponíveis agora: ${Math.max(0, reserveAvailable)}.`}
             >
               <input
                 required
@@ -1591,7 +1510,7 @@ export function ReservationsPage({
                                       disabled={!isReservationInProgress(item) || movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído"}
                                       onClick={() => updateMovementStatus(item.id, "Concluído")}
                                     >
-                                      <Check size={14} /> Concluído
+                                      <Check size={14} /> Concluir
                                     </Button>
                                   </div>
                                 ) : (
@@ -1621,13 +1540,25 @@ export function ReservationsPage({
                                       )}
                                     </div>
                                     <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-                                      <Button size="sm" disabled={!isReservationInProgress(item) || movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído"} onClick={() => updateMovementStatus(item.id, "Concluído")}><Check size={14} /> Concluído</Button>
+                                      <Button size="sm" disabled={!isReservationInProgress(item) || movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído"} onClick={() => updateMovementStatus(item.id, "Concluído")}><Check size={14} /> Concluir</Button>
                                       <Button size="sm" variant="secondary" disabled={!isReservationInProgress(item) || (movements.find((entry) => entry.reservationId === item.id)?.status === "Concluído" && !movements.find((entry) => entry.reservationId === item.id)?.autoCompleted)} onClick={() => reportNotReceived(item.id)}>Não Recebi</Button>
                                       <Button size="sm" variant="secondary" disabled={!isReservationInProgress(item) || !movements.find((entry) => entry.reservationId === item.id)?.notReceived} onClick={() => requestMovementAgain(item.id)}>Pedir novamente</Button>
                                       <div className="basis-full pt-8">
-                                        <Button size="sm" variant="danger" onClick={() => { if (window.confirm("Excluir este agendamento?")) { deleteReservation(item.id); setExpandedReservationId(null); } }}>Excluir agendamento</Button>
+                                        <Button
+                                          size="sm"
+                                          variant="danger"
+                                          disabled={!canCancelReservation(item)}
+                                          onClick={() => {
+                                            if (canCancelReservation(item) && window.confirm("Cancelar este agendamento?")) {
+                                              deleteReservation(item.id);
+                                              setExpandedReservationId(null);
+                                            }
+                                          }}
+                                        >
+                                          Cancelar agendamento
+                                        </Button>
                                       </div>
-                                      {!isReservationInProgress(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Disponível somente no horário da aula.</span>}
+                                      {!canCancelReservation(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Cancelamento encerrado: permitido até 10 minutos após o início.</span>}
                                     </div>
                                   </div>
                                 </td>
@@ -1663,10 +1594,13 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     carts,
     addCart,
+    addCartUnit,
     deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
+    deleteCartUnit,
     toggleCartUnitReserved,
+    restoreReservedUnits,
     reservations,
     reserveAvailable,
     campusSettings,
@@ -1678,8 +1612,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [reserveCategoryOpen, setReserveCategoryOpen] = useState(false);
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
+  const [selectedReserveUnits, setSelectedReserveUnits] = useState<string[]>([]);
   const [unitSelectionMode, setUnitSelectionMode] = useState<
-    "unavailable" | "reserved"
+    "unavailable" | "reserved" | "deleted"
   >("unavailable");
   const isSuperAdmin =
     typeof window !== "undefined" &&
@@ -1696,6 +1631,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const reserveUsed = reservations
     .filter((item) => item.kind === "Reserva")
     .reduce((total, item) => total + item.quantity, 0);
+  const reserveUnits = carts.flatMap((cart) =>
+    cart.reservedUnits.map((unit) => ({ unit, cartName: cart.name })),
+  );
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
@@ -1716,7 +1654,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric
           label="Inventário total"
-          value={String(carts.reduce((total, cart) => total + cart.total, 0))}
+          value={String(carts.reduce((total, cart) => total + cart.total - (cart.deletedUnits ?? []).length, 0))}
           detail={`${carts.length} carrinhos cadastrados`}
           icon={Laptop}
         />
@@ -1800,11 +1738,12 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
               const units = Array.from(
                 { length: cart.total },
                 (_, index) => `${cart.prefix}${index + 1}`,
-              );
+              ).filter((unit) => !(cart.deletedUnits ?? []).includes(unit));
               const reserveUnits = units.slice(-Math.max(1, cart.reserveCapacity));
               const visibleUnits = filter === "Reservas"
                 ? reserveUnits
                 : expanded ? units : units.slice(0, 12);
+              const activeTotal = units.length;
               return (
                 <div
                   key={cart.id}
@@ -1826,7 +1765,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           {cart.name}
                         </p>
                         <p className="font-data text-[11px] text-[hsl(var(--muted-foreground))]">
-                          Código {cart.code} · {cart.location}
+                          Código {cart.code} · Observação: {cart.location}
                         </p>
                       </div>
                     </div>
@@ -1844,14 +1783,14 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           {cart.unavailable
                             ? 0
                             : Math.max(0, cart.available - cart.reservedUnits.length)}
-                          /{cart.total}
+                          /{activeTotal}
                         </span>
                       </div>
                       <ProgressBar
                         value={
                           cart.unavailable
                             ? 0
-                            : (cart.available / cart.total) * 100
+                            : (cart.available / Math.max(1, activeTotal)) * 100
                         }
                         tone={
                           cart.unavailable
@@ -1903,10 +1842,39 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         >
                           Reserva
                         </button>
+                        {isSuperAdmin && (
+                          <button
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => setUnitSelectionMode("deleted")}
+                            className={cx(
+                              "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
+                              unitSelectionMode === "deleted"
+                                ? "bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))]"
+                                : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
+                            )}
+                          >
+                            <Trash2 size={12} /> Excluir
+                          </button>
+                        )}
+                        {isSuperAdmin && (
+                          <button
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => {
+                              const unit = addCartUnit(cart.id);
+                              if (unit) setExpandedCarts((current) => current.includes(cart.id) ? current : [...current, cart.id]);
+                            }}
+                            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[hsl(var(--primary))] transition hover:bg-[hsl(var(--muted))]"
+                            data-testid={`button-add-unit-${cart.id}`}
+                          >
+                            <Plus size={12} /> Adicionar unidade
+                          </button>
+                        )}
                       </div>
                       <span className="shrink-0 font-data text-[11px] font-semibold">
                         {cart.prefix}1–{cart.prefix}
-                        {cart.total}
+                        {activeTotal}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -1921,7 +1889,11 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                             key={unit}
                             disabled={readOnly}
                             onClick={() => {
-                              if (unitSelectionMode === "reserved") {
+                              if (unitSelectionMode === "deleted") {
+                                if (window.confirm(`Excluir a unidade ${unit} permanentemente do ${cart.name}?`)) {
+                                  deleteCartUnit(cart.id, unit);
+                                }
+                              } else if (unitSelectionMode === "reserved") {
                                 if (!unavailable) {
                                   toggleCartUnitReserved(cart.id, unit);
                                 }
@@ -1937,7 +1909,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                                   ? "border-[hsl(var(--primary)/.55)] bg-[hsl(var(--primary)/.08)] text-[hsl(var(--primary))] line-through"
                                 : "border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/.6)]",
                             )}
-                            aria-label={`${unit}: ${unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "marcar disponível" : "marcar indisponível"}`}
+                            aria-label={`${unit}: ${unitSelectionMode === "deleted" ? "excluir unidade" : unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "marcar disponível" : "marcar indisponível"}`}
                             data-testid={`button-unit-${unit}`}
                           >
                             {unit}
@@ -1945,7 +1917,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         );
                       })}
                     </div>
-                    {cart.total > 12 && (
+                    {activeTotal > 12 && (
                       <button
                         type="button"
                         onClick={() =>
@@ -1959,7 +1931,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                       >
                         {expanded
                           ? "Mostrar menos"
-                          : `Ver todos os ${cart.total} Chromebooks`}
+                          : `Ver todos os ${activeTotal} Chromebooks`}
                       </button>
                     )}
                   </div>
@@ -2005,6 +1977,101 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 </div>
               );
             })}
+            {filter === "Todos" && (
+              <div
+                className="bg-[hsl(var(--card))] p-5 sm:p-6"
+                data-testid="card-cart-reservas-independent"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(34_60%_32%)]">
+                      <Settings2 size={19} />
+                    </span>
+                    <div>
+                      <p className="font-display text-lg font-semibold">Reservas</p>
+                      <p className="font-data text-[11px] text-[hsl(var(--muted-foreground))]">
+                        Card independente · {reserveUnits.length} unidade(s)
+                      </p>
+                    </div>
+                  </div>
+                  <StatusPill status={reserveUnits.length ? "Pronto" : "Atenção"} />
+                </div>
+                <div className="mt-6 flex justify-between text-xs">
+                  <span>Chromebooks em reserva</span>
+                  <span className="font-data font-semibold">{reserveUnits.length}</span>
+                </div>
+                <ProgressBar value={reserveUnits.length ? 100 : 0} tone={reserveUnits.length ? "gold" : "teal"} />
+                <div className="mt-5 rounded-xl border border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.08)] p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-[.12em]">Unidades reservadas</span>
+                    {!readOnly && reserveUnits.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-[10px] font-semibold text-[hsl(var(--primary))]"
+                        onClick={() => setSelectedReserveUnits((current) =>
+                          current.length === reserveUnits.length ? [] : reserveUnits.map((item) => item.unit),
+                        )}
+                      >
+                        {selectedReserveUnits.length === reserveUnits.length ? "Desmarcar todos" : "Selecionar todos"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {reserveUnits.map(({ unit, cartName }) => {
+                      const selected = selectedReserveUnits.includes(unit);
+                      return (
+                        <button
+                          key={unit}
+                          type="button"
+                          disabled={readOnly}
+                          title={`Origem: ${cartName}`}
+                          onClick={() => setSelectedReserveUnits((current) =>
+                            selected ? current.filter((item) => item !== unit) : [...current, unit],
+                          )}
+                          className={cx(
+                            "rounded-md border px-2 py-1 font-data text-[11px]",
+                            selected
+                              ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.15)] text-[hsl(var(--primary))]"
+                              : "border-[hsl(var(--accent)/.55)] bg-[hsl(var(--card))]",
+                          )}
+                        >
+                          {unit}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!readOnly && selectedReserveUnits.length > 0 && (
+                    <Button
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => {
+                        restoreReservedUnits(selectedReserveUnits);
+                        setSelectedReserveUnits([]);
+                      }}
+                    >
+                      Mover selecionados
+                    </Button>
+                  )}
+                </div>
+                <div className="mt-5 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4">
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">Retorna ao carrinho de origem.</span>
+                  {!readOnly && reserveUnits.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        if (window.confirm("Mover todas as reservas para os carrinhos de origem?")) {
+                          restoreReservedUnits();
+                          setSelectedReserveUnits([]);
+                        }
+                      }}
+                    >
+                      Mover todos
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </SectionCard>
@@ -2059,7 +2126,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         )}
       </SectionCard>
       {modalOpen && (
-        <Modal title="Adicionar carrinho" onClose={() => setModalOpen(false)}>
+        <Modal title="Adicionar Carrinho" onClose={() => setModalOpen(false)}>
           <form
             className="space-y-5 p-5 sm:p-6"
             onSubmit={(event) => {
@@ -2072,13 +2139,14 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 prefix: letter,
                 total: 60,
                 available: 60,
-                location: newCart.location || "A definir",
+                location: newCart.location.trim() || "A definir",
                 status: "Pronto",
                 lastCheck: "Agora",
                 accent: "bg-[hsl(var(--primary))]",
                 unavailable: false,
                 unavailableUnits: [],
                 reservedUnits: [],
+                deletedUnits: [],
                 reserveCapacity: 0,
               });
               setNewCart({ letter: "", location: "" });
@@ -2102,7 +2170,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                 data-testid="input-cart-letter"
               />
             </Field>
-            <Field label="Localização">
+            <Field label="Observação">
               <input
                 required
                 value={newCart.location}
@@ -2110,7 +2178,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                   setNewCart({ ...newCart, location: event.target.value })
                 }
                 className={inputClass}
-                placeholder="Ex.: Armário D · Bloco 1"
+                placeholder="Ex.: Carrinho azul · sala de tecnologia"
                 data-testid="input-cart-location"
               />
             </Field>
@@ -2754,7 +2822,7 @@ export function HistoryPage() {
     }
     return events;
   });
-  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory, ...historySeed.map((event) => ({ ...event, date: todayISO() }))];
+  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory];
   const localToday = (() => {
     const date = new Date();
     const pad = (value: number) => String(value).padStart(2, "0");

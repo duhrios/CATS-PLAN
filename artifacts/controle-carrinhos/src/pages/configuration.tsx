@@ -102,7 +102,7 @@ export function ScheduleManagementPage() {
 
   return (
     <div className="animate-rise space-y-7">
-      <PageHeader eyebrow="Acesso exclusivo · Super Administrador" title="Horários" description="Gerencie os horários de cada carrinho, sincronize as faixas entre os veículos e mantenha a agenda escolar consistente." />
+      <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Horários" description="Gerencie os horários de cada carrinho, sincronize as faixas entre os veículos e mantenha a agenda escolar consistente." />
       <SectionCard title="Configuração por carrinho" eyebrow="Agenda operacional">
         <div className="grid gap-5 p-4 xl:grid-cols-[260px_1fr] xl:p-6">
           <div className="space-y-4">
@@ -228,7 +228,7 @@ export function ConfigurationPage() {
     ["profiles", "Apagar todos os perfis", "Remover professores e usuários TI.", Users],
     ["history", "Apagar históricos", "Remover registros de movimentação.", History],
     ["teachers", "Apagar professores", "Remover apenas os perfis de professores.", UserRound],
-    ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando este Super administrador.", Factory],
+    ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando o Administrador.", Factory],
   ] as const;
   const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, authenticateAdmin, reservations, replaceReservations, carts } = useCampusData();
   const scheduleFileInputRef = useRef<HTMLInputElement>(null);
@@ -351,7 +351,7 @@ export function ConfigurationPage() {
     }
   };
   return <div className="animate-rise space-y-7">
-    <PageHeader eyebrow="Acesso exclusivo · Super administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
     <SectionCard title="Agendamentos dos carrinhos" eyebrow="Planilha de professores">
       <div className="flex flex-col gap-3 p-4 text-sm text-[hsl(var(--muted-foreground))] sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <p>Use o modelo com Data, Professor, Disciplina, Turma, Sala, Período, Início, Fim, Carrinho e Quantidade.</p>

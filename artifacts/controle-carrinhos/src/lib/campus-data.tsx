@@ -109,6 +109,18 @@ export type Reservation = {
   reservedChromebooks?: string[];
 };
 
+export const canCancelReservation = (
+  reservation: Pick<Reservation, "date" | "start" | "end">,
+  now = new Date(),
+) => {
+  const startsAt = new Date(`${reservation.date}T${reservation.start}:00`);
+  const endsAt = new Date(`${reservation.date}T${reservation.end}:00`);
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) return false;
+  if (now.getTime() < startsAt.getTime()) return true;
+  return now.getTime() < endsAt.getTime() &&
+    now.getTime() <= startsAt.getTime() + 10 * 60 * 1000;
+};
+
 export type Cart = {
   id: string;
   name: string;
@@ -123,6 +135,7 @@ export type Cart = {
   unavailable: boolean;
   unavailableUnits: string[];
   reservedUnits: string[];
+  deletedUnits?: string[];
   reserveCapacity: number;
 };
 
@@ -218,7 +231,8 @@ const normalizeScheduleSlot = (slot: Partial<CartScheduleSlot> | undefined): Car
 };
 
 export const buildCartSchedule = (cartName: string): CartScheduleTemplate => {
-  const source = defaultCartSchedules[cartName] ?? defaultCartSchedules["Carrinho A"];
+  const source = defaultCartSchedules[cartName];
+  if (!source) return { "Manhã": [], "Tarde": [] };
   return {
     "Manhã": source["Manhã"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
     "Tarde": source["Tarde"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
@@ -226,7 +240,7 @@ export const buildCartSchedule = (cartName: string): CartScheduleTemplate => {
 };
 
 export const normalizeCartSchedules = (value: unknown): Record<string, CartScheduleTemplate> => {
-  const fallback = { ...defaultCartSchedules };
+  const fallback: Record<string, CartScheduleTemplate> = {};
   if (!value || typeof value !== "object") return fallback;
   const entries = value as Record<string, unknown>;
   Object.entries(entries).forEach(([cartName, scheduleValue]) => {
@@ -287,6 +301,43 @@ export const movementChangeEventName = "controle-carrinhos-movement-change";
 const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
 const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
 const cartSchedulesStorageKey = "controle-carrinhos-cart-schedules";
+const cleanDefaultStateKey = "controle-carrinhos-clean-default-v3";
+
+const cloneDefaultCarts = () => initialCarts.map((cart) => ({
+  ...cart,
+  unavailableUnits: [...cart.unavailableUnits],
+  reservedUnits: [...cart.reservedUnits],
+  deletedUnits: [...(cart.deletedUnits ?? [])],
+}));
+
+const cloneDefaultSchedules = () => normalizeCartSchedules(defaultCartSchedules);
+
+const initializeCleanDefaultState = () => {
+  if (typeof window === "undefined" || window.localStorage.getItem(cleanDefaultStateKey) === "1") return;
+  [
+    teacherStorageKey,
+    reservationStorageKey,
+    cartStorageKey,
+    teacherAccountsStorageKey,
+    rememberedTeacherStorageKey,
+    wifiPointsStorageKey,
+    wifiRoomsStorageKey,
+    operatorAccountsStorageKey,
+    movementsStorageKey,
+    movementSettingsStorageKey,
+    "controle-carrinhos-campus-settings",
+    "controle-carrinhos-operator-settings",
+    "controle-carrinhos-rooms",
+    "controle-carrinhos-admin-name",
+    "controle-carrinhos-operator-name",
+    "controle-carrinhos-role",
+    "controle-carrinhos-super-admin",
+  ].forEach((key) => window.localStorage.removeItem(key));
+  window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(initialAdminAccounts));
+  window.localStorage.setItem(cartStorageKey, JSON.stringify(cloneDefaultCarts()));
+  window.localStorage.setItem(cartSchedulesStorageKey, JSON.stringify(cloneDefaultSchedules()));
+  window.localStorage.setItem(cleanDefaultStateKey, "1");
+};
 
 export const addDaysISO = (days: number) => {
   const date = new Date();
@@ -295,10 +346,10 @@ export const addDaysISO = (days: number) => {
 };
 
 export const defaultTeacher: TeacherProfile = {
-  name: "Marina Lopes",
-  email: "marina.lopes@campus.edu.br",
+  name: "",
+  email: "",
   segment: "Fundamental 2",
-  subject: "Ciências",
+  subject: "",
 };
 
 export const initialReservations: Reservation[] = [
@@ -414,7 +465,7 @@ export const initialCarts: Cart[] = [
     accent: "bg-[hsl(var(--accent))]",
     unavailable: false,
     unavailableUnits: ["B8", "B19", "B37", "B51"],
-    reservedUnits: [],
+    reservedUnits: ["B49", "B50", "B51", "B52", "B53", "B54", "B55", "B56", "B57", "B58"],
     reserveCapacity: 10,
   },
   {
@@ -430,7 +481,7 @@ export const initialCarts: Cart[] = [
     accent: "bg-[hsl(var(--primary))]",
     unavailable: false,
     unavailableUnits: ["C4", "C16", "C33", "C48"],
-    reservedUnits: [],
+    reservedUnits: ["C46", "C47", "C48", "C49", "C50", "C51", "C52", "C53", "C54", "C55"],
     reserveCapacity: 10,
   },
 ];
@@ -540,13 +591,14 @@ export type CampusSettings = {
   reserveUnits: string[];
 };
 export const defaultCampusSettings: CampusSettings = {
-  campusName: "Colégio Vila Nova",
+  campusName: "",
   coordinatorName: "",
   agendaLabel: "Agenda",
   reservationsEnabled: true,
   reservationLimit: 10,
   reserveUnits: [],
 };
+export const emptyCartSchedules: Record<string, CartScheduleTemplate> = {};
 export const defaultMovementSettings: MovementSettings = {
   alertIntervalMinutes: 10,
   alertRepeat: 2,
@@ -626,10 +678,13 @@ type CampusDataValue = {
   replaceCartSchedules: (next: Record<string, CartScheduleTemplate>) => void;
   syncCartSchedules: (sourceCartNames: string[], targetCartNames: string[]) => void;
   addCart: (cart: Omit<Cart, "id">) => void;
+  addCartUnit: (cartId: string) => string | null;
   deleteCart: (id: string) => boolean;
   toggleCartUnavailable: (id: string) => void;
   toggleCartUnitUnavailable: (cartId: string, unit: string) => void;
+  deleteCartUnit: (cartId: string, unit: string) => boolean;
   toggleCartUnitReserved: (cartId: string, unit: string) => void;
+  restoreReservedUnits: (units?: string[]) => void;
   toggleCartMaintenance: (id: string) => void;
   wifiPoints: WifiPoint[];
   wifiRooms: typeof initialWifiRooms;
@@ -649,6 +704,7 @@ type CampusDataValue = {
 const CampusDataContext = createContext<CampusDataValue | null>(null);
 
 export function CampusDataProvider({ children }: { children: ReactNode }) {
+  initializeCleanDefaultState();
   const [teacher, setTeacher] = useState<TeacherProfile>(() => ({
     ...defaultTeacher,
     ...readStorage<Partial<TeacherProfile>>(teacherStorageKey, {}),
@@ -656,7 +712,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const [reservations, setReservations] = useState<Reservation[]>(() =>
     readStorage<Partial<Reservation>[]>(
       reservationStorageKey,
-      initialReservations,
+      [],
     ).map(
       (item) =>
         ({
@@ -668,26 +724,44 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         }) as Reservation,
     ),
   );
-  const [campusSettings, setCampusSettings] = useState<CampusSettings>(() => ({
-    ...defaultCampusSettings,
-    ...readStorage<Partial<CampusSettings>>("controle-carrinhos-campus-settings", {}),
-  }));
+  const [campusSettings, setCampusSettings] = useState<CampusSettings>(() => {
+    const savedSettings = readStorage<Partial<CampusSettings>>(
+      "controle-carrinhos-campus-settings",
+      {},
+    );
+    return {
+      ...defaultCampusSettings,
+      ...savedSettings,
+      campusName:
+        savedSettings.campusName === "Colégio Vila Nova"
+          ? ""
+          : savedSettings.campusName ?? defaultCampusSettings.campusName,
+    };
+  });
   const [carts, setCarts] = useState<Cart[]>(() =>
-    readStorage<Partial<Cart>[]>(cartStorageKey, initialCarts).map(
-      (cart) =>
-        ({
+    readStorage<Partial<Cart>[]>(cartStorageKey, cloneDefaultCarts()).map(
+      (cart) => {
+        const unavailableUnits = Array.from(new Set(cart.unavailableUnits ?? []));
+        const deletedUnits = Array.from(new Set(cart.deletedUnits ?? []));
+        const reservedUnits = Array.from(
+          new Set((cart.reservedUnits ?? []).filter((unit) => !unavailableUnits.includes(unit) && !deletedUnits.includes(unit))),
+        );
+        return {
           ...cart,
           unavailable: cart.unavailable ?? false,
-          unavailableUnits: cart.unavailableUnits ?? [],
-          reservedUnits: cart.reservedUnits ?? [],
+          unavailableUnits,
+          reservedUnits,
+          deletedUnits,
+          available: Math.max(0, (cart.total ?? 0) - unavailableUnits.length - deletedUnits.length),
           reserveCapacity:
             cart.reserveCapacity ??
             (cart.code === "B" || cart.code === "C" ? 10 : 0),
-        }) as Cart,
+        } as Cart;
+      },
     ),
   );
   const [cartSchedules, setCartSchedules] = useState<Record<string, CartScheduleTemplate>>(() =>
-    normalizeCartSchedules(readStorage(cartSchedulesStorageKey, defaultCartSchedules)),
+    normalizeCartSchedules(readStorage(cartSchedulesStorageKey, cloneDefaultSchedules())),
   );
   const updateCartSchedules = (cartName: string, next: CartScheduleTemplate) => {
     const normalized = {
@@ -719,16 +793,16 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     persistCartSchedules(nextSchedules);
   };
   const [teacherAccounts, setTeacherAccounts] = useState<TeacherAccount[]>(() =>
-    readStorage(teacherAccountsStorageKey, initialTeacherAccounts),
+    readStorage(teacherAccountsStorageKey, []),
   );
   const [wifiPoints, setWifiPoints] = useState<WifiPoint[]>(() =>
-    readStorage(wifiPointsStorageKey, initialWifiPoints),
+    readStorage(wifiPointsStorageKey, []),
   );
   const [wifiRooms, setWifiRooms] = useState<typeof initialWifiRooms>(() =>
-    readStorage(wifiRoomsStorageKey, initialWifiRooms),
+    readStorage(wifiRoomsStorageKey, []),
   );
   const [operatorAccounts, setOperatorAccounts] = useState<OperatorAccount[]>(() =>
-    readStorage(operatorAccountsStorageKey, initialOperatorAccounts),
+    readStorage(operatorAccountsStorageKey, []),
   );
   const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>(() =>
     readStorage(adminAccountsStorageKey, initialAdminAccounts),
@@ -964,11 +1038,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(rememberedTeacherStorageKey);
     }
     if (kind === "factory") {
-      persistCarts([]);
-      persistCartSchedules(defaultCartSchedules);
+      persistCarts(cloneDefaultCarts());
+      persistCartSchedules(cloneDefaultSchedules());
       persistWifiPoints([]);
       persistWifiRooms([]);
-      window.localStorage.removeItem(movementSettingsStorageKey);
+      setMovementSettings(defaultMovementSettings);
+      window.localStorage.setItem(movementSettingsStorageKey, JSON.stringify(defaultMovementSettings));
+      setCampusSettings(defaultCampusSettings);
+      window.localStorage.setItem("controle-carrinhos-campus-settings", JSON.stringify(defaultCampusSettings));
       window.localStorage.removeItem("controle-carrinhos-operator-settings");
       window.dispatchEvent(new Event("controle-carrinhos-clear-rooms"));
       persistAdminAccounts(preservedSuperAdmins);
@@ -1068,11 +1145,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       data.kind === "Reserva" && (!data.reservedChromebooks || data.reservedChromebooks.length === 0)
         ? (() => {
             const candidates = carts
-            .filter((cart) => cart.reserveCapacity > 0)
-            .flatMap((cart) =>
-              Array.from({ length: cart.total }, (_, index) => `${cart.prefix}${index + 1}`)
-                .filter((unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit)),
-            )
+            .filter((cart) => cart.reserveCapacity > 0 || cart.reservedUnits.length > 0)
+            .flatMap((cart) => cart.reservedUnits.filter((unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit)))
             .filter((unit) => !reservations.some((item) => item.kind === "Reserva" && item.id !== id && item.reservedChromebooks?.includes(unit)))
             .reverse();
             const reserved = candidates.filter((unit) =>
@@ -1085,7 +1159,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     if (data.kind === "Reserva" && (!assignedReserveUnits || assignedReserveUnits.length < data.quantity)) return false;
     if (isCartTransitionConflict(data, movementSettings.allowCartATransitionScheduling)) return false;
     const selectedCart = carts.find((cart) => cart.name === data.cart);
-    if (data.kind === "Aula" && selectedCart?.unavailable) return false;
+    if (data.kind === "Aula" && (!selectedCart || selectedCart.unavailable)) return false;
     const duplicate = reservations.find(
       (item) => item.id !== id && reservationsOverlap(item, data),
     );
@@ -1147,12 +1221,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           reservedUnits: unavailableUnits.includes(unit)
             ? cart.reservedUnits.filter((item) => item !== unit)
             : cart.reservedUnits,
-          available: Math.max(
-            0,
-            cart.total -
-              unavailableUnits.length -
-              cart.reservedUnits.filter((item) => !unavailableUnits.includes(item)).length,
-          ),
+          available: Math.max(0, cart.total - unavailableUnits.length - (cart.deletedUnits ?? []).length),
           status:
             unavailableUnits.length >= cart.total
               ? "Indisponível"
@@ -1163,23 +1232,65 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       }),
     );
   };
+  const deleteCartUnit = (cartId: string, unit: string) => {
+    if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return false;
+    const targetCart = carts.find((cart) => cart.id === cartId);
+    if (!targetCart || (targetCart.deletedUnits ?? []).includes(unit)) return false;
+    persistCarts(
+      carts.map((cart) =>
+        cart.id === cartId
+          ? {
+              ...cart,
+              deletedUnits: [...(cart.deletedUnits ?? []), unit],
+              unavailableUnits: cart.unavailableUnits.filter((item) => item !== unit),
+              reservedUnits: cart.reservedUnits.filter((item) => item !== unit),
+              available: Math.max(
+                0,
+                cart.total -
+                  (cart.deletedUnits ?? []).length -
+                  cart.unavailableUnits.filter((item) => item !== unit).length,
+              ),
+            }
+          : cart,
+      ),
+    );
+    return true;
+  };
   const toggleCartUnitReserved = (cartId: string, unit: string) => {
+    const targetCart = carts.find((cart) => cart.id === cartId);
+    if (!targetCart) return;
+    const marking = !targetCart.reservedUnits.includes(unit);
+    if (marking && targetCart.code === "A" && !window.confirm("As reservas são preferenciais aos carrinhos B e C. Deseja continuar usando o Carrinho A para reservas?")) {
+      return;
+    }
     persistCarts(
       carts.map((cart) => {
         if (cart.id !== cartId) return cart;
         const reservedUnits = cart.reservedUnits.includes(unit)
           ? cart.reservedUnits.filter((item) => item !== unit)
           : [...cart.reservedUnits, unit];
+        const nextReserveCapacity = Math.max(cart.reserveCapacity, reservedUnits.length);
         return {
           ...cart,
           reservedUnits,
+          reserveCapacity: nextReserveCapacity,
           unavailableUnits: cart.unavailableUnits.filter((item) => item !== unit),
-          available: Math.max(
-            0,
-            cart.total -
-              cart.unavailableUnits.length -
-              reservedUnits.filter((item) => !cart.unavailableUnits.includes(item)).length,
-          ),
+          available: Math.max(0, cart.total - cart.unavailableUnits.length - (cart.deletedUnits ?? []).length),
+        };
+      }),
+    );
+  };
+  const restoreReservedUnits = (units?: string[]) => {
+    const selected = units ? new Set(units) : null;
+    persistCarts(
+      carts.map((cart) => {
+        const reservedUnits = cart.reservedUnits.filter(
+          (unit) => selected ? !selected.has(unit) : false,
+        );
+        return {
+          ...cart,
+          reservedUnits,
+          available: Math.max(0, cart.total - cart.unavailableUnits.length - (cart.deletedUnits ?? []).length),
         };
       }),
     );
@@ -1191,6 +1302,24 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       ...cartSchedules,
       [nextCart.name]: buildCartSchedule(nextCart.name),
     });
+  };
+  const addCartUnit = (cartId: string) => {
+    if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return null;
+    const targetCart = carts.find((cart) => cart.id === cartId);
+    if (!targetCart) return null;
+    const unit = `${targetCart.prefix}${targetCart.total + 1}`;
+    persistCarts(
+      carts.map((cart) =>
+        cart.id === cartId
+          ? {
+              ...cart,
+              total: cart.total + 1,
+              available: cart.unavailable ? 0 : cart.available + 1,
+            }
+          : cart,
+      ),
+    );
+    return unit;
   };
   const deleteCart = (id: string) => {
     if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return false;
@@ -1451,7 +1580,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
 
   const reserveAvailable = useMemo(
     () =>
-      carts.reduce((total, cart) => total + cart.reserveCapacity, 0) -
+      carts.reduce((total, cart) => total + cart.reservedUnits.length, 0) -
       reservations
         .filter((item) => item.kind === "Reserva")
         .reduce((total, item) => total + item.quantity, 0),
@@ -1510,10 +1639,13 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         replaceCartSchedules,
         syncCartSchedules,
         addCart,
+        addCartUnit,
         deleteCart,
         toggleCartUnavailable,
         toggleCartUnitUnavailable,
+        deleteCartUnit,
         toggleCartUnitReserved,
+        restoreReservedUnits,
         toggleCartMaintenance,
         wifiPoints,
         wifiRooms,

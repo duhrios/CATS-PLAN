@@ -49,8 +49,8 @@ function Router() {
     // Keep a shared shell (sidebar, navbar) outside the boundary so it
     // survives a page crash.
     <RoutedErrorBoundary>
-      {location === "/" || location === "/admin/login" ? (
-        location === "/" ? <AccessPage /> : <AdminLoginPage />
+      {location === "/" || location === "/admin/login" || location === "/login" || location === "/operador/login" ? (
+        location === "/" ? <AccessPage /> : location === "/admin/login" ? <AdminLoginPage /> : location === "/login" ? <TeacherLoginPage /> : <OperatorLoginPage />
       ) : restrictedRole ? (
         <RoleRedirect role={restrictedRole} />
       ) : <AppShell role={operatorMode ? "operator" : userMode ? "user" : "admin"}>

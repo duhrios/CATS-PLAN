@@ -118,6 +118,39 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  await esbuild({
+    entryPoints: [path.resolve(artifactDir, "src/vercel.ts")],
+    platform: "node",
+    bundle: true,
+    format: "esm",
+    outdir: path.resolve(distDir, "vercel"),
+    entryNames: "vercel-api",
+    outExtension: { ".js": ".mjs" },
+    logLevel: "info",
+    external: [
+      "*.node",
+      "bcrypt",
+      "argon2",
+      "fsevents",
+      "pg-native",
+      "pino",
+      "pino-http",
+      "pino-pretty",
+      "thread-stream",
+    ],
+    sourcemap: "linked",
+    banner: {
+      js: `import { createRequire as __bannerCrReq } from 'node:module';
+import __bannerPath from 'node:path';
+import __bannerUrl from 'node:url';
+
+globalThis.require = __bannerCrReq(import.meta.url);
+globalThis.__filename = __bannerUrl.fileURLToPath(import.meta.url);
+globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
+    `,
+    },
+  });
 }
 
 buildAll().catch((err) => {
