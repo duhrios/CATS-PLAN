@@ -6,18 +6,13 @@ import {
   type Reservation,
   useCampusData,
 } from "@/lib/campus-data";
+import { openSyncChannel, showBrowserNotification } from "@/lib/browser-notifications";
 
 type ReservationChange = {
   type: "created" | "updated" | "deleted";
   reservation?: Reservation;
   timestamp?: string;
   source?: string;
-};
-
-const notifyBrowser = (title: string, body: string) => {
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-    new Notification(title, { body });
-  }
 };
 
 const reservationBody = (reservation: Reservation) =>
@@ -27,6 +22,7 @@ export function ReservationNotifications() {
   const { reservations } = useCampusData();
   const knownIds = useRef(new Set(reservations.map((reservation) => reservation.id)));
   const scheduledIds = useRef(new Set<string>());
+  const handledEvents = useRef(new Set<string>());
   const canNotify = () =>
     typeof window !== "undefined" &&
     window.localStorage.getItem("controle-carrinhos-role") !== "user";
@@ -38,10 +34,14 @@ export function ReservationNotifications() {
       if (!canNotify()) return;
       const body = reservationBody(reservation);
       toast({ title: "Nova reserva criada", description: body });
-      notifyBrowser("Nova reserva criada", body);
+      void showBrowserNotification("Nova reserva criada", body, "/reservas");
     };
     const handleChange = (change: ReservationChange) => {
       if (change.type !== "created" || !change.reservation) return;
+      const eventId = change.source ?? `${change.type}:${change.reservation.id}:${change.timestamp ?? ""}`;
+      if (handledEvents.current.has(eventId)) return;
+      handledEvents.current.add(eventId);
+      if (handledEvents.current.size > 200) handledEvents.current.clear();
       showCreated(change.reservation);
       knownIds.current.add(change.reservation.id);
     };
@@ -59,9 +59,16 @@ export function ReservationNotifications() {
     };
     window.addEventListener(reservationChangeEventName, handleCustomEvent);
     window.addEventListener("storage", handleStorage);
+    const channel = openSyncChannel("controle-carrinhos-sync");
+    const handleChannel = (event: MessageEvent<{ type?: string; change?: ReservationChange }>) => {
+      if (event.data?.type === "reservations" && event.data.change) handleChange(event.data.change);
+    };
+    channel?.addEventListener("message", handleChannel);
     return () => {
       window.removeEventListener(reservationChangeEventName, handleCustomEvent);
       window.removeEventListener("storage", handleStorage);
+      channel?.removeEventListener("message", handleChannel);
+      channel?.close();
     };
   }, []);
 
@@ -91,7 +98,7 @@ export function ReservationNotifications() {
           if (!canNotify()) return;
           const body = reservationBody(reservation);
           toast({ title: "Reserva no horário agendado", description: body });
-          notifyBrowser("Reserva no horário agendado", body);
+          void showBrowserNotification("Reserva no horário agendado", body, "/reservas");
           try {
             window.sessionStorage.setItem(`controle-carrinhos-reservation-alert:${key}`, "1");
           } catch {

@@ -14,6 +14,7 @@ Navegador
 API Express
   ├── /api/healthz
   └── /api/reservations
+        └── /api/push/*
         │
         └── Drizzle ORM
               │
@@ -88,16 +89,21 @@ O frontend fica em `http://localhost:4173` e a API em `http://localhost:3000`.
 
 ## Banco Neon
 
-O projeto usa Neon Postgres no projeto `orange-paper-53554576`, branch `production`.
+Cada instalação deve usar seu próprio projeto Neon. Nenhuma credencial ou
+conexão de banco de dados é incluída no código distribuído.
 
 ```powershell
-neon env pull
-$env:DATABASE_URL = $env:DATABASE_URL_UNPOOLED
-pnpm --filter @workspace/db push
-pnpm --filter @workspace/db seed
+Copy-Item .env.example .env.local
+# Preencha DATABASE_URL com a conexão direta do seu projeto Neon.
+$env:DATABASE_URL = "SUA_URL_DIRETA_DO_NEON"
+pnpm --filter @workspace/db run push
+pnpm --filter @workspace/db run seed
 ```
 
-Use `DATABASE_URL_UNPOOLED` para migrações e `DATABASE_URL` (pooler) para tráfego normal da aplicação. Nunca versione `.env.local`.
+Use a URL direta (sem `-pooler`) para aplicar o schema/migrações e a URL pooled
+(`-pooler`) em `DATABASE_URL` no runtime serverless. Nunca versione `.env.local`.
+O arquivo [COMERCIALIZACAO.md](./COMERCIALIZACAO.md) descreve o provisionamento
+individual de Neon e Vercel para uma instalação comercial.
 
 O estado inicial é deliberadamente limpo: o seed/reset remove reservas, usuários
 auxiliares, Wi-Fi, históricos e configurações, mantendo somente o usuário
@@ -173,6 +179,34 @@ Cria uma reserva e valida:
 - inserção dentro de transação no PostgreSQL.
 
 Autenticação e autorização server-side ainda são necessárias antes do uso em produção.
+
+### PWA e notificações push
+
+O frontend registra `/manifest.webmanifest` e `/sw.js`, permitindo instalação como
+PWA e recebimento de notificações pela Push API. O botão **Ativar notificações**
+solicita permissão somente após uma ação explícita do usuário e registra a
+subscription na API.
+
+Para habilitar o envio real, configure `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+`VAPID_SUBJECT` e `PUSH_ADMIN_TOKEN` no ambiente da API. Gere o par VAPID com:
+
+```powershell
+npx web-push generate-vapid-keys
+```
+
+Endpoints disponíveis:
+
+- `GET /api/push/public-key` — retorna a chave pública VAPID.
+- `POST /api/push/subscriptions` — registra o dispositivo.
+- `DELETE /api/push/subscriptions` — remove o dispositivo.
+- `GET /api/push/status` — verifica configuração e subscriptions; exige
+  `Authorization: Bearer <PUSH_ADMIN_TOKEN>`.
+- `POST /api/push/send` — envia uma notificação; exige
+  `Authorization: Bearer <PUSH_ADMIN_TOKEN>`.
+
+As subscriptions são persistidas na tabela `push_subscriptions`, permitindo
+reinício da API e múltiplas instâncias sem perder os dispositivos registrados.
+Execute a migração Drizzle antes de habilitar o recurso em produção.
 
 ## Testes e validação
 

@@ -68,7 +68,7 @@ export function AdminLoginPage() {
         event.preventDefault();
         const account = authenticateAdmin(name, password);
         if (!account) {
-          setError("Senha administrativa incorreta.");
+          setError("Nome ou senha inválidos. O acesso padrão é Administrador / admin123.");
           return;
         }
         window.localStorage.setItem("controle-carrinhos-role", "admin");

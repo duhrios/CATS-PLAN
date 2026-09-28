@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { type Segment } from "@/lib/campus-data";
+import { segments, type Segment } from "@/lib/campus-data";
+import { initialCampusRooms } from "@/lib/room-directory-seed";
 
 export const periods = ["Manhã", "Tarde"] as const;
 export type Period = (typeof periods)[number];
@@ -36,26 +37,52 @@ type RoomDirectoryValue = {
 };
 
 const storageKey = "controle-carrinhos-rooms";
-
-const defaultRooms: Room[] = [
-  { id: "room-08", number: "08", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["8º ano C · Artes"], afternoonClasses: ["6º ano A · Português"] },
-  { id: "room-14", number: "14", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["7º ano A · Matemática"], afternoonClasses: ["7º ano B · Matemática"] },
-  { id: "room-18", number: "18", floor: "2º andar", segment: "Fundamental 2", morningClasses: ["8º ano A · História"], afternoonClasses: ["8º ano D · História"] },
-  { id: "room-02", number: "02", floor: "1º andar", segment: "Fundamental 2", morningClasses: ["8º ano B · Ciências"], afternoonClasses: ["9º ano A · Ciências"] },
-  { id: "room-21", number: "21", floor: "3º andar", segment: "Fundamental 2", morningClasses: ["9º ano C · Geografia"], afternoonClasses: ["9º ano B · Geografia"] },
-];
+const factoryResetKey = "controle-carrinhos-rooms-factory-reset";
+const legacySampleRoomIds = new Set([
+  "room-02",
+  "room-08",
+  "room-14",
+  "room-18",
+  "room-21",
+]);
 
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const normalizeRoom = (value: string) => value.trim().toLowerCase().replace(/^sala\s*/i, "").replace(/\s+/g, " ");
 const roomLabel = (number: string) => `Sala ${number}`;
 
+const segmentForClass = (className: string, fallback: Segment): Segment => {
+  const normalized = className.trim().toLocaleUpperCase("pt-BR");
+  if (/^(PR[EÉ]|MAT\.?)(\s|$)/.test(normalized)) return "Educação Infantil";
+  if (/^(INT[-\s]|[1-3]\s*°?\s*EM\b)/.test(normalized)) return "Ensino Médio";
+  const grade = normalized.match(/^([1-9])\s*°/);
+  if (grade) return Number(grade[1]) <= 5 ? "Fundamental 1" : "Fundamental 2";
+  return fallback;
+};
+
 function readRooms() {
-  if (typeof window === "undefined") return defaultRooms;
+  if (typeof window === "undefined") return [];
   try {
     const saved = window.localStorage.getItem(storageKey);
-    return saved ? (JSON.parse(saved) as Room[]).map((room) => ({ ...room, floor: room.floor ?? "Térreo", segment: room.segment ?? "Fundamental 2" })) : defaultRooms;
+    const factoryReset = window.localStorage.getItem(factoryResetKey) === "1";
+    const seedEnabled = import.meta.env.VITE_ENABLE_CAMPUS_SEED === "true";
+    if (!saved) {
+      if (factoryReset || !seedEnabled) return [];
+      const seeded = initialCampusRooms.map((room) => ({ ...room }));
+      window.localStorage.setItem(storageKey, JSON.stringify(seeded));
+      return seeded;
+    }
+    const parsed = JSON.parse(saved) as Room[];
+    if (!Array.isArray(parsed)) return [];
+    const isLegacySample = parsed.length === legacySampleRoomIds.size &&
+      parsed.every((room) => legacySampleRoomIds.has(room.id));
+    if (seedEnabled && !factoryReset && isLegacySample) {
+      const seeded = initialCampusRooms.map((room) => ({ ...room }));
+      window.localStorage.setItem(storageKey, JSON.stringify(seeded));
+      return seeded;
+    }
+    return parsed.map((room) => ({ ...room, floor: room.floor ?? "Térreo", segment: room.segment ?? "Fundamental 2" }));
   } catch {
-    return defaultRooms;
+    return [];
   }
 }
 
@@ -67,25 +94,40 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
     const clearRooms = () => {
       setRooms([]);
       window.localStorage.removeItem(storageKey);
+      window.localStorage.setItem(factoryResetKey, "1");
     };
     window.addEventListener("controle-carrinhos-clear-rooms", clearRooms);
     return () => window.removeEventListener("controle-carrinhos-clear-rooms", clearRooms);
   }, []);
-  const classEntries = useMemo(() => rooms.flatMap((room) => [
-     ...room.morningClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Manhã" as Period, segment: room.segment, floor: room.floor })),
-     ...room.afternoonClasses.map((className) => ({ className, room: roomLabel(room.number), period: "Tarde" as Period, segment: room.segment, floor: room.floor })),
-  ]), [rooms]);
+  const classEntries = useMemo(() => rooms.flatMap((room) =>
+    ([
+      ...room.morningClasses.map((className) => ({ className, period: "Manhã" as Period })),
+      ...room.afternoonClasses.map((className) => ({ className, period: "Tarde" as Period })),
+    ]).flatMap(({ className, period }) => {
+      const entry = {
+        className,
+        room: roomLabel(room.number),
+        period,
+        floor: room.floor,
+      };
+      const normalizedClass = className.trim().toLocaleLowerCase("pt-BR");
+      const entrySegments = normalizedClass === "contraturno"
+        ? segments
+        : [segmentForClass(className, room.segment)];
+      return entrySegments.map((segment) => ({ ...entry, segment }));
+    }),
+  ), [rooms]);
   const roomOptions = useMemo(() => [...rooms]
     .sort((first, second) => Number(first.number) - Number(second.number))
     .map((room) => roomLabel(room.number)), [rooms]);
-  const roomOptionsForSegment = (segment: Segment) => rooms
-    .filter((room) => room.segment === segment)
-    .sort((first, second) => Number(first.number) - Number(second.number))
-    .map((room) => roomLabel(room.number));
+  const roomOptionsForSegment = (segment: Segment) => [...new Set(
+    classEntries.filter((entry) => entry.segment === segment).map((entry) => entry.room),
+  )].sort((first, second) => Number(normalizeRoom(first)) - Number(normalizeRoom(second)));
 
   const persist = (nextRooms: Room[]) => {
     setRooms(nextRooms);
     window.localStorage.setItem(storageKey, JSON.stringify(nextRooms));
+    window.localStorage.removeItem(factoryResetKey);
   };
 
   const addRoom = (room: Omit<Room, "id">) => {

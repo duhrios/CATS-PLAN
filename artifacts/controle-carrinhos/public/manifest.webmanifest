@@ -1,0 +1,17 @@
+{
+  "name": "Controle de Carrinhos Chromebook",
+  "short_name": "Carrinhos",
+  "description": "Gestão de carrinhos Chromebook, reservas e movimentações.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f8fb",
+  "theme_color": "#1d4f91",
+  "icons": [
+    {
+      "src": "/agenda-adventista-icon.png",
+      "sizes": "768x768",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

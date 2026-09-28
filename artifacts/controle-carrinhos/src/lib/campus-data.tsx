@@ -298,6 +298,8 @@ const wifiRoomsStorageKey = "controle-carrinhos-wifi-rooms";
 const operatorAccountsStorageKey = "controle-carrinhos-operator-accounts";
 const movementsStorageKey = "controle-carrinhos-movements";
 export const movementChangeEventName = "controle-carrinhos-movement-change";
+export const movementStorageKey = "controle-carrinhos-movements";
+export const syncChannelName = "controle-carrinhos-sync";
 const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
 const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
 const cartSchedulesStorageKey = "controle-carrinhos-cart-schedules";
@@ -313,7 +315,11 @@ const cloneDefaultCarts = () => initialCarts.map((cart) => ({
 const cloneDefaultSchedules = () => normalizeCartSchedules(defaultCartSchedules);
 
 const initializeCleanDefaultState = () => {
-  if (typeof window === "undefined" || window.localStorage.getItem(cleanDefaultStateKey) === "1") return;
+  if (typeof window === "undefined") return;
+  if (window.localStorage.getItem(adminAccountsStorageKey) === null) {
+    window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(initialAdminAccounts));
+  }
+  if (window.localStorage.getItem(cleanDefaultStateKey) === "1") return;
   [
     teacherStorageKey,
     reservationStorageKey,
@@ -908,6 +914,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       };
       window.localStorage.setItem(reservationChangeStorageKey, JSON.stringify(event));
       window.dispatchEvent(new CustomEvent(reservationChangeEventName, { detail: event }));
+      if ("BroadcastChannel" in window) {
+        const channel = new BroadcastChannel(syncChannelName);
+        channel.postMessage({ type: "reservations", change: event });
+        channel.close();
+      }
     }
   };
   useEffect(() => {
@@ -1057,6 +1068,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent(movementChangeEventName, {
       detail: next,
     }));
+    if ("BroadcastChannel" in window) {
+      const channel = new BroadcastChannel(syncChannelName);
+      channel.postMessage({ type: "movements", movements: next });
+      channel.close();
+    }
   };
   const updateMovementStatus = (
     reservationId: number,

@@ -132,6 +132,14 @@ export const activityTable = pgTable("campus_activity", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const pushSubscriptionsTable = pgTable("push_subscriptions", {
+  endpoint: text("endpoint").primaryKey(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User = typeof usersTable.$inferSelect;
 export type Cart = typeof cartsTable.$inferSelect;
 export type CartUnit = typeof cartUnitsTable.$inferSelect;
@@ -141,3 +149,4 @@ export type Reservation = typeof reservationsTable.$inferSelect;
 export type Movement = typeof movementsTable.$inferSelect;
 export type DayLock = typeof dayLocksTable.$inferSelect;
 export type Activity = typeof activityTable.$inferSelect;
+export type PushSubscription = typeof pushSubscriptionsTable.$inferSelect;
