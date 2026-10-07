@@ -106,9 +106,38 @@ O arquivo [COMERCIALIZACAO.md](./COMERCIALIZACAO.md) descreve o provisionamento
 individual de Neon e Vercel para uma instalação comercial.
 
 O estado inicial é deliberadamente limpo: o seed/reset remove reservas, usuários
-auxiliares, Wi-Fi, históricos e configurações, mantendo somente o usuário
-`Administrador` e o catálogo padrão de carrinhos/horários. A senha `admin123` ainda é uma credencial provisória do
-protótipo local e deve ser substituída antes de qualquer uso em produção.
+auxiliares, Wi-Fi, históricos e configurações, mantendo apenas o catálogo padrão
+de carrinhos/horários. Configure a autenticação do servidor antes do deploy:
+
+```powershell
+$env:SESSION_SECRET = (node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))")
+node .\scripts\hash-password.mjs
+# Copie o hash impresso para ADMIN_PASSWORD_HASH (e gere outro para TI).
+```
+
+Configure `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `ADMIN_SUPER_ADMIN`,
+`OPERATOR_USERNAME`, `OPERATOR_PASSWORD_HASH` e `SESSION_SECRET` no ambiente
+privado da API. Contas de professor devem existir em `campus_users` com
+`role='user'`, senha armazenada no formato scrypt criado pelo script e
+`active=true`. Nunca coloque hashes ou segredos em variáveis `VITE_*`, no
+frontend, no banco local do navegador ou em arquivos versionados. Sem essas
+configurações, o servidor nega o login.
+
+No primeiro acesso administrativo, a credencial temporária configurada no
+servidor só autentica quando a conta ainda não tem uma senha persistida. Esse
+login recebe uma sessão restrita e precisa definir uma senha nova de pelo menos
+6 caracteres antes de acessar qualquer outra área. A senha nova é gravada como
+hash scrypt em `campus_users`; a partir daí, ela prevalece sobre a credencial
+temporária e esta não volta a autenticar enquanto a senha persistida existir.
+Senhas escolhidas para o Administrador e professores precisam ter pelo menos
+6 caracteres. O Administrador, TI e professores podem optar por salvar suas
+credenciais usando o gerenciador de senhas do navegador; o aplicativo não grava
+senhas no armazenamento local do navegador.
+
+A sessão é assinada no servidor e guardada em cookie `HttpOnly`, `Secure` em
+produção e `SameSite=Strict`; o papel salvo no armazenamento do navegador não
+concede acesso. Professores têm sessão de 45 minutos; TI e Administrador, 12
+horas. A API valida a sessão e a origem antes de aceitar alterações de reservas.
 Para repetir a limpeza explicitamente:
 
 ```powershell
@@ -120,6 +149,9 @@ pnpm --filter @workspace/db reset
 
 - **Acesso e perfis:** entrada do Administrador, perfis de professores,
   operadores e controle de permissões.
+- **Sessões:** o servidor emite cookies assinados, com expiração e validação
+  própria. O cliente não pode conceder a si mesmo uma função alterando
+  `localStorage`.
 - **Carrinhos:** cadastro, edição, disponibilidade geral, indisponibilidade,
   unidades indisponíveis/reservadas e atualização operacional. O Bloco
   Reservas é calculado pelas unidades marcadas pelo TI/Administrador, sem
@@ -134,7 +166,34 @@ pnpm --filter @workspace/db reset
   sobreposição, atribuição de unidades e regras especiais de transição do
   Carrinho A.
 - **Operação do TI:** estados Não movido, Movendo, Concluído e Não atendida,
-  confirmação, reenvio e registro de movimentações.
+  confirmação, reenvio e registro de movimentações. Todos os carrinhos com
+  horário simultâneo aparecem em um único aviso navegável por setas (modo
+  seleção) ou empilhados (modo clássico, configurável no dispositivo do TI).
+  Lembretes valem somente durante a janela da aula; alterações de status não
+  geram notificações do sistema. Notificações externas são reservadas para um
+  novo pedido ativo do professor. Se o mesmo
+  carrinho tem horários consecutivos na mesma sala e a entrega anterior já foi
+  iniciada/concluída, as próximas aulas não pedem outra movimentação física e
+  são concluídas automaticamente no horário. Se o carrinho for destinado a
+  outra sala ou houver intervalo entre horários, uma nova movimentação é avisada.
+- **Visão - Planilha:** bloco exclusivo do TI e da Administração, com acesso
+  rápido em grade semanal inspirada na planilha de referência (carrinho,
+  horários, turma e professor) e acesso completo com dados da reserva e do
+  acompanhamento operacional. Acesso Rápido permite selecionar e arrastar
+  uma aula para outro horário/carrinho disponível, salvando pela agenda
+  compartilhada para atualizar também a área de movimentações. Para transferir
+  várias aulas de uma vez, mantenha Ctrl pressionado ao selecioná-las e arraste
+  a seleção até o título do carrinho de destino; os horários são mantidos e a
+  seleção é validada antes de salvar. Se alguma gravação falhar, a interface
+  informa quantas aulas foram salvas e sincroniza novamente os agendamentos.
+  Ctrl+Z (ou Cmd+Z no Mac) desfaz a última movimentação enquanto a planilha
+  estiver aberta. O filtro de período mostra manhã, tarde ou ambos; a visão geral
+  separa as linhas em blocos visuais para cada período.
+  A grade rápida
+  segue os dias úteis; o acesso completo também inclui reservas do fim de semana,
+  reúne tudo em **Ver todas** ou mantém abas específicas por carrinho e permite
+  exibir todas as colunas ou personalizar a seleção. As sugestões de otimização
+  por piso aparecem abaixo da planilha nesta mesma página.
 - **Infraestrutura:** cadastro de pontos Wi-Fi, salas, bloqueios de dia e
   configurações do campus.
 - **Histórico:** consulta dos eventos reais de reservas e movimentações; a
@@ -179,6 +238,10 @@ Cria uma reserva e valida:
 - inserção dentro de transação no PostgreSQL.
 
 Autenticação e autorização server-side ainda são necessárias antes do uso em produção.
+As sessões acima controlam a interface no navegador e não substituem validação
+de identidade/autorização na API. Os perfis atuais também são armazenados no
+navegador; autenticação compartilhada entre dispositivos requer persistência de
+contas e sessões no servidor.
 
 ### PWA e notificações push
 
@@ -230,6 +293,11 @@ DATABASE_URL
 DATABASE_URL_UNPOOLED
 SESSION_SECRET
 APP_BASE_URL
+ADMIN_USERNAME
+ADMIN_PASSWORD_HASH
+ADMIN_SUPER_ADMIN
+OPERATOR_USERNAME
+OPERATOR_PASSWORD_HASH
 ```
 
 Não coloque credenciais no Git, no README ou em logs.

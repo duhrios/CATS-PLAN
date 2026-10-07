@@ -9,7 +9,16 @@ const cleanRoomNumber = (value: string) => value.trim().replace(/^sala\s*/i, "")
 const emptyForm = { number: "", floor: "Térreo", segment: "Fundamental 2" as Segment, morningClasses: "", afternoonClasses: "" };
 
 export function RoomsPage() {
-  const { rooms, addRoom, updateRoom, deleteRoom, deleteRooms } = useRoomDirectory();
+  const {
+    rooms,
+    roomCatalogLoading,
+    roomsSyncError,
+    syncRooms,
+    addRoom,
+    updateRoom,
+    deleteRoom,
+    deleteRooms,
+  } = useRoomDirectory();
   const orderedRooms = [...rooms].sort((first, second) => Number(first.number) - Number(second.number));
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState("");
@@ -115,8 +124,10 @@ export function RoomsPage() {
         eyebrow="Cadastro administrativo"
         title="Salas"
         description="Cadastre os números e informe quais turmas usam cada sala em cada período."
-        action={<Button onClick={openAddModal} data-testid="button-new-room"><Plus size={16} /> Adicionar sala</Button>}
+        action={<Button onClick={openAddModal} disabled={roomCatalogLoading} data-testid="button-new-room"><Plus size={16} /> Adicionar sala</Button>}
       />
+      {roomCatalogLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]" role="status">Carregando salas compartilhadas...</p>}
+      {roomsSyncError && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.06)] p-3 text-sm text-[hsl(var(--destructive))]" role="alert"><span>As alterações de salas não foram sincronizadas com os professores: {roomsSyncError}</span><Button size="sm" variant="secondary" onClick={() => void syncRooms()}>Tentar sincronizar</Button></div>}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Salas cadastradas</p><p className="mt-4 font-display text-3xl font-semibold">{rooms.length}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Disponíveis para reservas</p></div>
         <div className="rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5"><p className="text-[11px] font-bold uppercase tracking-[.13em] text-[hsl(var(--muted-foreground))]">Turmas pela manhã</p><p className="mt-4 font-display text-3xl font-semibold">{rooms.reduce((total, room) => total + room.morningClasses.length, 0)}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">O primeiro período</p></div>

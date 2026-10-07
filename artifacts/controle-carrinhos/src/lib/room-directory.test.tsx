@@ -1,14 +1,33 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import React, { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CampusDataProvider, useCampusData } from "./campus-data";
 import { RoomDirectoryProvider, useRoomDirectory } from "./room-directory";
 import { initialCampusRooms } from "./room-directory-seed";
 
+const { getRole, loadSharedRooms } = vi.hoisted(() => ({
+  getRole: vi.fn(() => null),
+  loadSharedRooms: vi.fn(),
+}));
+
+vi.mock("@/lib/auth-session", () => ({
+  getAuthenticatedRole: getRole,
+  getAuthenticatedSession: vi.fn(() => null),
+  onAuthenticatedSessionChange: vi.fn(() => () => {}),
+}));
+
+vi.mock("./room-directory-api", () => ({
+  loadSharedRooms,
+  saveSharedRooms: vi.fn().mockResolvedValue({ rooms: [], configured: true }),
+}));
+
 describe("Room directory factory reset", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    getRole.mockReturnValue(null);
+    loadSharedRooms.mockResolvedValue({ rooms: [], configured: false });
   });
 
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -17,11 +36,18 @@ describe("Room directory factory reset", () => {
     </CampusDataProvider>
   );
 
-  it("does not recreate sample rooms after a factory reset or app reload", () => {
+  it("does not request protected room data before a user signs in", async () => {
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.roomCatalogLoading).toBe(false));
+    expect(loadSharedRooms).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate sample rooms after a factory reset or app reload", async () => {
     const { result, unmount } = renderHook(
       () => ({ campus: useCampusData(), directory: useRoomDirectory() }),
       { wrapper },
     );
+    await waitFor(() => expect(result.current.directory.roomCatalogLoading).toBe(false));
 
     act(() => {
       expect(result.current.directory.addRoom({
@@ -58,14 +84,16 @@ describe("Room directory factory reset", () => {
       () => ({ campus: useCampusData(), directory: useRoomDirectory() }),
       { wrapper },
     );
+    await waitFor(() => expect(reloaded.result.current.directory.roomCatalogLoading).toBe(false));
     expect(reloaded.result.current.directory.rooms).toHaveLength(0);
     expect(reloaded.result.current.campus.wifiPoints).toHaveLength(0);
     expect(reloaded.result.current.campus.wifiRooms).toHaveLength(0);
   });
 
-  it("loads the configured 46-room campus seed once and classifies mixed-grade rooms by class", () => {
+  it("loads the configured 46-room campus seed once and classifies mixed-grade rooms by class", async () => {
     vi.stubEnv("VITE_ENABLE_CAMPUS_SEED", "true");
     const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.roomCatalogLoading).toBe(false));
 
     expect(initialCampusRooms).toHaveLength(46);
     expect(result.current.rooms).toHaveLength(46);
@@ -87,7 +115,7 @@ describe("Room directory factory reset", () => {
     expect(window.localStorage.getItem("controle-carrinhos-rooms")).not.toBeNull();
   });
 
-  it("replaces only the known five-room demo catalog with the configured campus layout", () => {
+  it("replaces only the known five-room demo catalog with the configured campus layout", async () => {
     vi.stubEnv("VITE_ENABLE_CAMPUS_SEED", "true");
     window.localStorage.setItem("controle-carrinhos-rooms", JSON.stringify([
       { id: "room-08", number: "08", floor: "1º andar", segment: "Fundamental 2", morningClasses: [], afternoonClasses: [] },
@@ -98,6 +126,7 @@ describe("Room directory factory reset", () => {
     ]));
 
     const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.roomCatalogLoading).toBe(false));
 
     expect(result.current.rooms).toHaveLength(46);
     expect(result.current.rooms.map((room) => room.number)).toContain("46");

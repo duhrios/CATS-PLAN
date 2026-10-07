@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import React from 'react';
 import type { ReactNode } from 'react';
@@ -11,6 +11,17 @@ import {
   useCampusData,
 } from './campus-data';
 import type { Cart } from './campus-data';
+
+vi.mock('@/lib/auth-session', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/auth-session')>(),
+  getAuthenticatedSession: () => ({
+    role: 'admin',
+    name: 'Test administrator',
+    isSuperAdmin: true,
+    mustChangePassword: false,
+    expiresAt: Date.now() + 60_000,
+  }),
+}));
 
 describe('Campus data core logic', () => {
   beforeEach(() => {
@@ -39,23 +50,42 @@ describe('Campus data core logic', () => {
     act(() => result.current.addCart(cart));
   };
 
-  it('starts with only the default administrator account', () => {
+  it('starts without built-in accounts or shared default credentials', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
 
-    const admin = initialAdminAccounts[0];
-
-    expect(admin.password).toBe('admin123');
+    expect(initialAdminAccounts).toHaveLength(0);
+    expect(result.current.adminAccounts).toHaveLength(0);
     expect(result.current.operatorAccounts).toHaveLength(0);
     expect(result.current.teacherAccounts).toHaveLength(0);
     expect(result.current.reservations).toHaveLength(0);
     expect(result.current.carts).toHaveLength(initialCarts.length);
-    expect(result.current.authenticateAdmin(admin.name, admin.password)?.id).toBe(admin.id);
-    expect(result.current.authenticateOperator('TI', '123456')).toBeNull();
+    expect(result.current.authenticateAdmin('Administrador', 'invalid-test-password')).toBeNull();
+    expect(result.current.authenticateOperator('TI', 'invalid-test-password')).toBeNull();
+  });
+
+  it('does not persist a teacher password in browser storage', () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    act(() => {
+      result.current.addTeacherAccounts([{
+        name: 'Professora Teste',
+        email: 'teste@escola.edu.br',
+        segment: 'Fundamental 2',
+        subject: 'Ciências',
+      }]);
+    });
+
+    const stored = window.localStorage.getItem('controle-carrinhos-teacher-accounts') ?? '';
+    expect(stored).not.toContain('password');
+    expect(result.current.teacherAccounts[0].mustSetPassword).toBe(true);
+    expect(result.current.completeTeacherRegistration(
+      result.current.teacherAccounts[0].id,
+      'Professora Teste',
+      'some-long-password',
+    )).toBeNull();
   });
 
   it('adds a new unit to a cart and persists its availability', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
-    window.localStorage.setItem('controle-carrinhos-super-admin', 'true');
     const original = result.current.carts.find((cart) => cart.id === 'a');
     expect(original).toBeDefined();
 
@@ -72,7 +102,7 @@ describe('Campus data core logic', () => {
   });
 
   it('creates, updates and deletes reservations while preserving overlap validation', () => {
-    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const { result } = renderHook(() => useCampusData(), { wrapper     });
     addTestCart(result);
     const base = { date: '2026-10-01' };
     const created = {
@@ -131,6 +161,24 @@ describe('Campus data core logic', () => {
     expect(result.current.reservations.some((item) => item.id === createdId)).toBe(false);
   });
 
+  it("preserves every movement completed in the same update cycle", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+
+    act(() => {
+      result.current.updateMovementStatus(101, "Concluído", true, "Aula repetida na mesma sala/turma");
+      result.current.updateMovementStatus(102, "Concluído", true, "Aula repetida na mesma sala/turma");
+    });
+
+    expect(result.current.movements.map((movement) => movement.reservationId).sort()).toEqual([101, 102]);
+    const persisted = JSON.parse(
+      window.localStorage.getItem("controle-carrinhos-movements") ?? "[]",
+    ) as Array<{ reservationId: number; status: string; autoCompleted: boolean }>;
+    expect(persisted).toHaveLength(2);
+    expect(persisted.every((movement) =>
+      movement.status === "Concluído" && movement.autoCompleted,
+    )).toBe(true);
+  });
+
   it('keeps schedules empty until an administrator configures a cart', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
 
@@ -144,7 +192,7 @@ describe('Campus data core logic', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
 
     expect(result.current.teacherAccounts).toHaveLength(0);
-    expect(result.current.authenticateTeacher('Marina Lopes', '1234')).toBeNull();
+    expect(result.current.authenticateTeacher('Marina Lopes', 'invalid-test-password')).toBeNull();
   });
 
   it('blocks the Carrinho A transition slot unless the setting explicitly allows it', () => {

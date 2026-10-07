@@ -1,4 +1,4 @@
-import { Bell, BellOff } from "lucide-react";
+import { BellOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/app-ui";
 
@@ -15,7 +15,11 @@ export function PushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [registered, setRegistered] = useState(false);
+  const [registered, setRegistered] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("controle-carrinhos-push-enabled") === "true",
+  );
   const [serviceWorkerReady, setServiceWorkerReady] = useState(false);
 
   useEffect(() => {
@@ -25,7 +29,11 @@ export function PushNotifications() {
       "PushManager" in window;
     setSupported(available);
     if ("Notification" in window) setPermission(Notification.permission);
-    setRegistered(window.localStorage.getItem("controle-carrinhos-push-enabled") === "true");
+    setRegistered(
+      "Notification" in window &&
+        Notification.permission === "granted" &&
+        window.localStorage.getItem("controle-carrinhos-push-enabled") === "true",
+    );
     if (available) {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`)
         .then(() => setServiceWorkerReady(true))
@@ -35,7 +43,7 @@ export function PushNotifications() {
     }
   }, []);
 
-  if (!supported) return null;
+  if (!supported || registered) return null;
 
   const enable = async () => {
     setBusy(true);
@@ -79,9 +87,9 @@ export function PushNotifications() {
           Notificações bloqueadas. Permita notificações nas configurações do site para ativá-las.
         </p>
       ) : (
-        <Button size="sm" variant="secondary" onClick={enable} disabled={busy || registered || !serviceWorkerReady}>
-          {registered ? <Bell size={14} /> : <BellOff size={14} />}
-          {busy ? "Ativando..." : !serviceWorkerReady ? "Preparando notificações..." : registered ? "Notificações ativas" : "Ativar notificações"}
+        <Button size="sm" variant="secondary" onClick={enable} disabled={busy || !serviceWorkerReady}>
+          <BellOff size={14} />
+          {busy ? "Ativando..." : !serviceWorkerReady ? "Preparando notificações..." : "Ativar notificações"}
         </Button>
       )}
       {error && <p className="max-w-xs text-right text-[11px] text-[hsl(var(--destructive))]">{error}</p>}

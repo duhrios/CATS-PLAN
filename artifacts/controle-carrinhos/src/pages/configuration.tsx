@@ -2,6 +2,12 @@ import { AlertTriangle, CalendarX, Clock3, Database, Download, Factory, History,
 import { PageHeader, SectionCard, Button, Field, Modal, inputClass } from "@/components/app-ui";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { buildCartSchedule, segments, useCampusData, type CartScheduleTemplate, type Reservation } from "@/lib/campus-data";
+import { loadSharedReservations, replaceSharedReservations } from "@/lib/reservations-api";
+import { endAuthSession, loginWithCredentials } from "@/lib/auth-session";
+import {
+  loadTeacherSpreadsheetEnabled,
+  saveTeacherSpreadsheetEnabled,
+} from "@/lib/teacher-spreadsheet";
 import * as XLSX from "xlsx";
 
 const normalizeSpreadsheetHeader = (value: unknown) =>
@@ -230,11 +236,50 @@ export function ConfigurationPage() {
     ["teachers", "Apagar professores", "Remover apenas os perfis de professores.", UserRound],
     ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando o Administrador.", Factory],
   ] as const;
-  const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, authenticateAdmin, reservations, replaceReservations, carts } = useCampusData();
+  const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, reservations, replaceReservations, carts } = useCampusData();
   const scheduleFileInputRef = useRef<HTMLInputElement>(null);
+  const [teacherSpreadsheetEnabled, setTeacherSpreadsheetEnabled] = useState(true);
+  const [teacherSpreadsheetLoading, setTeacherSpreadsheetLoading] = useState(true);
+  const [teacherSpreadsheetSaving, setTeacherSpreadsheetSaving] = useState(false);
+  const [teacherSpreadsheetError, setTeacherSpreadsheetError] = useState("");
   const [pendingAction, setPendingAction] = useState<typeof actions[number] | null>(null);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void loadTeacherSpreadsheetEnabled()
+      .then((enabled) => {
+        if (active) setTeacherSpreadsheetEnabled(enabled);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setTeacherSpreadsheetError(
+            error instanceof Error ? error.message : "Não foi possível carregar a opção de acesso à planilha.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setTeacherSpreadsheetLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const toggleTeacherSpreadsheet = async () => {
+    if (teacherSpreadsheetSaving || teacherSpreadsheetLoading) return;
+    const next = !teacherSpreadsheetEnabled;
+    setTeacherSpreadsheetSaving(true);
+    setTeacherSpreadsheetError("");
+    try {
+      setTeacherSpreadsheetEnabled(await saveTeacherSpreadsheetEnabled(next));
+    } catch (error) {
+      setTeacherSpreadsheetError(
+        error instanceof Error ? error.message : "Não foi possível salvar a opção de acesso à planilha.",
+      );
+    } finally {
+      setTeacherSpreadsheetSaving(false);
+    }
+  };
   const run = (action: typeof actions[number]) => {
     setPendingAction(action);
     setPassword("");
@@ -244,17 +289,23 @@ export function ConfigurationPage() {
     event.preventDefault();
     if (!pendingAction) return;
     const currentAdminName = window.localStorage.getItem("controle-carrinhos-admin-name") ?? "";
-    const account = authenticateAdmin(currentAdminName, password);
-    if (!account?.isSuperAdmin) {
-      setPasswordError("Senha incorreta. Informe novamente a senha do administrador.");
-      return;
-    }
-    const [, label] = pendingAction;
-    if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) {
-      resetData(pendingAction[0]);
-      setPendingAction(null);
-      setPassword("");
-    }
+    void loginWithCredentials("admin", currentAdminName, password)
+      .then(async (session) => {
+        if (!session.isSuperAdmin) {
+          await endAuthSession();
+          setPasswordError("Esta ação exige a conta de superadministrador.");
+          return;
+        }
+        const [, label] = pendingAction;
+        if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) {
+          resetData(pendingAction[0]);
+          setPendingAction(null);
+          setPassword("");
+        }
+      })
+      .catch((error: unknown) => {
+        setPasswordError(error instanceof Error ? error.message : "Não foi possível validar a senha.");
+      });
   };
   const exportAppointments = () => {
     const rows = reservations
@@ -343,7 +394,9 @@ export function ConfigurationPage() {
       if (!imported.length) throw new Error("Nenhum agendamento válido foi encontrado.");
       const nextId = Math.max(...reservations.map((reservation) => reservation.id), 0);
       const withIds = imported.map((reservation, index) => ({ ...reservation, id: nextId + index + 1 }));
-      replaceReservations([...reservations.filter((reservation) => reservation.kind !== "Aula"), ...withIds]);
+      const nextReservations = [...reservations.filter((reservation) => reservation.kind !== "Aula"), ...withIds];
+      await replaceSharedReservations(nextReservations);
+      replaceReservations(await loadSharedReservations());
       const suffix = errors.length ? ` Linhas ignoradas: ${errors.join(", ")}.` : "";
       window.alert(`${withIds.length} agendamento(s) importado(s).${suffix}`);
     } catch (error) {
@@ -352,6 +405,29 @@ export function ConfigurationPage() {
   };
   return <div className="animate-rise space-y-7">
     <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <SectionCard title="Acesso do professor à planilha" eyebrow="Permissões de visualização">
+      <div className="space-y-3 p-4 sm:p-5">
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[hsl(var(--border))] p-4 text-sm">
+          <input
+            type="checkbox"
+            checked={teacherSpreadsheetEnabled}
+            disabled={teacherSpreadsheetLoading || teacherSpreadsheetSaving}
+            onChange={() => void toggleTeacherSpreadsheet()}
+            className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]"
+            data-testid="toggle-teacher-spreadsheet"
+          />
+          <span>
+            <span className="block font-semibold">Permitir que professores vejam a Visão Rápida da planilha</span>
+            <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">
+              Professores terão acesso somente à visualização semanal rápida, sem mover ou editar agendamentos.
+            </span>
+          </span>
+        </label>
+        {teacherSpreadsheetLoading && <p role="status" className="text-xs text-[hsl(var(--muted-foreground))]">Carregando configuração...</p>}
+        {teacherSpreadsheetSaving && <p role="status" className="text-xs text-[hsl(var(--muted-foreground))]">Salvando configuração...</p>}
+        {teacherSpreadsheetError && <p role="alert" className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{teacherSpreadsheetError}</p>}
+      </div>
+    </SectionCard>
     <SectionCard title="Agendamentos dos carrinhos" eyebrow="Planilha de professores">
       <div className="flex flex-col gap-3 p-4 text-sm text-[hsl(var(--muted-foreground))] sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <p>Use o modelo com Data, Professor, Disciplina, Turma, Sala, Período, Início, Fim, Carrinho e Quantidade.</p>

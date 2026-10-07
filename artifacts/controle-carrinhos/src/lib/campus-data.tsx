@@ -3,10 +3,21 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { todayISO } from "@/components/app-ui";
+import {
+  clearSharedReservations,
+  loadSharedReservations,
+  onSharedReservationsRefresh,
+} from "@/lib/reservations-api";
+import {
+  getAuthenticatedRole,
+  getAuthenticatedSession,
+  onAuthenticatedSessionChange,
+} from "@/lib/auth-session";
 
 export const segments = [
   "Educação Infantil",
@@ -22,6 +33,7 @@ export type TeacherProfile = {
   email: string;
   segment: Segment;
   subject: string;
+  className?: string;
 };
 export type TeacherAccount = TeacherProfile & {
   id: string;
@@ -304,6 +316,7 @@ const movementSettingsStorageKey = "controle-carrinhos-movement-settings";
 const adminAccountsStorageKey = "controle-carrinhos-admin-accounts";
 const cartSchedulesStorageKey = "controle-carrinhos-cart-schedules";
 const cleanDefaultStateKey = "controle-carrinhos-clean-default-v3";
+const secureAuthMigrationKey = "controle-carrinhos-secure-auth-v1";
 
 const cloneDefaultCarts = () => initialCarts.map((cart) => ({
   ...cart,
@@ -316,8 +329,32 @@ const cloneDefaultSchedules = () => normalizeCartSchedules(defaultCartSchedules)
 
 const initializeCleanDefaultState = () => {
   if (typeof window === "undefined") return;
-  if (window.localStorage.getItem(adminAccountsStorageKey) === null) {
-    window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(initialAdminAccounts));
+  if (window.localStorage.getItem(secureAuthMigrationKey) !== "1") {
+    for (const key of [
+      adminAccountsStorageKey,
+      operatorAccountsStorageKey,
+      "controle-carrinhos-role",
+      "controle-carrinhos-auth-session",
+      "controle-carrinhos-super-admin",
+    ]) {
+      window.localStorage.removeItem(key);
+    }
+    try {
+      const storedTeachers = window.localStorage.getItem(teacherAccountsStorageKey);
+      if (storedTeachers) {
+        const accounts = JSON.parse(storedTeachers) as TeacherAccount[];
+        window.localStorage.setItem(
+          teacherAccountsStorageKey,
+          JSON.stringify(accounts.map(({ password: _password, ...account }) => ({
+            ...account,
+            mustSetPassword: true,
+          }))),
+        );
+      }
+    } catch {
+      window.localStorage.removeItem(teacherAccountsStorageKey);
+    }
+    window.localStorage.setItem(secureAuthMigrationKey, "1");
   }
   if (window.localStorage.getItem(cleanDefaultStateKey) === "1") return;
   [
@@ -337,9 +374,10 @@ const initializeCleanDefaultState = () => {
     "controle-carrinhos-admin-name",
     "controle-carrinhos-operator-name",
     "controle-carrinhos-role",
+    "controle-carrinhos-auth-session",
+    "controle-carrinhos-remembered-operator-name",
     "controle-carrinhos-super-admin",
   ].forEach((key) => window.localStorage.removeItem(key));
-  window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(initialAdminAccounts));
   window.localStorage.setItem(cartStorageKey, JSON.stringify(cloneDefaultCarts()));
   window.localStorage.setItem(cartSchedulesStorageKey, JSON.stringify(cloneDefaultSchedules()));
   window.localStorage.setItem(cleanDefaultStateKey, "1");
@@ -505,8 +543,8 @@ export const initialTeacherAccounts: TeacherAccount[] = [
     email: "rafael.nunes@campus.edu.br",
     segment: "Fundamental 2",
     subject: "Matemática",
-    password: "1234",
-    mustSetPassword: false,
+    password: undefined,
+    mustSetPassword: true,
   },
   {
     id: "teacher-bianca",
@@ -514,16 +552,12 @@ export const initialTeacherAccounts: TeacherAccount[] = [
     email: "bianca.reis@campus.edu.br",
     segment: "Fundamental 2",
     subject: "Geografia",
-    password: "1234",
-    mustSetPassword: false,
+    password: undefined,
+    mustSetPassword: true,
   },
 ];
-export const initialOperatorAccounts: OperatorAccount[] = [
-  { id: "operator-01", name: "TI", password: "123456", isAdmin: false },
-];
-export const initialAdminAccounts: AdminAccount[] = [
-  { id: "admin-01", name: "Administrador", password: "admin123", isSuperAdmin: true },
-];
+export const initialOperatorAccounts: OperatorAccount[] = [];
+export const initialAdminAccounts: AdminAccount[] = [];
 
 export const initialWifiPoints: WifiPoint[] = [
   {
@@ -672,6 +706,7 @@ type CampusDataValue = {
   campusSettings: CampusSettings;
   updateCampusSettings: (settings: CampusSettings) => void;
   reservations: Reservation[];
+  reservationsSyncError: string | null;
   replaceReservations: (next: Reservation[]) => void;
   saveReservation: (
     data: Omit<Reservation, "id" | "status">,
@@ -730,6 +765,69 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         }) as Reservation,
     ),
   );
+  const [reservationsSyncError, setReservationsSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    if (import.meta.env.MODE === "test") return;
+    let active = true;
+    const syncReservations = () => {
+      if (!getAuthenticatedRole()) return Promise.resolve();
+      return loadSharedReservations()
+        .then((sharedReservations) => {
+          if (!active) return;
+          const serializedReservations = JSON.stringify(sharedReservations);
+          setReservations((currentReservations) =>
+            JSON.stringify(currentReservations) === serializedReservations
+              ? currentReservations
+              : sharedReservations,
+          );
+          window.localStorage.setItem(reservationStorageKey, serializedReservations);
+          setReservationsSyncError(null);
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setReservationsSyncError(
+            error instanceof Error
+              ? `Não foi possível carregar a agenda compartilhada: ${error.message}`
+              : "Não foi possível carregar a agenda compartilhada.",
+          );
+        });
+    };
+    let syncInFlight: Promise<void> | null = null;
+    const refreshReservations = () => {
+      if (syncInFlight) return syncInFlight;
+      syncInFlight = syncReservations().finally(() => {
+        syncInFlight = null;
+      });
+      return syncInFlight;
+    };
+    const handleSessionChange = () => {
+      if (getAuthenticatedRole()) {
+        void refreshReservations();
+      } else {
+        setReservations([]);
+        window.localStorage.removeItem(reservationStorageKey);
+      }
+    };
+    const unsubscribeManualRefresh = onSharedReservationsRefresh((complete) => {
+      void refreshReservations().finally(complete);
+    });
+    const unsubscribeSession = onAuthenticatedSessionChange(handleSessionChange);
+    if (getAuthenticatedRole()) void refreshReservations();
+    const interval = window.setInterval(() => void refreshReservations(), 15_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshReservations();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      unsubscribeManualRefresh();
+      unsubscribeSession();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
   const [campusSettings, setCampusSettings] = useState<CampusSettings>(() => {
     const savedSettings = readStorage<Partial<CampusSettings>>(
       "controle-carrinhos-campus-settings",
@@ -808,10 +906,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     readStorage(wifiRoomsStorageKey, []),
   );
   const [operatorAccounts, setOperatorAccounts] = useState<OperatorAccount[]>(() =>
-    readStorage(operatorAccountsStorageKey, []),
+    [],
   );
   const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>(() =>
-    readStorage(adminAccountsStorageKey, initialAdminAccounts),
+    [],
   );
   const [movements, setMovements] = useState<CartMovement[]>(() =>
     readStorage<Partial<CartMovement>[]>(movementsStorageKey, []).map((item) => ({
@@ -833,11 +931,12 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       confirmedAt: item.confirmedAt,
     })),
   );
+  const movementsRef = useRef(movements);
   useEffect(() => {
     const syncMovements = (event: StorageEvent) => {
       if (event.key !== movementsStorageKey || !event.newValue) return;
       const parsed = JSON.parse(event.newValue) as Partial<CartMovement>[];
-      setMovements(parsed.map((item) => ({
+      const next = parsed.map((item) => ({
         reservationId: item.reservationId as number,
         status: item.status ?? "Não movido",
         updatedAt: item.updatedAt ?? new Date().toISOString(),
@@ -854,12 +953,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         requestAgainAt: item.requestAgainAt,
         confirmedBy: item.confirmedBy,
         confirmedAt: item.confirmedAt,
-      })));
+      }));
+      movementsRef.current = next;
+      setMovements(next);
     };
     const syncMovementEvent = (event: Event) => {
       const parsed = (event as CustomEvent<Partial<CartMovement>[]>).detail;
       if (!Array.isArray(parsed)) return;
-      setMovements(parsed.map((item) => ({
+      const next = parsed.map((item) => ({
         reservationId: item.reservationId as number,
         status: item.status ?? "Não movido",
         updatedAt: item.updatedAt ?? new Date().toISOString(),
@@ -876,7 +977,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         requestAgainAt: item.requestAgainAt,
         confirmedBy: item.confirmedBy,
         confirmedAt: item.confirmedAt,
-      })));
+      }));
+      movementsRef.current = next;
+      setMovements(next);
     };
     window.addEventListener("storage", syncMovements);
     window.addEventListener(movementChangeEventName, syncMovementEvent);
@@ -950,10 +1053,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(cartSchedulesStorageKey, JSON.stringify(normalized));
   };
   const persistTeacherAccounts = (next: TeacherAccount[]) => {
-    setTeacherAccounts(next);
+    const safeAccounts = next.map(({ password: _password, ...account }) => ({
+      ...account,
+      mustSetPassword: true,
+    }));
+    setTeacherAccounts(safeAccounts);
     window.localStorage.setItem(
       teacherAccountsStorageKey,
-      JSON.stringify(next),
+      JSON.stringify(safeAccounts),
     );
   };
   const persistWifiPoints = (next: WifiPoint[]) => {
@@ -965,15 +1072,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(wifiRoomsStorageKey, JSON.stringify(next));
   };
   const persistOperatorAccounts = (next: OperatorAccount[]) => {
-    setOperatorAccounts(next);
-    window.localStorage.setItem(
-      operatorAccountsStorageKey,
-      JSON.stringify(next),
-    );
+    const safeAccounts = next.map((account) => ({ ...account, password: "" }));
+    setOperatorAccounts(safeAccounts);
+    window.localStorage.removeItem(operatorAccountsStorageKey);
   };
   const persistAdminAccounts = (next: AdminAccount[]) => {
-    setAdminAccounts(next);
-    window.localStorage.setItem(adminAccountsStorageKey, JSON.stringify(next));
+    const safeAccounts = next.map((account) => ({ ...account, password: "" }));
+    setAdminAccounts(safeAccounts);
+    window.localStorage.removeItem(adminAccountsStorageKey);
   };
   const updateAdminAccount = (id: string, name: string, password: string) => {
     const normalized = name.trim().replace(/\s+/g, " ");
@@ -1032,6 +1138,15 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     if (kind === "reservations" || kind === "history" || kind === "factory") {
       persistReservations([]);
       persistMovements([]);
+      if (import.meta.env.MODE !== "test") {
+        clearSharedReservations().catch((error: unknown) => {
+          setReservationsSyncError(
+            error instanceof Error
+              ? `Não foi possível limpar a agenda compartilhada: ${error.message}`
+              : "Não foi possível limpar a agenda compartilhada.",
+          );
+        });
+      }
     }
     if (kind === "history") {
       window.localStorage.removeItem(rememberedTeacherStorageKey);
@@ -1049,6 +1164,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(rememberedTeacherStorageKey);
     }
     if (kind === "factory") {
+      window.localStorage.removeItem("controle-carrinhos-auth-session");
       persistCarts(cloneDefaultCarts());
       persistCartSchedules(cloneDefaultSchedules());
       persistWifiPoints([]);
@@ -1063,6 +1179,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     }
   };
   const persistMovements = (next: CartMovement[]) => {
+    movementsRef.current = next;
     setMovements(next);
     window.localStorage.setItem(movementsStorageKey, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent(movementChangeEventName, {
@@ -1081,7 +1198,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     actor = autoCompleted ? "Conclusão automática" : "TI",
     movedLate?: boolean,
   ) => {
-    const current = movements.find((item) => item.reservationId === reservationId);
+    const currentMovements = movementsRef.current;
+    const current = currentMovements.find((item) => item.reservationId === reservationId);
     const nextItem: CartMovement = {
       reservationId,
       status,
@@ -1090,28 +1208,30 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       autoCompleted,
       requestCount: current?.requestCount ?? 0,
       movedBy: status === "Movendo" ? actor : current?.movedBy,
-      completedBy: status === "Concluído" ? actor : current?.completedBy,
+      completedBy: status === "Concluído" ? actor : status === "Não movido" ? undefined : current?.completedBy,
       movedAt: status === "Movendo" ? new Date().toISOString() : current?.movedAt,
-      completedAt: status === "Concluído" ? new Date().toISOString() : current?.completedAt,
+      completedAt: status === "Concluído" ? new Date().toISOString() : status === "Não movido" ? undefined : current?.completedAt,
       movedLate: movedLate ?? current?.movedLate ?? false,
-      confirmedBy: status === "Concluído" && !autoCompleted ? actor : current?.confirmedBy,
-      confirmedAt: status === "Concluído" && !autoCompleted ? new Date().toISOString() : current?.confirmedAt,
+      confirmedBy: status === "Concluído" && !autoCompleted ? actor : status === "Não movido" ? undefined : current?.confirmedBy,
+      confirmedAt: status === "Concluído" && !autoCompleted ? new Date().toISOString() : status === "Não movido" ? undefined : current?.confirmedAt,
       notAttendedAt: status === "Não atendida" ? new Date().toISOString() : current?.notAttendedAt,
     };
-    persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
+    persistMovements([...currentMovements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
   const reportNotReceived = (reservationId: number) => {
-    const current = movements.find((item) => item.reservationId === reservationId);
+    const currentMovements = movementsRef.current;
+    const current = currentMovements.find((item) => item.reservationId === reservationId);
     if (current?.status === "Concluído" && !current.autoCompleted) return;
     const now = new Date().toISOString();
     const nextItem = { reservationId, status: "Não movido" as const, updatedAt: now, notReceived: true, autoCompleted: false, requestCount: (current?.requestCount ?? 0) + 1, notReceivedAt: now };
-    persistMovements([...movements.filter((item) => item.reservationId !== reservationId), { ...current, ...nextItem }]);
+    persistMovements([...currentMovements.filter((item) => item.reservationId !== reservationId), { ...current, ...nextItem }]);
   };
   const markMovementNotAttended = (reservationId: number) => {
-    const current = movements.find((item) => item.reservationId === reservationId);
+    const currentMovements = movementsRef.current;
+    const current = currentMovements.find((item) => item.reservationId === reservationId);
     if (current?.status === "Movendo" || current?.status === "Concluído" || current?.status === "Não atendida") return;
     const now = new Date().toISOString();
-    persistMovements([...movements.filter((item) => item.reservationId !== reservationId), {
+    persistMovements([...currentMovements.filter((item) => item.reservationId !== reservationId), {
       reservationId,
       status: "Não atendida",
       updatedAt: now,
@@ -1126,7 +1246,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     }]);
   };
   const requestMovementAgain = (reservationId: number) => {
-    const current = movements.find((item) => item.reservationId === reservationId);
+    const currentMovements = movementsRef.current;
+    const current = currentMovements.find((item) => item.reservationId === reservationId);
     const now = new Date().toISOString();
     const nextItem = {
       ...current,
@@ -1139,7 +1260,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       notReceivedAt: current?.notReceivedAt ?? now,
       requestAgainAt: now,
     };
-    persistMovements([...movements.filter((item) => item.reservationId !== reservationId), nextItem]);
+    persistMovements([...currentMovements.filter((item) => item.reservationId !== reservationId), nextItem]);
   };
   const updateMovementSettings = (settings: MovementSettings) => {
     setMovementSettings(settings);
@@ -1249,7 +1370,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     );
   };
   const deleteCartUnit = (cartId: string, unit: string) => {
-    if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return false;
+    if (getAuthenticatedSession()?.isSuperAdmin !== true) return false;
     const targetCart = carts.find((cart) => cart.id === cartId);
     if (!targetCart || (targetCart.deletedUnits ?? []).includes(unit)) return false;
     persistCarts(
@@ -1320,7 +1441,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     });
   };
   const addCartUnit = (cartId: string) => {
-    if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return null;
+    if (getAuthenticatedSession()?.isSuperAdmin !== true) return null;
     const targetCart = carts.find((cart) => cart.id === cartId);
     if (!targetCart) return null;
     const unit = `${targetCart.prefix}${targetCart.total + 1}`;
@@ -1338,7 +1459,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     return unit;
   };
   const deleteCart = (id: string) => {
-    if (window.localStorage.getItem("controle-carrinhos-super-admin") !== "true") return false;
+    if (getAuthenticatedSession()?.isSuperAdmin !== true) return false;
     const cart = carts.find((item) => item.id === id);
     if (!cart) return false;
     const nextSchedules = { ...cartSchedules };
@@ -1401,54 +1522,14 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(rememberedTeacherStorageKey);
   };
   const completeTeacherRegistration = (
-    id: string,
-    name: string,
-    password: string,
+    _id: string,
+    _name: string,
+    _password: string,
   ): TeacherRegistrationResult => {
-    const trimmedName = name.trim().replace(/\s+/g, " ");
-    if (!trimmedName || password.length < 6) return null;
-    if (
-      teacherAccounts.some(
-        (account) =>
-          account.id !== id &&
-          normalizeTeacherName(account.name) ===
-            normalizeTeacherName(trimmedName),
-      )
-    ) {
-      return "name-taken";
-    }
-    const current = teacherAccounts.find((account) => account.id === id);
-    if (!current) return null;
-    const updated = {
-      ...current,
-      name: trimmedName,
-      password,
-      mustSetPassword: false,
-    };
-    persistTeacherAccounts(
-      teacherAccounts.map((account) => (account.id === id ? updated : account)),
-    );
-    return updated;
+    return null;
   };
-  const updateTeacherPassword = (currentPassword: string, nextPassword: string) => {
-    const trimmedPassword = nextPassword.trim();
-    if (trimmedPassword.length < 6) return false;
-    const currentAccount = teacherAccounts.find(
-      (account) => account.name === teacher.name && account.email === teacher.email,
-    ) ?? teacherAccounts.find((account) => account.name === teacher.name)
-      ?? teacherAccounts.find((account) => account.email === teacher.email);
-    if (!currentAccount) return false;
-    if (currentAccount.password !== undefined && currentAccount.password !== currentPassword) {
-      return false;
-    }
-    persistTeacherAccounts(
-      teacherAccounts.map((account) =>
-        account.id === currentAccount.id
-          ? { ...account, password: trimmedPassword, mustSetPassword: false }
-          : account,
-      ),
-    );
-    return true;
+  const updateTeacherPassword = (_currentPassword: string, _nextPassword: string) => {
+    return false;
   };
   const authenticateTeacher = (
     name: string,
@@ -1646,6 +1727,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         campusSettings,
         updateCampusSettings,
         reservations,
+        reservationsSyncError,
         replaceReservations,
         saveReservation,
         deleteReservation,

@@ -2,6 +2,7 @@ import { count, eq } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import webpush from "web-push";
 import { db, pushSubscriptionsTable } from "@workspace/db";
+import { requireSameOrigin, requireSession, requireStaff } from "../lib/auth";
 
 type PushSubscription = webpush.PushSubscription;
 
@@ -19,9 +20,33 @@ router.get("/push/public-key", (_req, res) => {
   return res.json({ publicKey: vapidPublicKey });
 });
 
-router.post("/push/subscriptions", async (req, res) => {
-  const subscription = req.body as Partial<PushSubscription>;
-  if (!subscription.endpoint || !subscription.keys?.auth || !subscription.keys.p256dh) {
+const isSupportedPushEndpoint = (value: string) => {
+  try {
+    const endpoint = new URL(value);
+    const supportedHosts = [
+      "fcm.googleapis.com",
+      "push.services.mozilla.com",
+      "push.apple.com",
+      "notify.windows.com",
+    ];
+    return endpoint.protocol === "https:" &&
+      supportedHosts.some((host) => endpoint.hostname === host || endpoint.hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+};
+
+router.post("/push/subscriptions", requireSameOrigin, requireSession, async (req, res) => {
+  const subscription = (req.body ?? {}) as Partial<PushSubscription>;
+  if (
+    typeof subscription.endpoint !== "string" ||
+    subscription.endpoint.length > 2048 ||
+    !isSupportedPushEndpoint(subscription.endpoint) ||
+    typeof subscription.keys?.auth !== "string" ||
+    subscription.keys.auth.length > 256 ||
+    typeof subscription.keys.p256dh !== "string" ||
+    subscription.keys.p256dh.length > 256
+  ) {
     return res.status(400).json({ error: "Subscription push inválida." });
   }
   await db.insert(pushSubscriptionsTable).values({
@@ -39,7 +64,7 @@ router.post("/push/subscriptions", async (req, res) => {
   return res.status(201).json({ registered: true });
 });
 
-router.delete("/push/subscriptions", async (req, res) => {
+router.delete("/push/subscriptions", requireSameOrigin, requireStaff, async (req, res) => {
   const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
   if (endpoint) await db.delete(pushSubscriptionsTable).where(eq(pushSubscriptionsTable.endpoint, endpoint));
   return res.status(204).send();
@@ -66,9 +91,14 @@ router.post("/push/send", async (req, res) => {
     return res.status(401).json({ error: "Não autorizado." });
   }
   const payload = JSON.stringify({
-    title: typeof req.body?.title === "string" ? req.body.title : "Controle de Carrinhos",
-    body: typeof req.body?.body === "string" ? req.body.body : "Você tem uma nova atualização.",
-    url: typeof req.body?.url === "string" ? req.body.url : "/",
+    title: typeof req.body?.title === "string" ? req.body.title.slice(0, 120) : "Controle de Carrinhos",
+    body: typeof req.body?.body === "string" ? req.body.body.slice(0, 500) : "Você tem uma nova atualização.",
+    url: typeof req.body?.url === "string" &&
+      req.body.url.startsWith("/") &&
+      !req.body.url.startsWith("//") &&
+      !req.body.url.includes("\\")
+      ? req.body.url.slice(0, 2048)
+      : "/",
   });
   let sent = 0;
   const subscriptions = await db.select().from(pushSubscriptionsTable);

@@ -47,6 +47,7 @@ import {
   todayISO,
 } from "@/components/app-ui";
 import { Calendar } from "@/components/ui/calendar";
+import { getAuthenticatedSession } from "@/lib/auth-session";
 import { type Period, useRoomDirectory } from "@/lib/room-directory";
 import {
   isReservationInProgress,
@@ -59,6 +60,11 @@ import {
   reservationsOverlap,
   useCampusData,
 } from "@/lib/campus-data";
+import {
+  deleteSharedReservation,
+  loadSharedReservations,
+  saveSharedReservation,
+} from "@/lib/reservations-api";
 
 const isoToDate = (value: string) => new Date(`${value}T12:00:00`);
 const dateToISO = (value: Date) => value.toISOString().slice(0, 10);
@@ -496,8 +502,8 @@ function ReservationModal({
   initialDate?: string;
   mode?: "admin" | "user" | "operator";
   onClose: () => void;
-  onSave: (value: Omit<Reservation, "id" | "status">) => boolean;
-  teacher: { name: string; segment: Segment; subject: string };
+  onSave: (value: Omit<Reservation, "id" | "status">) => boolean | string | Promise<boolean | string>;
+  teacher: { name: string; segment: Segment; subject: string; className?: string };
   reserveAvailable: number;
   teacherReserved: number;
 }) {
@@ -505,11 +511,19 @@ function ReservationModal({
     useRoomDirectory();
   const { carts, reservations, wifiRooms, wifiPoints, movementSettings, campusSettings, cartSchedules } = useCampusData();
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const scheduleFor = (cart: string, period: "Manhã" | "Tarde", date?: string) => {
     if (date && period === "Tarde" && isFridayISO(date)) return fridayAfternoonSchedule;
     return cartSchedules[cart]?.[period] ?? [];
   };
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
+  const initialSegment = reservation?.segment ?? teacher.segment;
+  const initialClassName = reservation?.className ??
+    ((initialSegment === "Educação Infantil" || initialSegment === "Fundamental 1")
+      ? teacher.className ?? ""
+      : "");
+  const initialRoom = reservation?.room ??
+    (initialClassName ? roomForClass(initialClassName, initialPeriod, initialSegment) : "");
   const initialCart = reservation?.cart ?? "Carrinho A";
   const selectedInitialDate = reservation?.date ?? initialDateValue ?? todayISO();
   const initialSlots = scheduleFor(initialCart, initialPeriod, selectedInitialDate);
@@ -518,11 +532,11 @@ function ReservationModal({
     initialSlots[0];
   const [form, setForm] = useState({
     teacher: reservation?.teacher ?? teacher.name,
-    segment: reservation?.segment ?? teacher.segment,
+    segment: initialSegment,
     subject: reservation?.subject ?? teacher.subject,
     kind: reservation?.kind ?? ("Aula" as ReservationKind),
-    className: reservation?.className ?? "",
-    room: reservation?.room ?? "",
+    className: initialClassName,
+    room: initialRoom,
     period: initialPeriod,
     date: selectedInitialDate,
     start: initialSlot?.start ?? reservation?.start ?? "07:00",
@@ -625,8 +639,9 @@ function ReservationModal({
     >
       <form
         className="space-y-5 p-5 sm:p-6"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
+          if (saving) return;
           const quantity = Math.max(1, Number(form.quantity) || 1);
           if (isReserve && !campusSettings.reservationsEnabled) {
             setError("As reservas de Chromebooks estão desativadas pelo administrador.");
@@ -682,8 +697,20 @@ function ReservationModal({
             setError("Este carrinho já está reservado nesse horário. Escolha outro horário ou carrinho.");
             return;
           }
-          if (!sameDayBlocked && !onSave(reservationData)) {
-            setError("Este carrinho acabou de ser reservado nesse horário. Escolha outro horário ou carrinho.");
+          if (!sameDayBlocked) {
+            setSaving(true);
+            try {
+              const result = await onSave(reservationData);
+              if (result !== true) {
+                setError(
+                  typeof result === "string"
+                    ? result
+                    : "Este carrinho acabou de ser reservado nesse horário. Escolha outro horário ou carrinho.",
+                );
+              }
+            } finally {
+              setSaving(false);
+            }
           }
         }}
         data-testid="form-reservation"
@@ -991,7 +1018,7 @@ function ReservationModal({
           </Button>
           <Button
             type="submit"
-            disabled={sameDayBlocked || weekendBlocked}
+            disabled={sameDayBlocked || weekendBlocked || saving}
             data-testid="button-save-reservation"
           >
             <Check size={15} />{" "}
@@ -999,7 +1026,7 @@ function ReservationModal({
               ? "Salvar alterações"
               : isReserve
                 ? "Solicitar Chromebooks"
-                : "Criar reserva"}
+                : saving ? "Salvando..." : "Criar reserva"}
           </Button>
         </div>
       </form>
@@ -1016,6 +1043,7 @@ export function ReservationsPage({
   const { floorForRoom } = useRoomDirectory();
   const {
     reservations,
+    replaceReservations,
     saveReservation,
     teacher,
     reserveAvailable,
@@ -1083,6 +1111,10 @@ export function ReservationsPage({
       typeof window !== "undefined" ? window.location.search : "",
     );
     if (params.get("nova") === "1") {
+      const requestedDate = params.get("data");
+      if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+        setCalendarDate(requestedDate);
+      }
       setModal({ open: true, reservation: undefined });
       if (location.startsWith("/usuario/reservas")) {
         const nextUrl = new URL(window.location.href);
@@ -1105,22 +1137,6 @@ export function ReservationsPage({
       ),
     [conflictDetails],
   );
-  const floorSuggestions = useMemo(() => {
-    const suggestions: Array<{ current: Reservation; previous: Reservation; floor: string }> = [];
-    const ordered = [...reservations].filter((item) => item.kind === "Aula").sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
-    ordered.forEach((current, index) => {
-      const previous = ordered.slice(0, index).reverse().find((item) =>
-        item.date === current.date &&
-        item.cart !== current.cart &&
-        item.start < current.start &&
-        floorForRoom(item.room) === floorForRoom(current.room),
-      );
-      if (previous && !suggestions.some((item) => item.current.id === current.id)) {
-        suggestions.push({ current, previous, floor: floorForRoom(current.room) });
-      }
-    });
-    return suggestions;
-  }, [floorForRoom, reservations]);
   const visibleReservations = useMemo(
     () =>
       mode === "user"
@@ -1184,10 +1200,33 @@ export function ReservationsPage({
     setCalendarDate(dateToISO(date));
     setDateFilter("Calendário");
   };
-  const handleSaveReservation = (data: Omit<Reservation, "id" | "status">) => {
-    const saved = saveReservation({ ...data, cart: recommendCart(data) }, modal.reservation?.id);
-    if (saved) setModal({ open: false });
-    return saved;
+  const handleSaveReservation = async (data: Omit<Reservation, "id" | "status">) => {
+    const sharedData = { ...data, cart: recommendCart(data) };
+    const saved = saveReservation(sharedData, modal.reservation?.id);
+    if (!saved) return false;
+    try {
+      await saveSharedReservation(sharedData, modal.reservation?.id);
+      replaceReservations(await loadSharedReservations());
+      setModal({ open: false });
+      return true;
+    } catch (error) {
+      replaceReservations(reservations);
+      return error instanceof Error
+        ? `Não foi possível salvar na agenda compartilhada: ${error.message}`
+        : "Não foi possível salvar na agenda compartilhada.";
+    }
+  };
+  const handleDeleteReservation = async (id: number) => {
+    try {
+      await deleteSharedReservation(id);
+      deleteReservation(id);
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? `Não foi possível cancelar na agenda compartilhada: ${error.message}`
+          : "Não foi possível cancelar na agenda compartilhada.",
+      );
+    }
   };
   return (
     <div className="animate-rise space-y-4">
@@ -1257,21 +1296,6 @@ export function ReservationsPage({
           />
         )}
       </div>
-      {mode !== "user" && floorSuggestions.length > 0 && (
-        <SectionCard title="Otimização por piso" eyebrow="Sugestões para reduzir trocas de andar">
-          <div className="divide-y divide-[hsl(var(--border))]">
-            {floorSuggestions.slice(0, 5).map(({ current, previous, floor }) => (
-              <div key={current.id} className="flex flex-wrap items-center justify-between gap-3 p-4 sm:px-6">
-                <div>
-                  <p className="text-sm font-semibold">{current.date} · {current.start} · {current.room} ({floor})</p>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">O {previous.cart} já estará no mesmo piso às {previous.start} em {previous.room}.</p>
-                </div>
-                <span className="rounded-full bg-[hsl(var(--accent)/.18)] px-3 py-1 text-xs font-bold text-[hsl(34_60%_32%)]">Sugestão: {previous.cart}</span>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
       <div className="grid gap-6 xl:grid-cols-[20rem_1fr]">
         <SectionCard title="Calendário" eyebrow="Agendamentos por dia">
           <div className="p-3">
@@ -1550,7 +1574,7 @@ export function ReservationsPage({
                                           disabled={!canCancelReservation(item)}
                                           onClick={() => {
                                             if (canCancelReservation(item) && window.confirm("Cancelar este agendamento?")) {
-                                              deleteReservation(item.id);
+                                              void handleDeleteReservation(item.id);
                                               setExpandedReservationId(null);
                                             }
                                           }}
@@ -1616,9 +1640,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [unitSelectionMode, setUnitSelectionMode] = useState<
     "unavailable" | "reserved" | "deleted"
   >("unavailable");
-  const isSuperAdmin =
-    typeof window !== "undefined" &&
-    window.localStorage.getItem("controle-carrinhos-super-admin") === "true";
+  const isSuperAdmin = getAuthenticatedSession()?.isSuperAdmin === true;
   const filtered = carts.filter(
     (cart) =>
       (filter === "Todos" || filter === "Reservas"
