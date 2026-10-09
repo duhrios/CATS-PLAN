@@ -24,6 +24,7 @@ export const segments = [
   "Fundamental 1",
   "Fundamental 2",
   "Ensino Médio",
+  "Contraturno",
 ] as const;
 export type Segment = (typeof segments)[number];
 export type ReservationKind = "Aula" | "Reserva";

@@ -6,7 +6,7 @@ import { RoomDirectoryProvider, useRoomDirectory } from "./room-directory";
 import { initialCampusRooms } from "./room-directory-seed";
 
 const { getRole, loadSharedRooms } = vi.hoisted(() => ({
-  getRole: vi.fn(() => null),
+  getRole: vi.fn((): "admin" | "operator" | "user" | null => null),
   loadSharedRooms: vi.fn(),
 }));
 
@@ -110,9 +110,52 @@ describe("Room directory factory reset", () => {
       afternoonClasses: ["8° TA"],
     });
     expect(result.current.roomOptionsForSegment("Educação Infantil")).toContain("Sala 05");
+    expect(result.current.roomOptionsForSegment("Contraturno")).toEqual([
+      "Sala 02",
+      "Sala 03",
+      "Sala 04",
+    ]);
+    expect(result.current.roomOptionsForSegment("Fundamental 1")).not.toContain("Sala 02");
     expect(result.current.roomOptionsForSegment("Fundamental 2")).toContain("Sala 29");
     expect(result.current.roomOptionsForSegment("Ensino Médio")).toContain("Sala 29");
     expect(window.localStorage.getItem("controle-carrinhos-rooms")).not.toBeNull();
+  });
+
+  it("keeps legacy contraturno rooms exclusively in the Contraturno segment", async () => {
+    const legacyRoom = {
+      id: "room-02",
+      number: "02",
+      floor: "Subsolo",
+      segment: "Fundamental 1",
+      morningClasses: ["Contraturno"],
+      afternoonClasses: ["Contraturno"],
+    };
+    getRole.mockReturnValue("admin");
+    loadSharedRooms.mockResolvedValue({
+      configured: true,
+      rooms: [legacyRoom],
+    });
+
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.rooms).toHaveLength(1));
+
+    expect(result.current.rooms[0].segment).toBe("Contraturno");
+    expect(result.current.classEntries).toEqual([
+      expect.objectContaining({
+        className: "Contraturno",
+        period: "Manhã",
+        room: "Sala 02",
+        segment: "Contraturno",
+      }),
+      expect.objectContaining({
+        className: "Contraturno",
+        period: "Tarde",
+        room: "Sala 02",
+        segment: "Contraturno",
+      }),
+    ]);
+    expect(result.current.roomOptionsForSegment("Contraturno")).toEqual(["Sala 02"]);
+    expect(result.current.roomOptionsForSegment("Fundamental 1")).toEqual([]);
   });
 
   it("replaces only the known five-room demo catalog with the configured campus layout", async () => {

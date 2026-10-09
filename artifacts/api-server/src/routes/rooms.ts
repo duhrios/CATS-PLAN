@@ -5,7 +5,7 @@ import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
 import { getRoomDirectory, roomDirectorySettingKey, type CampusRoom } from "../lib/room-directory";
 
 const router: IRouter = Router();
-const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio"];
+const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio", "Contraturno"];
 
 const validateRooms = (value: unknown): CampusRoom[] | null => {
   if (!Array.isArray(value) || value.length > 200) return null;

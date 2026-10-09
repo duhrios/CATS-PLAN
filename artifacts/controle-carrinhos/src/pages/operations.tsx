@@ -519,9 +519,11 @@ function ReservationModal({
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialSegment = reservation?.segment ?? teacher.segment;
   const initialClassName = reservation?.className ??
-    ((initialSegment === "Educação Infantil" || initialSegment === "Fundamental 1")
-      ? teacher.className ?? ""
-      : "");
+    (initialSegment === "Contraturno"
+      ? "Contraturno"
+      : (initialSegment === "Educação Infantil" || initialSegment === "Fundamental 1")
+        ? teacher.className ?? ""
+        : "");
   const initialRoom = reservation?.room ??
     (initialClassName ? roomForClass(initialClassName, initialPeriod, initialSegment) : "");
   const initialCart = reservation?.cart ?? "Carrinho A";
@@ -563,13 +565,22 @@ function ReservationModal({
         const segment = value as Segment;
         const rooms = roomOptionsForSegment(segment);
         next.room = rooms.length === 1 ? rooms[0] : "";
-        next.className =
-          segment === "Educação Infantil" || segment === "Fundamental 1"
+        next.className = segment === "Contraturno"
+          ? classEntries.some((entry) => entry.segment === segment && entry.className === "Contraturno")
+            ? "Contraturno"
+            : ""
+          : segment === "Educação Infantil" || segment === "Fundamental 1"
             ? next.room
             : "";
       }
-      if (key === "className")
-        next.room = roomForClass(value, next.period, next.segment);
+      if (key === "className") {
+        const roomsForPeriod = classEntries
+          .filter((entry) => entry.segment === next.segment && entry.period === next.period)
+          .map((entry) => entry.room);
+        next.room = next.segment === "Contraturno"
+          ? roomsForPeriod.includes(next.room) ? next.room : ""
+          : roomForClass(value, next.period, next.segment);
+      }
       if (key === "room") {
         const matchingClasses = classesForRoom(value, next.period);
         if (matchingClasses.length === 1) next.className = matchingClasses[0];
@@ -601,7 +612,9 @@ function ReservationModal({
       }
       return next;
     });
-  const matchedRoom = roomForClass(form.className, form.period, form.segment);
+  const matchedRoom = form.segment === "Contraturno"
+    ? ""
+    : roomForClass(form.className, form.period, form.segment);
   const roomClasses = classesForRoom(form.room, form.period);
   const selectedRoomWifi = wifiRooms.find(
     (item) => item.room.toLowerCase() === form.room.toLowerCase(),
@@ -777,7 +790,9 @@ function ReservationModal({
             <Field
               label="Turma e disciplina"
               hint={
-                form.segment === "Educação Infantil" ||
+                form.segment === "Contraturno"
+                  ? "Escolha uma sala cadastrada no segmento Contraturno."
+                  : form.segment === "Educação Infantil" ||
                 form.segment === "Fundamental 1"
                   ? "Este seguimento usa a sala cadastrada pelo administrador."
                   : "Escolha uma turma do seu seguimento para preencher a sala."
@@ -795,7 +810,7 @@ function ReservationModal({
               <datalist id="reservation-classes">
                 {eligibleEntries.map((item) => (
                   <option
-                    key={`${item.period}-${item.className}`}
+                    key={`${item.period}-${item.room}-${item.className}`}
                     value={item.className}
                   >
                     {item.room} · {item.period}

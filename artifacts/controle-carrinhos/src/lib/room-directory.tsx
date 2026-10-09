@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { segments, type Segment } from "@/lib/campus-data";
+import { type Segment } from "@/lib/campus-data";
 import { initialCampusRooms } from "@/lib/room-directory-seed";
 import { getAuthenticatedRole, onAuthenticatedSessionChange } from "@/lib/auth-session";
 import { loadSharedRooms, saveSharedRooms } from "@/lib/room-directory-api";
@@ -54,9 +54,24 @@ const legacySampleRoomIds = new Set([
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const normalizeRoom = (value: string) => value.trim().toLowerCase().replace(/^sala\s*/i, "").replace(/\s+/g, " ");
 const roomLabel = (number: string) => `Sala ${number}`;
+const isContraturno = (className: string) => normalize(className) === "contraturno";
+
+const normalizeRoomRecord = (room: Room): Room => {
+  const normalized = {
+    ...room,
+    floor: room.floor ?? "Térreo",
+    segment: room.segment ?? "Fundamental 2",
+  };
+  const classes = [...normalized.morningClasses, ...normalized.afternoonClasses];
+  if (classes.length > 0 && classes.every(isContraturno)) {
+    normalized.segment = "Contraturno";
+  }
+  return normalized;
+};
 
 const segmentForClass = (className: string, fallback: Segment): Segment => {
   const normalized = className.trim().toLocaleUpperCase("pt-BR");
+  if (normalized === "CONTRATURNO") return "Contraturno";
   if (/^(PR[EÉ]|MAT\.?)(\s|$)/.test(normalized)) return "Educação Infantil";
   if (/^(INT[-\s]|[1-3]\s*°?\s*EM\b)/.test(normalized)) return "Ensino Médio";
   const grade = normalized.match(/^([1-9])\s*°/);
@@ -85,7 +100,7 @@ function readRooms() {
       window.localStorage.setItem(storageKey, JSON.stringify(seeded));
       return seeded;
     }
-    return parsed.map((room) => ({ ...room, floor: room.floor ?? "Térreo", segment: room.segment ?? "Fundamental 2" }));
+    return parsed.map(normalizeRoomRecord);
   } catch {
     return [];
   }
@@ -121,11 +136,7 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
         period,
         floor: room.floor,
       };
-      const normalizedClass = className.trim().toLocaleLowerCase("pt-BR");
-      const entrySegments = normalizedClass === "contraturno"
-        ? segments
-        : [segmentForClass(className, room.segment)];
-      return entrySegments.map((segment) => ({ ...entry, segment }));
+      return [{ ...entry, segment: segmentForClass(className, room.segment) }];
     }),
   ), [rooms]);
   const roomOptions = useMemo(() => [...rooms]
@@ -178,10 +189,17 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
         const directory = await loadSharedRooms();
         if (!active) return;
         if (directory.configured) {
-          roomsRef.current = directory.rooms;
-          setRooms(directory.rooms);
-          window.localStorage.setItem(storageKey, JSON.stringify(directory.rooms));
+          const normalizedRooms = directory.rooms.map(normalizeRoomRecord);
+          roomsRef.current = normalizedRooms;
+          setRooms(normalizedRooms);
+          window.localStorage.setItem(storageKey, JSON.stringify(normalizedRooms));
           window.localStorage.removeItem(factoryResetKey);
+          if (
+            (role === "admin" || role === "operator") &&
+            JSON.stringify(normalizedRooms) !== JSON.stringify(directory.rooms)
+          ) {
+            await saveSharedRooms(normalizedRooms);
+          }
         } else if ((role === "admin" || role === "operator") && roomsRef.current.length > 0) {
           await saveSharedRooms(roomsRef.current);
         } else if (role === "user") {

@@ -195,12 +195,24 @@ export const authenticate = async (
     })
     .from(usersTable)
     .where(and(eq(usersTable.role, role), eq(usersTable.active, true)));
-  const matchingAccounts = accounts.filter((candidate) =>
-    candidate.name.trim().toLocaleLowerCase("pt-BR") === normalizedName ||
-    (role === "user" && candidate.email.trim().toLocaleLowerCase("pt-BR") === normalizedName),
+  const emailMatches = role === "user"
+    ? accounts.filter((candidate) =>
+        candidate.email.trim().toLocaleLowerCase("pt-BR") === normalizedName,
+      )
+    : [];
+  const nameMatches = accounts.filter((candidate) =>
+    candidate.name.trim().toLocaleLowerCase("pt-BR") === normalizedName,
   );
-  if (matchingAccounts.length > 1) return null;
-  const account = matchingAccounts[0];
+  const matchingAccounts = emailMatches.length > 0 ? emailMatches : nameMatches;
+  let account = matchingAccounts[0];
+  if (matchingAccounts.length > 1) {
+    if (role !== "user") return null;
+    const accountsWithMatchingPassword = matchingAccounts.filter((candidate) =>
+      candidate.passwordHash && verifyPassword(password, candidate.passwordHash),
+    );
+    if (accountsWithMatchingPassword.length !== 1) return null;
+    account = accountsWithMatchingPassword[0];
+  }
   const isConfiguredAdmin = role === "admin" &&
     Boolean(configuredName) &&
     configuredName!.trim().toLocaleLowerCase("pt-BR") === normalizedName;

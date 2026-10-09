@@ -68,6 +68,7 @@ const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 const completeColumnsStorageKey = "controle-carrinhos-complete-view-columns";
 const completeCartStorageKey = "controle-carrinhos-complete-view-cart";
+const spreadsheetModeStorageKey = "controle-carrinhos-view-mode";
 
 function formatWeekLabel(dates: Date[]) {
   if (dates.length === 0) return "";
@@ -78,6 +79,18 @@ function sortCartNames(names: string[]) {
   return [...new Set(names)].sort((a, b) =>
     a.localeCompare(b, "pt-BR", { numeric: true }),
   );
+}
+
+function readSpreadsheetMode(readOnly: boolean): SpreadsheetMode {
+  if (readOnly) return "quick";
+  try {
+    const savedMode = window.localStorage.getItem(spreadsheetModeStorageKey);
+    return savedMode === "complete" || savedMode === "quick"
+      ? savedMode
+      : "quick";
+  } catch {
+    return "quick";
+  }
 }
 
 const isInteractiveTarget = (target: EventTarget | null) =>
@@ -809,7 +822,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     replaceReservations,
   } = useCampusData();
   const { floorForRoom } = useRoomDirectory();
-  const [mode, setMode] = useState<SpreadsheetMode>(() => readOnly ? "quick" : "complete");
+  const [mode, setMode] = useState<SpreadsheetMode>(() => readSpreadsheetMode(readOnly));
   const [teacherReservations, setTeacherReservations] = useState<Reservation[]>([]);
   const [teacherReservationsLoading, setTeacherReservationsLoading] = useState(readOnly);
   const [teacherReservationsError, setTeacherReservationsError] = useState("");
@@ -897,6 +910,14 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   const selectCompleteCart = (cartName: string) => {
     setSelectedCompleteCart(cartName);
     window.localStorage.setItem(completeCartStorageKey, cartName);
+  };
+  const selectSpreadsheetMode = (nextMode: SpreadsheetMode) => {
+    setMode(nextMode);
+    try {
+      window.localStorage.setItem(spreadsheetModeStorageKey, nextMode);
+    } catch {
+      // The selected mode still applies for this visit when storage is unavailable.
+    }
   };
   const moveReservation = async (reservation: Reservation) => {
     if (readOnly) throw new Error("A visualização da planilha é somente para consulta.");
@@ -1025,7 +1046,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           type="button"
           role="tab"
           aria-selected={mode === "quick"}
-          onClick={() => setMode("quick")}
+          onClick={() => selectSpreadsheetMode("quick")}
           className={`inline-flex h-10 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition ${
             mode === "quick"
               ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
@@ -1039,7 +1060,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           type="button"
           role="tab"
           aria-selected={mode === "complete"}
-          onClick={() => setMode("complete")}
+          onClick={() => selectSpreadsheetMode("complete")}
           className={`inline-flex h-10 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition ${
             mode === "complete"
               ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"

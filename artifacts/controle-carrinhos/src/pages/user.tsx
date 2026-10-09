@@ -1,4 +1,4 @@
-import { CalendarDays, Clock3, Plus, ShieldCheck } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Plus, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { Button, PageHeader, SectionCard, StatusPill, formatDate, fridaySabbathMessage, isFridayISO, todayISO } from "@/components/app-ui";
@@ -12,21 +12,39 @@ export function UserOverviewPage() {
   const [currentTime, setCurrentTime] = useState(() => new Date());
   useEffect(() => { const timer = window.setInterval(() => setCurrentTime(new Date()), 30000); return () => window.clearInterval(timer); }, []);
   const nextBookableDate = useMemo(() => nextBookableWeekday(currentTime), [currentTime]);
+  const [availabilityDate, setAvailabilityDate] = useState(nextBookableDate);
+  const [availabilityPeriod, setAvailabilityPeriod] = useState<"Todos" | "Manhã" | "Tarde">("Todos");
   const cartAvailability = useMemo(
     () => getCartAvailability(
       carts,
       cartSchedules,
       reservations,
-      nextBookableDate,
+      availabilityDate,
       movementSettings.allowCartATransitionScheduling,
     ),
-    [carts, cartSchedules, reservations, nextBookableDate, movementSettings.allowCartATransitionScheduling],
+    [carts, cartSchedules, reservations, availabilityDate, movementSettings.allowCartATransitionScheduling],
   );
+  const visibleCartAvailability = useMemo(() => availabilityPeriod === "Todos"
+    ? cartAvailability
+    : cartAvailability.map((cart) => ({
+        ...cart,
+        slots: cart.slots.filter((slot) => slot.period === availabilityPeriod),
+      })).filter((cart) => cart.slots.length > 0),
+  [availabilityPeriod, cartAvailability]);
   const availableSlotCount = cartAvailability.reduce(
-    (total, cart) => total + cart.slots.filter((slot) => slot.available).length,
+    (total, cart) => total + cart.slots.filter((slot) =>
+      slot.available && (availabilityPeriod === "Todos" || slot.period === availabilityPeriod),
+    ).length,
     0,
   );
-  const totalSlotCount = cartAvailability.reduce((total, cart) => total + cart.slots.length, 0);
+  const totalSlotCount = cartAvailability.reduce((total, cart) => total + cart.slots.filter((slot) =>
+    availabilityPeriod === "Todos" || slot.period === availabilityPeriod,
+  ).length, 0);
+  const moveAvailabilityDateByDay = (days: number) => {
+    const date = new Date(`${availabilityDate}T12:00:00`);
+    date.setDate(date.getDate() + days);
+    setAvailabilityDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+  };
   const todayReservations = reservations
     .filter((item) => item.date === todayISO() && item.teacher === teacher.name)
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -44,24 +62,66 @@ export function UserOverviewPage() {
       </div>
       <SectionCard
         title="Carrinhos e horários disponíveis"
-        eyebrow={`Próximo dia para agendamento · ${formatDate(nextBookableDate)}`}
-        action={<Link href={`/usuario/reservas?nova=1&data=${nextBookableDate}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-3 text-xs font-semibold text-[hsl(var(--primary-foreground))]" data-testid="link-user-book-next-date"><Plus size={14} /> Reservar neste dia</Link>}
+        eyebrow={`Dia selecionado para agendamento · ${formatDate(availabilityDate)}`}
+        action={<Link href={`/usuario/reservas?nova=1&data=${availabilityDate}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-3 text-xs font-semibold text-[hsl(var(--primary-foreground))]" data-testid="link-user-book-next-date"><Plus size={14} /> Reservar neste dia</Link>}
       >
         <div className="p-5 sm:p-6" data-testid="cart-schedule-availability">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => moveAvailabilityDateByDay(-1)} data-testid="button-availability-previous-day">
+                <ChevronLeft size={16} /> Dia anterior
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setAvailabilityDate(nextBookableDate)} data-testid="button-availability-today">
+                <CalendarDays size={15} /> Hoje
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => moveAvailabilityDateByDay(1)} data-testid="button-availability-next-day">
+                Próximo dia <ChevronRight size={16} />
+              </Button>
+              <label className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--foreground))]">
+                Período
+                <select
+                  aria-label="Filtrar horários por período"
+                  value={availabilityPeriod}
+                  onChange={(event) => setAvailabilityPeriod(event.target.value as typeof availabilityPeriod)}
+                  className="h-9 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 text-xs"
+                  data-testid="select-availability-period"
+                >
+                  <option value="Todos">Manhã e tarde</option>
+                  <option value="Manhã">Manhã</option>
+                  <option value="Tarde">Tarde</option>
+                </select>
+              </label>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-right text-xs font-semibold text-[hsl(var(--foreground))]">
+                <span className="sr-only">Escolher data da disponibilidade</span>
+                <input
+                  aria-label="Escolher data da disponibilidade"
+                  type="date"
+                  value={availabilityDate}
+                  onChange={(event) => {
+                    if (event.target.value) setAvailabilityDate(event.target.value);
+                  }}
+                  className="h-9 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 text-xs"
+                  data-testid="input-availability-date"
+                />
+              </label>
+            </div>
+          </div>
           <p className="mb-4 text-xs text-[hsl(var(--muted-foreground))]">
             {availableSlotCount} de {totalSlotCount} horários estão livres. A disponibilidade considera reservas feitas para cada carrinho.
           </p>
-          {cartAvailability.length === 0 ? (
+          {visibleCartAvailability.length === 0 ? (
             <p className="rounded-xl bg-[hsl(var(--muted)/.35)] p-4 text-sm text-[hsl(var(--muted-foreground))]" data-testid="text-no-cart-schedule">
               Nenhum horário foi configurado para os carrinhos disponíveis.
             </p>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
-              {cartAvailability.map((cart) => (
+              {visibleCartAvailability.map((cart) => (
                 <article key={cart.id} className="rounded-xl border border-[hsl(var(--border))] p-4" data-testid={`card-cart-availability-${cart.id}`}>
                   <h3 className="text-sm font-semibold">{cart.name}</h3>
                   <div className="mt-3 space-y-3">
-                    {(["Manhã", "Tarde"] as const).map((period) => {
+                    {(availabilityPeriod === "Todos" ? ["Manhã", "Tarde"] as const : [availabilityPeriod]).map((period) => {
                       const periodSlots = cart.slots.filter((slot) => slot.period === period);
                       if (periodSlots.length === 0) return null;
                       return (

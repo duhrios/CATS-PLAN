@@ -1,5 +1,6 @@
 import { Check, FileSpreadsheet, FileText, KeyRound, Loader2, Mail, Plus, Upload, UserRound, ShieldCheck, Pencil, X, AlertCircle } from "lucide-react";
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 import { Button, Field, Modal, PageHeader, SectionCard, StatusPill, cx, inputClass } from "@/components/app-ui";
 import { parseTeacherEmailsFile } from "@/lib/teacher-import";
@@ -58,9 +59,8 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const [staffAccountsLoading, setStaffAccountsLoading] = useState(canManageStaff);
   const [staffAccountsError, setStaffAccountsError] = useState("");
   const [staffActionError, setStaffActionError] = useState("");
-  const operatorAccounts = staffAccounts
-    .filter((account) => account.role === "operator" || !account.isSuperAdmin)
-    .map((account) => ({ ...account, isAdmin: account.role === "admin" }));
+  const [staffActionMessage, setStaffActionMessage] = useState("");
+  const operatorAccounts = staffAccounts.filter((account) => account.role === "operator");
   const adminAccounts = staffAccounts.filter((account) => account.role === "admin");
   const [form, setForm] = useState({ ...teacher });
   const [profileLoading, setProfileLoading] = useState(!admin);
@@ -309,38 +309,70 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     }
   };
   const openAdminEditor = (account: StaffAccount) => {
+    setStaffActionError("");
+    setStaffActionMessage("");
     setEditingAdminId(account.id);
     setEditingAdminForm({ name: account.name, password: "" });
   };
   const saveAdminEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editingAdminId || !editingAdminForm.name.trim() || editingAdminForm.password.length < 6) return;
+    if (!editingAdminId || !editingAdminForm.name.trim() || editingAdminForm.password.length < 6) {
+      setStaffActionError("Informe um nome e uma senha com pelo menos 6 caracteres.");
+      return;
+    }
+    setStaffActionError("");
+    setStaffActionMessage("");
+    let updatedAccount: StaffAccount;
     try {
-      await updateStaffAccount(editingAdminId, editingAdminForm.name.trim(), editingAdminForm.password);
-      await refreshStaffAccounts();
+      updatedAccount = await updateStaffAccount(editingAdminId, editingAdminForm.name.trim(), editingAdminForm.password);
       setEditingAdminId(null);
       setEditingAdminForm({ name: "", password: "" });
-      setStaffActionError("");
+      setStaffActionMessage(`Senha do administrador ${updatedAccount.name} alterada com sucesso. Use a nova senha no acesso administrativo.`);
     } catch (cause) {
       setStaffActionError(cause instanceof Error ? cause.message : "Não foi possível atualizar a conta.");
+      return;
+    }
+    try {
+      await refreshStaffAccounts();
+      setStaffAccountsError("");
+    } catch (cause) {
+      setStaffAccountsError(cause instanceof Error
+        ? `Senha alterada, mas não foi possível atualizar a lista: ${cause.message}`
+        : "Senha alterada, mas não foi possível atualizar a lista.");
     }
   };
   const openOperatorEditor = (account: (typeof operatorAccounts)[number]) => {
+    setStaffActionError("");
+    setStaffActionMessage("");
     setEditingOperatorId(account.id);
     setEditingOperatorForm({ name: account.name, password: "" });
   };
   const saveOperatorEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const account = operatorAccounts.find((item) => item.id === editingOperatorId);
-    if (!account || editingOperatorForm.name.trim().length < 3 || editingOperatorForm.password.length < 6) return;
+    if (!account || editingOperatorForm.name.trim().length < 3 || editingOperatorForm.password.length < 6) {
+      setStaffActionError("Informe um nome com pelo menos 3 caracteres e uma senha com pelo menos 6 caracteres.");
+      return;
+    }
+    setStaffActionError("");
+    setStaffActionMessage("");
+    let updatedAccount: StaffAccount;
     try {
-      await updateStaffAccount(account.id, editingOperatorForm.name.trim(), editingOperatorForm.password);
-      await refreshStaffAccounts();
+      updatedAccount = await updateStaffAccount(account.id, editingOperatorForm.name.trim(), editingOperatorForm.password);
       setEditingOperatorId(null);
       setEditingOperatorForm({ name: "", password: "" });
-      setStaffActionError("");
+      setStaffActionMessage(`Senha do usuário TI ${updatedAccount.name} alterada com sucesso. Use a nova senha na tela de acesso do TI.`);
     } catch (cause) {
       setStaffActionError(cause instanceof Error ? cause.message : "Não foi possível atualizar a conta.");
+      return;
+    }
+    try {
+      await refreshStaffAccounts();
+      setStaffAccountsError("");
+    } catch (cause) {
+      setStaffAccountsError(cause instanceof Error
+        ? `Senha alterada, mas não foi possível atualizar a lista: ${cause.message}`
+        : "Senha alterada, mas não foi possível atualizar a lista.");
     }
   };
 
@@ -466,10 +498,10 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
         <div className="p-5 sm:p-6">
           {staffAccountsLoading && <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]" role="status">Carregando contas da equipe...</p>}
           {(staffAccountsError || staffActionError) && <p className="mb-3 rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-sm text-[hsl(var(--destructive))]" role="alert">{staffAccountsError || staffActionError}</p>}
-          {operatorMessage && <p className="mb-3 rounded-lg bg-[hsl(var(--primary)/.1)] px-3 py-2 text-sm text-[hsl(var(--primary))]" role="status">{operatorMessage}</p>}
+          {(operatorMessage || staffActionMessage) && <p className="mb-3 rounded-lg bg-[hsl(var(--primary)/.1)] px-3 py-2 text-sm text-[hsl(var(--primary))]" role="status">{staffActionMessage || operatorMessage}</p>}
           <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.25)]">
             <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-4 py-3">
-              <div><p className="text-sm font-semibold">TI cadastrado</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Acesso pela tela do TI.</p></div>
+              <div><p className="text-sm font-semibold">TI cadastrado</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Contas com perfil TI; acesso pela tela do TI.</p></div>
               <span className="rounded-full bg-[hsl(var(--primary)/.1)] px-2.5 py-1 text-xs font-bold text-[hsl(var(--primary))]">{operatorAccounts.length}</span>
             </div>
             {selectedOperatorIds.length > 0 && (
@@ -480,7 +512,7 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
               </div>
             )}
             <div className="divide-y divide-[hsl(var(--border))]">
-              {operatorAccounts.map((account) => <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="flex min-w-0 items-center gap-3"><input type="checkbox" checked={selectedOperatorIds.includes(account.id)} onChange={() => toggleOperatorSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar TI ${account.name}`} /><div className="min-w-0"><p className="break-words text-sm font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{account.isAdmin ? "Administrador · TI" : "Usuário TI"}</p></div></div><div className="flex items-center gap-2"><Button size="sm" variant="ghost" onClick={() => openOperatorEditor(account)}><Pencil size={14} /> Editar</Button><Link href="/operador/login" className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Tela de acesso</Link><Button size="sm" variant="ghost" onClick={() => deleteStaffAccountFromPage(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
+              {operatorAccounts.map((account) => <div key={account.id} data-testid={`staff-operator-${account.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="flex min-w-0 items-center gap-3"><input type="checkbox" checked={selectedOperatorIds.includes(account.id)} onChange={() => toggleOperatorSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar TI ${account.name}`} /><div className="min-w-0"><p className="break-words text-sm font-semibold">{account.name}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Usuário TI</p></div></div><div className="flex items-center gap-2"><Button size="sm" variant="ghost" onClick={() => openOperatorEditor(account)}><Pencil size={14} /> Editar</Button><Link href="/operador/login" className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Tela de acesso</Link><Button size="sm" variant="ghost" onClick={() => deleteStaffAccountFromPage(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></div></div>)}
               {!staffAccountsLoading && !staffAccountsError && operatorAccounts.length === 0 && <p className="px-4 py-5 text-sm text-[hsl(var(--muted-foreground))]">Nenhum usuário TI cadastrado.</p>}
             </div>
           </div>
@@ -492,7 +524,7 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
           {staffAccountsLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]" role="status">Carregando perfil administrador...</p>}
           {adminAccounts.length === 0 && !staffAccountsLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Nenhum perfil administrador ativo foi encontrado.</p>}
           {adminAccounts.map((account) => (
-            <div key={account.id} className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.18)] p-4">
+            <div key={account.id} data-testid={`staff-admin-${account.id}`} className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.18)] p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-lg font-semibold">{account.name}</p>
@@ -511,7 +543,7 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
       </SectionCard>}
       {operatorModalOpen && <Modal title="Criar usuário TI" onClose={() => setOperatorModalOpen(false)}><form className="space-y-4 p-5 sm:p-6" onSubmit={saveOperator} data-testid="form-operator-account"><Field label="Nome do usuário TI"><input required minLength={3} value={operatorForm.name} onChange={(event) => setOperatorForm({ ...operatorForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Carlos Souza" data-testid="input-new-operator-name" /></Field><Field label="Senha" hint="Use pelo menos 6 caracteres."><input required minLength={6} type="password" value={operatorForm.password} onChange={(event) => setOperatorForm({ ...operatorForm, password: event.target.value })} className={inputClass} placeholder="Senha de acesso" data-testid="input-new-operator-password" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={operatorForm.isAdmin} onChange={(event) => setOperatorForm({ ...operatorForm, isAdmin: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" /> Associar como administrador</label>{operatorError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]">{operatorError}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOperatorModalOpen(false)}>Cancelar</Button><Button type="submit"><Plus size={15} /> Criar usuário TI</Button></div></form></Modal>}
       {editingAdminId && <Modal title="Editar administrador" onClose={() => setEditingAdminId(null)}><form className="space-y-4 p-5 sm:p-6" onSubmit={saveAdminEdit}><Field label="Nome do administrador"><input required minLength={3} disabled={adminAccounts.find((account) => account.id === editingAdminId)?.isSuperAdmin} value={editingAdminForm.name} onChange={(event) => setEditingAdminForm({ ...editingAdminForm, name: event.target.value })} className={inputClass} /></Field><Field label="Nova senha" hint="Use pelo menos 6 caracteres."><input required minLength={6} type="password" value={editingAdminForm.password} onChange={(event) => setEditingAdminForm({ ...editingAdminForm, password: event.target.value })} className={inputClass} placeholder="Nova senha" /></Field>{staffActionError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" role="alert">{staffActionError}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditingAdminId(null)}>Cancelar</Button><Button type="submit"><Check size={15} /> Salvar alterações</Button></div></form></Modal>}
-      {modalOpen && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(187_54%_17%/.35)] p-0 backdrop-blur-[2px] sm:items-center sm:p-6" role="dialog" aria-modal="true"><div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:max-w-xl sm:rounded-2xl"><div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-5 py-4"><h2 className="font-display text-xl font-semibold">{mode === "single" ? "Cadastrar professor" : "Importar e-mails em lote"}</h2><button type="button" onClick={() => setModalOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" aria-label="Cancelar cadastro" title="Cancelar cadastro"><X size={18} /></button></div><form className="space-y-5 p-5 sm:p-6" onSubmit={saveAccounts} data-testid="form-teacher-account"><div className="flex gap-1 rounded-lg bg-[hsl(var(--muted))] p-1"><button type="button" onClick={() => setMode("single")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "single" && "bg-[hsl(var(--card))] shadow-sm")}>Um professor</button><button type="button" onClick={() => setMode("bulk")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "bulk" && "bg-[hsl(var(--card))] shadow-sm")}>Planilha ou PDF</button></div>      {mode === "single" ? <div className="space-y-4"><Field label="Nome para entrar (opcional)" hint="Se não informar, o nome será gerado a partir do e-mail."><input value={singleForm.name} onChange={(event) => setSingleForm({ ...singleForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Marina Lopes" data-testid="input-new-teacher-name" /></Field><Field label="E-mail associado"><input required type="email" value={singleForm.email} onChange={(event) => setSingleForm({ ...singleForm, email: event.target.value })} className={inputClass} placeholder="professor@escola.com.br" data-testid="input-new-teacher-email" /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Segmento"><select value={singleForm.segment} onChange={(event) => setSingleForm({ ...singleForm, segment: event.target.value as Segment })} className={inputClass}>{segments.map((segment) => <option key={segment}>{segment}</option>)}</select></Field><Field label="Matéria" hint={singleForm.segment === "Fundamental 2" || singleForm.segment === "Ensino Médio" ? "Obrigatória para este segmento." : undefined}><input required={singleForm.segment === "Fundamental 2" || singleForm.segment === "Ensino Médio"} value={singleForm.subject} onChange={(event) => setSingleForm({ ...singleForm, subject: event.target.value })} className={inputClass} placeholder="Ex.: Ciências" /></Field></div></div> : <div className="space-y-4"><div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.35)] p-4"><div className="flex items-start gap-3"><FileSpreadsheet className="mt-0.5 text-[hsl(var(--primary))]" size={19} /><div><p className="text-sm font-semibold">Importe vários e-mails de uma vez</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Aceitamos CSV, Excel (.xls/.xlsx) e PDF. O sistema encontra os e-mails em qualquer coluna ou página.</p></div></div><label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[hsl(var(--primary)/.45)] bg-[hsl(var(--card))] px-4 py-3 text-sm font-semibold text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/.06)]"><Upload size={16} /> {importingFile ? <><Loader2 className="animate-spin" size={15} /> Lendo arquivo...</> : "Escolher planilha ou PDF"}<input type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,.pdf,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleBulkFile} className="sr-only" disabled={importingFile} data-testid="input-bulk-teacher-file" /></label>{bulkFileName && <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[hsl(var(--primary))]"><FileText size={14} /> {bulkFileName}</p>}</div><Field label="E-mails encontrados" hint="Você também pode colar ou editar os endereços. Um por linha, separados por vírgula ou ponto e vírgula."><textarea required value={bulkEmails} onChange={(event) => setBulkEmails(event.target.value)} className={`${inputClass} min-h-32 py-3`} placeholder={"ana.silva@escola.com.br\nbruno.souza@escola.com.br"} data-testid="textarea-bulk-teacher-emails" /></Field><p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">Depois de criar a senha, cada professor preencherá seu segmento, matéria e turma no próprio perfil.</p></div>}{error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" role="alert">{error}</p>}<div className="flex justify-end gap-2 border-t border-[hsl(var(--border))] pt-4"><Button type="button" variant="ghost" onClick={() => setModalOpen(false)}>Cancelar</Button><Button type="submit" disabled={importingFile || savingAccounts}><Check size={15} /> {savingAccounts ? "Salvando..." : "Criar acessos"}</Button></div></form></div></div>}
+      {modalOpen && createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[hsl(187_54%_17%/.35)] p-4 backdrop-blur-[2px] sm:p-6" role="dialog" aria-modal="true"><div className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:max-h-[calc(100dvh-3rem)]"><div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-5 py-4"><h2 className="font-display text-xl font-semibold">{mode === "single" ? "Cadastrar professor" : "Importar e-mails em lote"}</h2><button type="button" onClick={() => setModalOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" aria-label="Cancelar cadastro" title="Cancelar cadastro"><X size={18} /></button></div><form className="space-y-5 p-5 sm:p-6" onSubmit={saveAccounts} data-testid="form-teacher-account"><div className="flex gap-1 rounded-lg bg-[hsl(var(--muted))] p-1"><button type="button" onClick={() => setMode("single")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "single" && "bg-[hsl(var(--card))] shadow-sm")}>Um professor</button><button type="button" onClick={() => setMode("bulk")} className={cx("flex-1 rounded-md px-3 py-2 text-xs font-semibold", mode === "bulk" && "bg-[hsl(var(--card))] shadow-sm")}>Planilha ou PDF</button></div>      {mode === "single" ? <div className="space-y-4"><Field label="Nome para entrar (opcional)" hint="Se não informar, o nome será gerado a partir do e-mail."><input value={singleForm.name} onChange={(event) => setSingleForm({ ...singleForm, name: event.target.value })} className={inputClass} placeholder="Ex.: Marina Lopes" data-testid="input-new-teacher-name" /></Field><Field label="E-mail associado"><input required type="email" value={singleForm.email} onChange={(event) => setSingleForm({ ...singleForm, email: event.target.value })} className={inputClass} placeholder="professor@escola.com.br" data-testid="input-new-teacher-email" /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Segmento"><select value={singleForm.segment} onChange={(event) => setSingleForm({ ...singleForm, segment: event.target.value as Segment })} className={inputClass}>{segments.map((segment) => <option key={segment}>{segment}</option>)}</select></Field><Field label="Matéria" hint={singleForm.segment === "Fundamental 2" || singleForm.segment === "Ensino Médio" ? "Obrigatória para este segmento." : undefined}><input required={singleForm.segment === "Fundamental 2" || singleForm.segment === "Ensino Médio"} value={singleForm.subject} onChange={(event) => setSingleForm({ ...singleForm, subject: event.target.value })} className={inputClass} placeholder="Ex.: Ciências" /></Field></div></div> : <div className="space-y-4"><div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.35)] p-4"><div className="flex items-start gap-3"><FileSpreadsheet className="mt-0.5 text-[hsl(var(--primary))]" size={19} /><div><p className="text-sm font-semibold">Importe vários e-mails de uma vez</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Aceitamos CSV, Excel (.xls/.xlsx) e PDF. O sistema encontra os e-mails em qualquer coluna ou página.</p></div></div><label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[hsl(var(--primary)/.45)] bg-[hsl(var(--card))] px-4 py-3 text-sm font-semibold text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/.06)]"><Upload size={16} /> {importingFile ? <><Loader2 className="animate-spin" size={15} /> Lendo arquivo...</> : "Escolher planilha ou PDF"}<input type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,.pdf,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleBulkFile} className="sr-only" disabled={importingFile} data-testid="input-bulk-teacher-file" /></label>{bulkFileName && <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[hsl(var(--primary))]"><FileText size={14} /> {bulkFileName}</p>}</div><Field label="E-mails encontrados" hint="Você também pode colar ou editar os endereços. Um por linha, separados por vírgula ou ponto e vírgula."><textarea required value={bulkEmails} onChange={(event) => setBulkEmails(event.target.value)} className={`${inputClass} min-h-32 py-3`} placeholder={"ana.silva@escola.com.br\nbruno.souza@escola.com.br"} data-testid="textarea-bulk-teacher-emails" /></Field><p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">Depois de criar a senha, cada professor preencherá seu segmento, matéria e turma no próprio perfil.</p></div>}{error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" role="alert">{error}</p>}<div className="flex justify-end gap-2 border-t border-[hsl(var(--border))] pt-4"><Button type="button" variant="ghost" onClick={() => setModalOpen(false)}>Cancelar</Button><Button type="submit" disabled={importingFile || savingAccounts}><Check size={15} /> {savingAccounts ? "Salvando..." : "Criar acessos"}</Button></div></form></div></div>, document.body)}
     </div>
   );
 }

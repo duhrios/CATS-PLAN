@@ -7,6 +7,7 @@ import {
   X,
 } from "lucide-react";
 import { type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export const cx = (...parts: Array<string | false | null | undefined>) =>
   parts.filter(Boolean).join(" ");
@@ -334,14 +335,14 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(187_54%_17%/.28)] p-0 sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[hsl(187_54%_17%/.28)] p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       data-testid="modal"
     >
-      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:max-w-xl sm:rounded-2xl">
+      <div className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] px-5 py-4">
           <h2 className="font-display text-xl font-semibold">{title}</h2>
           <IconButton label="Fechar" onClick={onClose}>
@@ -350,7 +351,8 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -59,6 +59,30 @@ describe("shared reservations API", () => {
     }]);
   });
 
+  it("preserves Contraturno as its own reservation segment", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      id: 43,
+      teacherName: "Marina",
+      segment: "Fundamental 2",
+      subject: "",
+      className: "Contraturno",
+      room: "Sala 02",
+      period: "Tarde",
+      scheduledDate: "2026-09-28",
+      startTime: "13:00:00",
+      endTime: "13:45:00",
+      cartId: 5,
+      cartName: "Carrinho B",
+      kind: "Aula",
+      quantity: 30,
+      status: "Aguardando",
+    }]), { status: 200 })));
+
+    await expect(loadSharedReservations()).resolves.toMatchObject([
+      { id: 43, segment: "Contraturno", className: "Contraturno", room: "Sala 02" },
+    ]);
+  });
+
   it("persists a reservation using the shared cart ID", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 5, name: "Carrinho B", code: "B" }]), { status: 200 }))

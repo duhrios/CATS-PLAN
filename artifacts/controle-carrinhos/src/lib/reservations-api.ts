@@ -1,4 +1,4 @@
-import type { Reservation, Segment } from "@/lib/campus-data";
+import { segments, type Reservation, type Segment } from "@/lib/campus-data";
 
 const refreshReservationsEvent = "controle-carrinhos:refresh-reservations";
 
@@ -40,13 +40,6 @@ type ReservationRecord = {
 
 type CartRecord = { id: number; name: string; code: string };
 
-const segments: Segment[] = [
-  "Educação Infantil",
-  "Fundamental 1",
-  "Fundamental 2",
-  "Ensino Médio",
-];
-
 const requireResponse = async (response: Response) => {
   if (response.ok) return response;
   const body = await response.json().catch(() => null) as { error?: string } | null;
@@ -56,7 +49,9 @@ const requireResponse = async (response: Response) => {
 const fromRecord = (item: ReservationRecord): Reservation => ({
   id: item.id,
   teacher: item.teacherName,
-  segment: segments.includes(item.segment as Segment) ? item.segment as Segment : "Fundamental 2",
+  segment: item.className.trim().toLocaleLowerCase("pt-BR") === "contraturno"
+    ? "Contraturno"
+    : segments.includes(item.segment as Segment) ? item.segment as Segment : "Fundamental 2",
   subject: item.subject,
   className: item.className,
   room: item.room,

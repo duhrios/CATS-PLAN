@@ -3,6 +3,7 @@ import {
   createStaffAccount,
   deleteStaffAccount,
   loadStaffAccounts,
+  updateStaffAccount,
 } from "./staff-accounts";
 
 describe("staff account API client", () => {
@@ -44,6 +45,29 @@ describe("staff account API client", () => {
       body: JSON.stringify({ name: "Admin TI", password: "senha123", role: "admin" }),
     });
     await expect(createStaffAccount("Admin TI", "senha123", "admin")).rejects.toThrow("Nome já utilizado.");
+  });
+
+  it("updates the staff password and parses the server-confirmed account", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "14",
+      name: "Eduardo TI",
+      role: "operator",
+      isSuperAdmin: false,
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateStaffAccount("14", "Eduardo TI", "nova-senha-ti")).resolves.toEqual({
+      id: "14",
+      name: "Eduardo TI",
+      role: "operator",
+      isSuperAdmin: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/staff-accounts/14", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Eduardo TI", password: "nova-senha-ti" }),
+    });
   });
 
   it("deletes a staff account and rejects malformed account responses", async () => {

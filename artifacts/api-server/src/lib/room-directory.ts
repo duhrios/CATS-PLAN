@@ -19,7 +19,7 @@ const isCampusRoom = (value: unknown): value is CampusRoom => {
     typeof room.number === "string" &&
     typeof room.floor === "string" &&
     typeof room.segment === "string" &&
-    ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio"].includes(room.segment) &&
+    ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio", "Contraturno"].includes(room.segment) &&
     Array.isArray(room.morningClasses) &&
     room.morningClasses.every((name) => typeof name === "string") &&
     Array.isArray(room.afternoonClasses) &&

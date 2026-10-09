@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nextBookableWeekday } from "@/lib/cart-availability";
@@ -52,7 +52,7 @@ describe("teacher dashboard cart availability", () => {
       cartSchedules: {
         "Carrinho A": {
           Manhã: [{ id: "a-1", start: "07:00", end: "07:45" }],
-          Tarde: [],
+          Tarde: [{ id: "a-tarde-1", start: "13:00", end: "13:45" }],
         },
         "Carrinho B": {
           Manhã: [{ id: "b-1", start: "07:00", end: "07:45" }],
@@ -81,6 +81,44 @@ describe("teacher dashboard cart availability", () => {
     expect(screen.getByTestId("link-user-book-next-date")).toHaveAttribute(
       "href",
       `/usuario/reservas?nova=1&data=${nextBookableWeekday(new Date())}`,
+    );
+  });
+
+  it("lets the teacher navigate days, reset the date, and filter availability by period", () => {
+    render(<UserOverviewPage />);
+
+    const bookingLink = screen.getByTestId("link-user-book-next-date");
+    const initialDate = nextBookableWeekday(new Date());
+    const nextDayDate = new Date(`${initialDate}T12:00:00`);
+    nextDayDate.setDate(nextDayDate.getDate() + 1);
+    const expectedNextDay = `${nextDayDate.getFullYear()}-${String(nextDayDate.getMonth() + 1).padStart(2, "0")}-${String(nextDayDate.getDate()).padStart(2, "0")}`;
+
+    fireEvent.click(screen.getByTestId("button-availability-next-day"));
+    expect(bookingLink).toHaveAttribute(
+      "href",
+      `/usuario/reservas?nova=1&data=${expectedNextDay}`,
+    );
+    expect(screen.getByRole("button", { name: /dia anterior/i })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("select-availability-period"), {
+      target: { value: "Manhã" },
+    });
+    expect(screen.getByTestId("slot-availability-cart-a-Manhã-a-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("slot-availability-cart-a-Tarde-a-tarde-1")).not.toBeInTheDocument();
+    expect(screen.getByText(/horários estão livres/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("button-availability-today"));
+    expect(bookingLink).toHaveAttribute(
+      "href",
+      `/usuario/reservas?nova=1&data=${initialDate}`,
+    );
+
+    fireEvent.change(screen.getByTestId("input-availability-date"), {
+      target: { value: "2026-11-12" },
+    });
+    expect(bookingLink).toHaveAttribute(
+      "href",
+      "/usuario/reservas?nova=1&data=2026-11-12",
     );
   });
 });

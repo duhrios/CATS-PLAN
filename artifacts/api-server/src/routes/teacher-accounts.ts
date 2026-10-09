@@ -14,7 +14,7 @@ import {
 
 const router: IRouter = Router();
 const profileSettingKey = "teacher-profiles-v1";
-const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio"] as const;
+const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio", "Contraturno"] as const;
 type TeacherSegment = (typeof segments)[number];
 type TeacherProfileMetadata = { segment: TeacherSegment; subject: string; className: string };
 type TeacherProfileMetadataMap = Record<string, TeacherProfileMetadata>;

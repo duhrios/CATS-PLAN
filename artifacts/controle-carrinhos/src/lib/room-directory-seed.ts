@@ -2,9 +2,9 @@ import type { Room } from "@/lib/room-directory";
 
 export const initialCampusRooms: Room[] = [
   { id: "room-01", number: "01", floor: "Subsolo", segment: "Fundamental 1", morningClasses: ["2° MA"], afternoonClasses: ["2° TA"] },
-  { id: "room-02", number: "02", floor: "Subsolo", segment: "Fundamental 1", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
-  { id: "room-03", number: "03", floor: "Subsolo", segment: "Fundamental 1", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
-  { id: "room-04", number: "04", floor: "Subsolo", segment: "Fundamental 1", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
+  { id: "room-02", number: "02", floor: "Subsolo", segment: "Contraturno", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
+  { id: "room-03", number: "03", floor: "Subsolo", segment: "Contraturno", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
+  { id: "room-04", number: "04", floor: "Subsolo", segment: "Contraturno", morningClasses: ["Contraturno"], afternoonClasses: ["Contraturno"] },
   { id: "room-05", number: "05", floor: "Subsolo", segment: "Educação Infantil", morningClasses: ["MAT. MA"], afternoonClasses: ["MAT. TA"] },
   { id: "room-06", number: "06", floor: "Subsolo", segment: "Educação Infantil", morningClasses: ["PRÉ I MA"], afternoonClasses: ["PRÉ I TA"] },
   { id: "room-07", number: "07", floor: "Subsolo", segment: "Educação Infantil", morningClasses: ["PRÉ II MB"], afternoonClasses: ["PRÉ II TB"] },

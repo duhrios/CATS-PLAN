@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMondayOfWeek, formatDateKey } from "@/lib/spreadsheet-view";
 import { SpreadsheetViewPage } from "./spreadsheet-view";
@@ -24,6 +24,7 @@ vi.mock("@/lib/teacher-spreadsheet", () => ({
 describe("teacher spreadsheet view", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     getCampusData.mockReturnValue({
       reservations: [],
       movements: [],
@@ -73,5 +74,23 @@ describe("teacher spreadsheet view", () => {
         expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       );
     });
+  });
+
+  it("opens quick access by default and restores the last selected mode", () => {
+    const { unmount } = render(<SpreadsheetViewPage />);
+    const quickTab = screen.getByRole("tab", { name: /acesso rápido/i });
+    const completeTab = screen.getByRole("tab", { name: /acesso completo/i });
+
+    expect(quickTab).toHaveAttribute("aria-selected", "true");
+    expect(completeTab).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.click(completeTab);
+    expect(completeTab).toHaveAttribute("aria-selected", "true");
+    expect(window.localStorage.getItem("controle-carrinhos-view-mode")).toBe("complete");
+    unmount();
+
+    render(<SpreadsheetViewPage />);
+    expect(screen.getByRole("tab", { name: /acesso completo/i }))
+      .toHaveAttribute("aria-selected", "true");
   });
 });
