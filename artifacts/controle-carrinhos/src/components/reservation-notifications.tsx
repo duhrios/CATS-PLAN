@@ -7,6 +7,7 @@ import {
   useCampusData,
 } from "@/lib/campus-data";
 import { openSyncChannel, showBrowserNotification } from "@/lib/browser-notifications";
+import { useNotificationSettings } from "@/lib/notification-settings";
 
 type ReservationChange = {
   type: "created" | "updated" | "deleted";
@@ -20,18 +21,22 @@ const reservationBody = (reservation: Reservation) =>
 
 export function ReservationNotifications() {
   const { reservations } = useCampusData();
+  const { settings, loading: settingsLoading, error: settingsError } = useNotificationSettings();
   const knownIds = useRef(new Set(reservations.map((reservation) => reservation.id)));
   const scheduledIds = useRef(new Set<string>());
   const handledEvents = useRef(new Set<string>());
-  const canNotify = () =>
+  const canNotify = (notification: "reservation-created" | "reservation-scheduled") =>
     typeof window !== "undefined" &&
+    !settingsLoading &&
+    !settingsError &&
+    settings.ti[notification] &&
     window.localStorage.getItem("controle-carrinhos-role") !== "user";
   const localDate = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
   useEffect(() => {
     const showCreated = (reservation: Reservation) => {
-      if (!canNotify()) return;
+      if (!canNotify("reservation-created")) return;
       const body = reservationBody(reservation);
       toast({ title: "Nova reserva criada", description: body });
       void showBrowserNotification("Nova reserva criada", body, "/reservas");
@@ -70,7 +75,7 @@ export function ReservationNotifications() {
       channel?.removeEventListener("message", handleChannel);
       channel?.close();
     };
-  }, []);
+  }, [settings.ti["reservation-created"], settingsLoading, settingsError]);
 
   useEffect(() => {
     reservations.forEach((reservation) => knownIds.current.add(reservation.id));
@@ -95,7 +100,7 @@ export function ReservationNotifications() {
             // Continue with the in-memory guard when session storage is unavailable.
           }
           scheduledIds.current.add(key);
-          if (!canNotify()) return;
+          if (!canNotify("reservation-scheduled")) return;
           const body = reservationBody(reservation);
           toast({ title: "Reserva no horário agendado", description: body });
           void showBrowserNotification("Reserva no horário agendado", body, "/reservas");
@@ -109,7 +114,7 @@ export function ReservationNotifications() {
     checkScheduledReservations();
     const timer = window.setInterval(checkScheduledReservations, 15000);
     return () => window.clearInterval(timer);
-  }, [reservations]);
+  }, [reservations, settings.ti["reservation-scheduled"], settingsLoading, settingsError]);
 
   return null;
 }

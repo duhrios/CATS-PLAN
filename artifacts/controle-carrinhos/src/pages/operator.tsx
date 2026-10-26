@@ -30,6 +30,7 @@ import {
 } from "@/lib/campus-data";
 import { Calendar } from "@/components/ui/calendar";
 import { useRoomDirectory } from "@/lib/room-directory";
+import { useNotificationSettings } from "@/lib/notification-settings";
 import {
   getDueMovementNotifications,
   getDueRepeatedRoomClassReservations,
@@ -38,6 +39,7 @@ import {
   repeatedLessonAutoCompleteActor,
 } from "@/lib/movement-schedule";
 import {
+  getAuthenticatedSession,
   getRememberedOperatorName,
   loginWithCredentials,
   rememberOperatorName,
@@ -268,7 +270,7 @@ export function OperatorLoginPage() {
           <div>
             <h1 className="font-display text-xl font-semibold">Acesso do TI</h1>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
-              Agenda e movimentação dos carrinhos
+              Equipe TI ou administrador: agenda e movimentação dos carrinhos
             </p>
           </div>
         </div>
@@ -327,6 +329,11 @@ export function OperatorLoginPage() {
 
 export function OperatorPage() {
   const {
+    settings: notificationSettings,
+    loading: notificationSettingsLoading,
+    error: notificationSettingsError,
+  } = useNotificationSettings();
+  const {
     reservations,
     movements,
     carts,
@@ -339,9 +346,8 @@ export function OperatorPage() {
     releaseMobileAntenna,
   } = useCampusData();
   const { floorForRoom } = useRoomDirectory();
-  const isOperatorAdmin =
-    typeof window !== "undefined" &&
-    window.localStorage.getItem("controle-carrinhos-role") === "admin";
+  const session = getAuthenticatedSession();
+  const isOperatorAdmin = session?.role === "admin";
   const [warning, setWarning] = useState("");
   const [alarmQueue, setAlarmQueue] = useState<Reservation[]>([]);
   const [alarmIndex, setAlarmIndex] = useState(0);
@@ -353,6 +359,20 @@ export function OperatorPage() {
   const requestCountsRef = useRef(new Map<number, CartMovement>());
   const alarmStopRef = useRef<(() => void) | null>(null);
   const operatorSettings = readOperatorSettings();
+  useEffect(() => {
+    if (
+      notificationSettingsLoading ||
+      notificationSettingsError ||
+      !notificationSettings.ti["movement-audio"]
+    ) {
+      alarmStopRef.current?.();
+      alarmStopRef.current = null;
+    }
+  }, [
+    notificationSettings.ti["movement-audio"],
+    notificationSettingsLoading,
+    notificationSettingsError,
+  ]);
   useEffect(
     () =>
       subscribeToOperatorAudioErrors((message) =>
@@ -360,6 +380,11 @@ export function OperatorPage() {
           action: {
             label: "Ativar som",
             onClick: () => {
+              if (
+                notificationSettingsLoading ||
+                notificationSettingsError ||
+                !notificationSettings.ti["movement-audio"]
+              ) return;
               void enableOperatorAudio()
                 .then(() =>
                   playOperatorAlert(
@@ -378,7 +403,12 @@ export function OperatorPage() {
           },
         }),
       ),
-    [movementSettings.alertRepeat],
+    [
+      movementSettings.alertRepeat,
+      notificationSettings.ti["movement-audio"],
+      notificationSettingsLoading,
+      notificationSettingsError,
+    ],
   );
   const today = reservations
     .filter((item) => item.date === todayISO() && item.kind === "Aula")
@@ -429,6 +459,11 @@ export function OperatorPage() {
     );
   }, [carts, reservations, now]);
   const playMovementAlert = () => {
+    if (
+      notificationSettingsLoading ||
+      notificationSettingsError ||
+      !notificationSettings.ti["movement-audio"]
+    ) return;
     if (document.visibilityState !== "visible" || !document.hasFocus()) return;
     alarmStopRef.current?.();
     alarmStopRef.current = playOperatorAlert(
@@ -437,7 +472,7 @@ export function OperatorPage() {
     );
   };
   const movementActor = () =>
-    window.localStorage.getItem("controle-carrinhos-operator-name") ?? "TI";
+    session?.name ?? "TI";
   const canUpdateMovement = (start: string, end: string) => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();

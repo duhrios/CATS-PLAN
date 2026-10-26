@@ -1,7 +1,7 @@
-import { and, eq, gt, lt, ne } from "drizzle-orm";
+import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
-import { cartsTable, reservationsTable } from "@workspace/db/schema";
+import { cartsTable, reservationsTable, usersTable } from "@workspace/db/schema";
 import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -45,6 +45,7 @@ router.get("/reservations", requireSession, async (req, res) => {
   const rows = await db
     .select({
       id: reservationsTable.id,
+      teacherId: reservationsTable.teacherId,
       teacherName: reservationsTable.teacherName,
       segment: reservationsTable.segment,
       subject: reservationsTable.subject,
@@ -86,7 +87,42 @@ const saveReservation = async (
     if (session?.role === "user" && !session.accountId) {
       return res.status(403).json({ error: "A conta não possui um identificador seguro." });
     }
+    let linkedTeacher: { id: number; name: string } | undefined;
+    if (body.teacherId !== undefined && body.teacherId !== null && body.teacherId !== "") {
+      const teacherId = Number(body.teacherId);
+      if (session?.role !== "admin" || !Number.isInteger(teacherId) || teacherId <= 0) {
+        return res.status(403).json({ error: "Somente a administração pode reservar em nome de um professor cadastrado." });
+      }
+      const [teacher] = await db
+        .select({ id: usersTable.id, name: usersTable.name })
+        .from(usersTable)
+        .where(and(
+          eq(usersTable.id, teacherId),
+          eq(usersTable.role, "user"),
+          eq(usersTable.active, true),
+        ))
+        .limit(1);
+      if (!teacher) {
+        return res.status(400).json({ error: "Selecione um professor com cadastro ativo." });
+      }
+      linkedTeacher = teacher;
+    }
     const kind = body.kind === "Reserva" ? "Reserva" : "Aula";
+    const teacherName = linkedTeacher?.name ?? requiredText(body.teacherName, "Professor");
+    if (session?.role === "admin" && !linkedTeacher) {
+      const matchingTeachers = await db
+        .select({ id: usersTable.id, name: usersTable.name })
+        .from(usersTable)
+        .where(and(
+          eq(usersTable.role, "user"),
+          eq(usersTable.active, true),
+          sql`lower(trim(${usersTable.name})) = lower(${teacherName})`,
+        ))
+        .limit(2);
+      if (matchingTeachers.length === 1) {
+        linkedTeacher = matchingTeachers[0];
+      }
+    }
     if (!Number.isInteger(cartId)) throw new Error("Carrinho inválido.");
     if (startTime >= endTime) throw new Error("O horário inicial deve ser anterior ao final.");
 
@@ -113,8 +149,12 @@ const saveReservation = async (
       }
 
       const values = {
-        ...(session?.role === "user" ? { teacherId: session.accountId } : {}),
-        teacherName: requiredText(body.teacherName, "Professor"),
+        ...(session?.role === "user"
+          ? { teacherId: session.accountId }
+          : linkedTeacher
+            ? { teacherId: linkedTeacher.id }
+            : {}),
+        teacherName: linkedTeacher?.name ?? teacherName,
         segment: requiredText(body.segment, "Segmento"),
         subject: requiredText(body.subject, "Disciplina"),
         className: requiredText(body.className, "Turma"),

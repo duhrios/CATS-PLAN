@@ -136,6 +136,23 @@ export const requireStaff: RequestHandler = (req, res, next) => {
   return next();
 };
 
+export const requireAdmin: RequestHandler = (req, res, next) => {
+  let session: AuthSession | null;
+  try {
+    session = readAuthSession(req);
+  } catch {
+    return res.status(503).json({ error: "Autenticação não configurada no servidor." });
+  }
+  if (!session) return res.status(401).json({ error: "Autenticação necessária." });
+  if (session.mustChangePassword) {
+    return res.status(403).json({ error: "Altere sua senha inicial para continuar." });
+  }
+  if (session.role !== "admin") {
+    return res.status(403).json({ error: "Ação restrita à administração." });
+  }
+  return next();
+};
+
 export const requireSuperAdmin: RequestHandler = (req, res, next) => {
   let session: AuthSession | null;
   try {

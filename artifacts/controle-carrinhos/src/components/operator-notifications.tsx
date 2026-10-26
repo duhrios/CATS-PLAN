@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
 import {
+  getAuthenticatedRole,
+} from "@/lib/auth-session";
+import {
   movementChangeEventName,
   movementStorageKey,
   isReservationInProgress,
@@ -12,9 +15,11 @@ import {
   showBrowserNotification,
 } from "@/lib/browser-notifications";
 import { isNewTeacherMovementRequest } from "@/lib/movement-notifications";
+import { useNotificationSettings } from "@/lib/notification-settings";
 
 export function OperatorNotifications() {
   const { movements, reservations } = useCampusData();
+  const { settings, loading: settingsLoading, error: settingsError } = useNotificationSettings();
   const known = useRef(new Map<number, CartMovement>());
 
   useEffect(() => {
@@ -26,7 +31,10 @@ export function OperatorNotifications() {
   useEffect(() => {
     const notify = (next: CartMovement[]) => {
       if (
-        window.localStorage.getItem("controle-carrinhos-role") !== "operator"
+        settingsLoading ||
+        settingsError ||
+        !settings.ti["movement-request"] ||
+        getAuthenticatedRole() !== "operator"
       ) {
         next.forEach((movement) =>
           known.current.set(movement.reservationId, movement),
@@ -83,7 +91,7 @@ export function OperatorNotifications() {
       channel?.removeEventListener("message", onChannel);
       channel?.close();
     };
-  }, [reservations]);
+  }, [reservations, settings.ti["movement-request"], settingsLoading, settingsError]);
 
   return null;
 }

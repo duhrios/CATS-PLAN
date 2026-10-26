@@ -86,6 +86,11 @@ describe("teacher dashboard cart availability", () => {
 
   it("lets the teacher navigate days, reset the date, and filter availability by period", () => {
     render(<UserOverviewPage />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Maximizar Carrinhos e horários disponíveis",
+      }),
+    );
 
     const bookingLink = screen.getByTestId("link-user-book-next-date");
     const initialDate = nextBookableWeekday(new Date());

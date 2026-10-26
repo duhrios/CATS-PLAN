@@ -7,6 +7,7 @@ const {
   checkFirstAccess,
   completeRegistration,
   createAccounts,
+  createStaffAccount,
   changeTeacherPassword,
   loadAccounts,
   loadStaffAccounts,
@@ -21,6 +22,7 @@ const {
   checkFirstAccess: vi.fn(),
   completeRegistration: vi.fn(),
   createAccounts: vi.fn(),
+  createStaffAccount: vi.fn(),
   changeTeacherPassword: vi.fn(),
   loadAccounts: vi.fn(),
   loadStaffAccounts: vi.fn(),
@@ -54,7 +56,7 @@ vi.mock("@/lib/auth-session", () => ({
 }));
 
 vi.mock("@/lib/staff-accounts", () => ({
-  createStaffAccount: vi.fn(),
+  createStaffAccount,
   deleteStaffAccount: vi.fn(),
   loadStaffAccounts,
   updateStaffAccount,
@@ -83,6 +85,10 @@ vi.mock("@/lib/room-directory", () => ({
     roomCatalogLoading: false,
   }),
 }));
+
+const expandSection = (label: string) => {
+  fireEvent.click(screen.getByRole("button", { name: `Maximizar ${label}` }));
+};
 
 describe("Teacher first access", () => {
   beforeEach(() => {
@@ -204,6 +210,7 @@ describe("Teacher first access", () => {
 
     it("offers only TI-registered classes for Fundamental 1 and saves the selection", async () => {
       render(<TeacherProfilePage />);
+      expandSection("Dados do professor");
 
       const classroom = await screen.findByTestId("select-teacher-class");
       expect(classroom.tagName).toBe("SELECT");
@@ -236,6 +243,7 @@ describe("Teacher first access", () => {
         className: "",
       });
       render(<TeacherProfilePage />);
+      expandSection("Dados do professor");
 
       const classroom = await screen.findByTestId("select-teacher-class");
       expect(screen.getByRole("option", { name: "Pré II" })).toBeInTheDocument();
@@ -268,6 +276,7 @@ describe("Teacher first access", () => {
 
     it("saves a TI password, confirms success, and keeps the TI account on the TI login", async () => {
       render(<TeacherProfilePage admin />);
+      expandSection("Usuários TI");
 
       expect(await screen.findByText("Eduardo TI")).toBeInTheDocument();
       expect(screen.getByLabelText("Selecionar TI Eduardo TI")).toBeInTheDocument();
@@ -295,6 +304,8 @@ describe("Teacher first access", () => {
 
     it("saves an administrator password through the administrator profile, not the TI profile", async () => {
       render(<TeacherProfilePage admin />);
+      expandSection("Perfil administrador");
+      expandSection("Usuários TI");
       await screen.findByText("Eduardo TI");
 
       fireEvent.click(within(screen.getByTestId("staff-admin-15"))
@@ -320,6 +331,7 @@ describe("Teacher first access", () => {
         className: "",
       });
       render(<TeacherProfilePage />);
+      expandSection("Dados do professor");
       await screen.findByTestId("form-teacher-profile");
 
       fireEvent.change(screen.getByPlaceholderText("Digite sua senha atual"), {
@@ -337,6 +349,57 @@ describe("Teacher first access", () => {
       expect(changeTeacherPassword).toHaveBeenCalledWith(
         "senha-atual",
         "nova-senha-professor",
+      );
+    });
+  });
+
+  describe("Staff account creation", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      window.localStorage.clear();
+      getSession.mockReturnValue({
+        role: "admin",
+        isSuperAdmin: true,
+        name: "Administrador",
+      });
+      loadAccounts.mockResolvedValue([]);
+      loadStaffAccounts.mockResolvedValue([]);
+      createStaffAccount.mockResolvedValue({
+        id: "21",
+        name: "Novo TI",
+        role: "operator",
+        isSuperAdmin: false,
+      });
+    });
+
+    it("creates a TI user by default and makes the administrator option explicit", async () => {
+      render(<TeacherProfilePage admin />);
+      expandSection("Usuários TI");
+      fireEvent.click(screen.getByRole("button", { name: "Criar usuário TI" }));
+
+      expect(screen.getByRole("dialog")).toHaveTextContent("Usuário TI");
+      expect(screen.getByRole("radio", { name: /usuário ti/i })).toBeChecked();
+      expect(screen.getByRole("radio", { name: /administrador/i })).not.toBeChecked();
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("button", { name: "Criar usuário TI" })).toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId("input-new-operator-name"), {
+        target: { value: "Novo TI" },
+      });
+      fireEvent.change(screen.getByTestId("input-new-operator-password"), {
+        target: { value: "senha-segura" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Criar usuário TI" }));
+
+      await waitFor(() => {
+        expect(createStaffAccount).toHaveBeenCalledWith(
+          "Novo TI",
+          "senha-segura",
+          "operator",
+        );
+      });
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Usuário TI criado com sucesso.",
       );
     });
   });

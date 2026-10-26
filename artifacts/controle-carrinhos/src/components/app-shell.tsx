@@ -28,15 +28,16 @@ import { loadTeacherSpreadsheetEnabled } from "@/lib/teacher-spreadsheet";
 
 const adminNavItems = [
   { href: "/admin", label: "Visão do dia", icon: LayoutDashboard },
+  { href: "/operador", label: "Área do TI", icon: Router },
   { href: "/reservas", label: "Reservas", icon: CalendarDays },
   { href: "/carrinhos", label: "Carrinhos", icon: Router },
   { href: "/salas", label: "Salas", icon: DoorOpen },
   { href: "/professores", label: "Usuários", icon: UserRound },
   { href: "/wifi", label: "Pontos Wi-Fi", icon: Network },
   { href: "/historico", label: "Histórico", icon: Activity },
-  { href: "/visao-planilha", label: "Visão - Planilha", icon: Table2 },
+  { href: "/visao-planilha", label: "Planilha", icon: Table2 },
 ];
-const superAdminNavItems = [
+const adminConfigurationNavItems = [
   { href: "/configuracao", label: "Configuração", icon: Settings },
   { href: "/configuracao/horarios", label: "Horários", icon: Clock3 },
 ];
@@ -48,7 +49,7 @@ const userNavItems = [
 ];
 const teacherSpreadsheetNavItem = {
   href: "/visao-planilha",
-  label: "Visão - Planilha",
+  label: "Planilha",
   icon: Table2,
 };
 const operatorNavItems = [
@@ -56,7 +57,7 @@ const operatorNavItems = [
   { href: "/reservas", label: "Reserva", icon: CalendarDays },
   { href: "/salas", label: "Salas", icon: DoorOpen },
   { href: "/wifi", label: "Pontos - Wifi", icon: Network },
-  { href: "/visao-planilha", label: "Visão - Planilha", icon: Table2 },
+  { href: "/visao-planilha", label: "Planilha", icon: Table2 },
   { href: "/operador/configuracao", label: "Configuração", icon: Settings },
 ];
 
@@ -69,7 +70,14 @@ export function AppShell({
 }) {
   const [location] = useLocation();
   const [, setLocation] = useLocation();
-  const { teacher, campusSettings, reservationsSyncError } = useCampusData();
+  const {
+    teacher,
+    campusSettings,
+    reservationsSyncError,
+    operationalStateSyncError,
+  } = useCampusData();
+  const sharedDataSyncError = reservationsSyncError ?? operationalStateSyncError;
+  const authenticatedSession = getAuthenticatedSession();
   const [collapsed, setCollapsed] = useState(
     () =>
       window.localStorage.getItem("controle-carrinhos-sidebar-collapsed") ===
@@ -81,10 +89,6 @@ export function AppShell({
   const [teacherSpreadsheetSettingsError, setTeacherSpreadsheetSettingsError] = useState("");
   const userMode = role === "user";
   const operatorMode = role === "operator";
-  const isSuperAdmin =
-    !operatorMode &&
-    !userMode &&
-    getAuthenticatedSession()?.isSuperAdmin === true;
   useEffect(() => {
     if (!userMode) {
       setTeacherSpreadsheetEnabled(false);
@@ -117,14 +121,14 @@ export function AppShell({
     };
   }, [userMode]);
   const navItems = operatorMode
-    ? operatorNavItems
+    ? authenticatedSession?.role === "admin"
+      ? [...adminNavItems, ...adminConfigurationNavItems]
+      : operatorNavItems
     : userMode
       ? teacherSpreadsheetEnabled
         ? [...userNavItems, teacherSpreadsheetNavItem]
         : userNavItems
-      : isSuperAdmin
-        ? [...adminNavItems, ...superAdminNavItems]
-        : adminNavItems;
+      : [...adminNavItems, ...adminConfigurationNavItems];
   const navOrderKey = `controle-carrinhos-menu-order:${role}`;
   const [menuOrder, setMenuOrder] = useState<string[]>(() => {
     try {
@@ -159,7 +163,11 @@ export function AppShell({
   const signOut = () => {
     void endAuthSession()
       .then(() => setLocation(
-        userMode ? "/login" : operatorMode ? "/operador/login" : "/admin/login",
+        authenticatedSession?.role === "user"
+          ? "/login"
+          : authenticatedSession?.role === "operator"
+            ? "/operador/login"
+            : "/admin/login",
       ))
       .catch((error: unknown) => console.error("Não foi possível encerrar a sessão no servidor.", error));
   };
@@ -198,7 +206,15 @@ export function AppShell({
       >
         <div className="flex h-[76px] items-center justify-between border-b border-[hsl(var(--sidebar-border))] px-5">
           <Link
-            href={operatorMode ? "/operador" : userMode ? "/usuario" : "/admin"}
+            href={
+              userMode
+                ? "/usuario"
+                : authenticatedSession?.role === "admin"
+                  ? "/admin"
+                  : operatorMode
+                    ? "/operador"
+                    : "/admin"
+            }
             onClick={() => setMobileOpen(false)}
             className={cx("flex items-center gap-3", collapsed && "md:mx-auto")}
             data-testid="link-brand"
@@ -317,27 +333,19 @@ export function AppShell({
                   : "Acompanhe a disponibilidade e o sinal antes do primeiro período."}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              operatorMode
-                ? setLocation("/admin/login")
-                : userMode
-                  ? setLocation("/usuario")
-                  : setLocation("/operador/login")
-            }
-            className={cx(
-              "mt-4 flex w-full items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]",
-              collapsed && "md:hidden",
-            )}
-            data-testid="button-switch-role"
-          >
-            {operatorMode
-              ? "Ir para administração"
-              : userMode
-                ? "Visão do professor"
-                : "Visão do TI"}
-          </button>
+          {(userMode || (operatorMode && authenticatedSession?.role === "admin")) && (
+            <button
+              type="button"
+              onClick={() => setLocation(userMode ? "/usuario" : "/admin")}
+              className={cx(
+                "mt-4 flex w-full items-center justify-center text-xs font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:text-[hsl(var(--sidebar-foreground))]",
+                collapsed && "md:hidden",
+              )}
+              data-testid="button-switch-role"
+            >
+              {userMode ? "Visão do professor" : "Voltar à administração"}
+            </button>
+          )}
           <button
             type="button"
             onClick={toggleCollapsed}
@@ -402,14 +410,16 @@ export function AppShell({
             <div className="hidden text-right sm:block">
               <p className="text-xs font-semibold">
                 {operatorMode
-                  ? "TI"
+                  ? authenticatedSession?.name ?? "TI"
                   : userMode
                     ? teacher.name
-                    : "Administrador"}
+                    : authenticatedSession?.name ?? "Administrador"}
               </p>
               <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
                 {operatorMode
-                  ? "Área do TI"
+                  ? authenticatedSession?.role === "admin"
+                    ? "Administrador · Área do TI"
+                    : "Área do TI"
                   : userMode
                     ? "Área do usuário"
                     : "Administrador"}
@@ -432,13 +442,13 @@ export function AppShell({
             </button>
           </div>
         </header>
-        {reservationsSyncError && (
+        {sharedDataSyncError && (
           <div
             role="alert"
             className="mx-5 mt-4 rounded-xl border border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.08)] px-4 py-3 text-sm text-[hsl(var(--destructive))] sm:mx-8 lg:mx-10"
             data-testid="alert-shared-agenda-error"
           >
-            {reservationsSyncError}
+            {sharedDataSyncError}
           </div>
         )}
         <main className="app-grid min-h-[calc(100dvh-76px)] px-5 py-7 sm:px-8 lg:px-10">

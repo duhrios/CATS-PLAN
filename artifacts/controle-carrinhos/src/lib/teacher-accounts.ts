@@ -9,6 +9,7 @@ export type TeacherAccessAccount = {
   email: string;
   segment: Segment;
   subject: string;
+  className: string;
   mustSetPassword: boolean;
 };
 
@@ -39,6 +40,8 @@ const parseTeacherAccount = (value: unknown): TeacherAccessAccount => {
     !isSegment(value.segment) ||
     !("subject" in value) ||
     typeof value.subject !== "string" ||
+    !("className" in value) ||
+    typeof value.className !== "string" ||
     !("mustSetPassword" in value) ||
     typeof value.mustSetPassword !== "boolean"
   ) {
@@ -50,6 +53,7 @@ const parseTeacherAccount = (value: unknown): TeacherAccessAccount => {
     email: value.email,
     segment: value.segment,
     subject: value.subject,
+    className: value.className,
     mustSetPassword: value.mustSetPassword,
   };
 };

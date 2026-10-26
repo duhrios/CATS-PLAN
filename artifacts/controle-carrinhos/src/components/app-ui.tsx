@@ -2,11 +2,12 @@ import {
   AlertCircle,
   Check,
   ChevronDown,
+  ChevronUp,
   Loader2,
   RefreshCcw,
   X,
 } from "lucide-react";
-import { type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export const cx = (...parts: Array<string | false | null | undefined>) =>
@@ -157,6 +158,10 @@ export function SectionCard({
   action?: ReactNode;
   eyebrow?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  const sectionLabel = title ?? eyebrow ?? "seção";
+
   return (
     <section
       className={cx(
@@ -164,24 +169,38 @@ export function SectionCard({
         className,
       )}
     >
-      {(title || eyebrow || action) && (
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-5 py-4 sm:items-end sm:px-6">
-          <div>
-            {eyebrow && (
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[.15em] text-[hsl(var(--primary))]">
-                {eyebrow}
-              </p>
-            )}
-            {title && (
-              <h2 className="font-display text-lg font-semibold text-[hsl(var(--foreground))]">
-                {title}
-              </h2>
-            )}
-          </div>
-          {action && <div className="max-w-full shrink-0">{action}</div>}
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-5 py-4 sm:items-end sm:px-6">
+        <div>
+          {eyebrow && (
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-[.15em] text-[hsl(var(--primary))]">
+              {eyebrow}
+            </p>
+          )}
+          {title && (
+            <h2 className="font-display text-lg font-semibold text-[hsl(var(--foreground))]">
+              {title}
+            </h2>
+          )}
         </div>
-      )}
-      {children}
+        <div className="flex max-w-full shrink-0 items-center gap-2">
+          {action}
+          <button
+            type="button"
+            aria-label={`${expanded ? "Minimizar" : "Maximizar"} ${sectionLabel}`}
+            aria-expanded={expanded}
+            aria-controls={contentId}
+            title={`${expanded ? "Minimizar" : "Maximizar"} ${sectionLabel}`}
+            data-testid="button-toggle-section"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+          >
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+        </div>
+      </div>
+      <div id={contentId} hidden={!expanded}>
+        {children}
+      </div>
     </section>
   );
 }

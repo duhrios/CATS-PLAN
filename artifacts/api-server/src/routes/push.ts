@@ -2,7 +2,8 @@ import { count, eq } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import webpush from "web-push";
 import { db, pushSubscriptionsTable } from "@workspace/db";
-import { requireSameOrigin, requireSession, requireStaff } from "../lib/auth";
+import { getAuthSession, requireSameOrigin, requireSession, requireStaff } from "../lib/auth";
+import { isNotificationEnabled } from "./notifications-settings";
 
 type PushSubscription = webpush.PushSubscription;
 
@@ -37,6 +38,11 @@ const isSupportedPushEndpoint = (value: string) => {
 };
 
 router.post("/push/subscriptions", requireSameOrigin, requireSession, async (req, res) => {
+  const session = getAuthSession(req);
+  const group = session?.role === "user" ? "teachers" : "ti";
+  if (!(await isNotificationEnabled(group, "push"))) {
+    return res.status(403).json({ error: "As notificações deste grupo foram desativadas pelo administrador." });
+  }
   const subscription = (req.body ?? {}) as Partial<PushSubscription>;
   if (
     typeof subscription.endpoint !== "string" ||
@@ -53,11 +59,13 @@ router.post("/push/subscriptions", requireSameOrigin, requireSession, async (req
     endpoint: subscription.endpoint,
     p256dh: subscription.keys.p256dh,
     auth: subscription.keys.auth,
+    notificationGroup: group,
   }).onConflictDoUpdate({
     target: pushSubscriptionsTable.endpoint,
     set: {
       p256dh: subscription.keys.p256dh,
       auth: subscription.keys.auth,
+      notificationGroup: group,
       updatedAt: new Date(),
     },
   });
@@ -90,6 +98,21 @@ router.post("/push/send", async (req, res) => {
   if (!process.env.PUSH_ADMIN_TOKEN || req.header("authorization") !== `Bearer ${process.env.PUSH_ADMIN_TOKEN}`) {
     return res.status(401).json({ error: "Não autorizado." });
   }
+  const requestedGroup: unknown = req.body?.group;
+  if (
+    requestedGroup !== undefined &&
+    requestedGroup !== "ti" &&
+    requestedGroup !== "teachers"
+  ) {
+    return res.status(400).json({ error: "O grupo da notificação é inválido." });
+  }
+  const enabledGroups = {
+    ti: await isNotificationEnabled("ti", "push"),
+    teachers: await isNotificationEnabled("teachers", "push"),
+  };
+  if (requestedGroup && !enabledGroups[requestedGroup]) {
+    return res.status(409).json({ error: "As notificações deste grupo foram desativadas pelo administrador." });
+  }
   const payload = JSON.stringify({
     title: typeof req.body?.title === "string" ? req.body.title.slice(0, 120) : "Controle de Carrinhos",
     body: typeof req.body?.body === "string" ? req.body.body.slice(0, 500) : "Você tem uma nova atualização.",
@@ -103,6 +126,14 @@ router.post("/push/send", async (req, res) => {
   let sent = 0;
   const subscriptions = await db.select().from(pushSubscriptionsTable);
   for (const subscription of subscriptions) {
+    const group = subscription.notificationGroup;
+    if (requestedGroup) {
+      if (group !== requestedGroup) continue;
+    } else if (group === "ti" || group === "teachers") {
+      if (!enabledGroups[group]) continue;
+    } else if (!enabledGroups.ti || !enabledGroups.teachers) {
+      continue;
+    }
     const pushSubscription: PushSubscription = {
       endpoint: subscription.endpoint,
       keys: { p256dh: subscription.p256dh, auth: subscription.auth },

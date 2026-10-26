@@ -20,6 +20,38 @@ import {
 const router: IRouter = Router();
 const allowedRoles: AuthRole[] = ["admin", "operator", "user"];
 
+router.post(
+  "/auth/verify-super-admin",
+  requireSameOrigin,
+  requireSession,
+  async (req, res) => {
+    const currentSession = getAuthSession(req);
+    const { username, password } = req.body ?? {};
+    if (currentSession?.role !== "admin") {
+      return res.status(403).json({ error: "Ação restrita à administração." });
+    }
+    if (
+      typeof username !== "string" ||
+      username.trim().length < 1 ||
+      username.length > 200 ||
+      typeof password !== "string" ||
+      password.length < 1 ||
+      password.length > 1024
+    ) {
+      return res.status(400).json({ error: "Informe o usuário e a senha do superadministrador." });
+    }
+
+    const identity = await authenticate("admin", username, password);
+    if (!identity) {
+      return res.status(401).json({ error: "Credenciais do superadministrador inválidas." });
+    }
+    if (!identity.isSuperAdmin) {
+      return res.status(403).json({ error: "Essas credenciais não pertencem ao superadministrador." });
+    }
+    return res.status(204).end();
+  },
+);
+
 router.get("/auth/session", (req, res) => {
   try {
     const session = getAuthSession(req);
@@ -52,7 +84,10 @@ router.post("/auth/login", requireSameOrigin, async (req, res) => {
 
   try {
     assertSessionConfiguration();
-    const identity = await authenticate(role, username, password);
+    const identity = role === "operator"
+      ? await authenticate("operator", username, password) ??
+        await authenticate("admin", username, password)
+      : await authenticate(role, username, password);
     if (!identity) return res.status(401).json({ error: "Nome ou senha inválidos." });
     const expiresAt = establishSession(res, identity);
     return res.json({ ...identity, expiresAt });

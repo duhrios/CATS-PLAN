@@ -25,6 +25,7 @@ describe("shared reservations API", () => {
   it("maps server reservations into the agenda model", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{
       id: 42,
+      teacherId: 18,
       teacherName: "Laura",
       segment: "Fundamental 2",
       subject: "Teste",
@@ -44,6 +45,7 @@ describe("shared reservations API", () => {
     await expect(loadSharedReservations()).resolves.toEqual([{
       id: 42,
       teacher: "Laura",
+      teacherAccountId: "18",
       segment: "Fundamental 2",
       subject: "Teste",
       className: "7° MA",
@@ -83,7 +85,7 @@ describe("shared reservations API", () => {
     ]);
   });
 
-  it("persists a reservation using the shared cart ID", async () => {
+  it("preserves a teacher's profile-bound reservation save using the shared cart ID", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 5, name: "Carrinho B", code: "B" }]), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 42 }), { status: 201 }));
@@ -113,6 +115,33 @@ describe("shared reservations API", () => {
       startTime: "07:00",
       endTime: "07:45",
     });
+    expect(JSON.parse(String(request.body))).not.toHaveProperty("teacherId");
+  });
+
+  it("links an administrator-created reservation to the selected active teacher", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 5, name: "Carrinho B", code: "B" }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 42 }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveSharedReservation({
+      teacher: "Ana Souza",
+      teacherAccountId: "21",
+      segment: "Fundamental 2",
+      subject: "Ciências",
+      className: "7º ano A",
+      room: "Sala 22",
+      period: "Manhã",
+      date: "2026-10-15",
+      start: "07:00",
+      end: "07:45",
+      cart: "Carrinho B",
+      kind: "Aula",
+      quantity: 1,
+    });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)))
+      .toMatchObject({ teacherName: "Ana Souza", teacherId: "21" });
   });
 
   it("stores reserve requests against the reserve inventory anchor", async () => {

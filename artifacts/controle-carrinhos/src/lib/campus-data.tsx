@@ -18,6 +18,12 @@ import {
   getAuthenticatedSession,
   onAuthenticatedSessionChange,
 } from "@/lib/auth-session";
+import {
+  loadSharedOperationalState,
+  operationalStateStorageKeys,
+  saveSharedOperationalState,
+  type OperationalState,
+} from "@/lib/operational-state-api";
 
 export const segments = [
   "Educação Infantil",
@@ -107,6 +113,7 @@ export type WifiPoint = {
 export type Reservation = {
   id: number;
   teacher: string;
+  teacherAccountId?: string;
   segment: Segment;
   subject: string;
   className: string;
@@ -154,13 +161,57 @@ export type Cart = {
 
 export type CartSchedulePeriod = "Manhã" | "Tarde";
 export type LegacyCartSchedulePeriod = "Manha" | "Tarde";
+export type CartScheduleWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CartScheduleSlot = {
   id: string;
   start: string;
   end: string;
   label?: string;
 };
-export type CartScheduleTemplate = Record<CartSchedulePeriod, CartScheduleSlot[]>;
+export type CartScheduleTemplate = Record<CartSchedulePeriod, CartScheduleSlot[]> & {
+  weekdays?: Partial<Record<CartScheduleWeekday, Partial<Record<CartSchedulePeriod, CartScheduleSlot[]>>>>;
+};
+
+const makeFridayAfternoonSchedule = (prefix: string): CartScheduleSlot[] => [
+  { id: `${prefix}-sexta-tarde-1`, start: "12:00", end: "12:45" },
+  { id: `${prefix}-sexta-tarde-2`, start: "12:45", end: "13:25" },
+  { id: `${prefix}-sexta-tarde-3`, start: "13:25", end: "14:05" },
+  { id: `${prefix}-sexta-tarde-4`, start: "14:05", end: "15:05" },
+  { id: `${prefix}-sexta-tarde-5`, start: "15:05", end: "15:45" },
+  { id: `${prefix}-sexta-tarde-6`, start: "15:45", end: "16:20" },
+  { id: `${prefix}-sexta-tarde-7`, start: "16:20", end: "17:00" },
+];
+
+export const cartScheduleWeekdays: Array<{ value: CartScheduleWeekday; label: string }> = [
+  { value: 1, label: "Segunda-feira" },
+  { value: 2, label: "Terça-feira" },
+  { value: 3, label: "Quarta-feira" },
+  { value: 4, label: "Quinta-feira" },
+  { value: 5, label: "Sexta-feira" },
+];
+
+export const getCartScheduleWeekday = (date: string): CartScheduleWeekday => {
+  const weekday = new Date(`${date}T12:00:00`).getDay();
+  return (weekday >= 0 && weekday <= 6 ? weekday : 0) as CartScheduleWeekday;
+};
+
+export const getCartScheduleForWeekday = (
+  schedule: CartScheduleTemplate,
+  weekday: CartScheduleWeekday,
+  period: CartSchedulePeriod,
+) => schedule.weekdays?.[weekday]?.[period] ?? schedule[period] ?? [];
+
+export const hasCartScheduleWeekdayOverride = (
+  schedule: CartScheduleTemplate,
+  weekday: CartScheduleWeekday,
+  period: CartSchedulePeriod,
+) => Array.isArray(schedule.weekdays?.[weekday]?.[period]);
+
+export const getCartScheduleForDate = (
+  schedule: CartScheduleTemplate,
+  date: string,
+  period: CartSchedulePeriod,
+) => getCartScheduleForWeekday(schedule, getCartScheduleWeekday(date), period);
 
 const normalizeSchedulePeriod = (period: unknown): CartSchedulePeriod => {
   if (period === "Manhã" || period === "Tarde") return period;
@@ -187,6 +238,7 @@ export const defaultCartSchedules: Record<string, CartScheduleTemplate> = {
       { id: "a-tarde-5", start: "16:05", end: "16:50" },
       { id: "a-tarde-6", start: "16:50", end: "17:35" },
     ],
+    weekdays: { 5: { "Tarde": makeFridayAfternoonSchedule("a") } },
   },
   "Carrinho B": {
     "Manhã": [
@@ -207,6 +259,7 @@ export const defaultCartSchedules: Record<string, CartScheduleTemplate> = {
       { id: "b-tarde-6", start: "16:05", end: "16:50" },
       { id: "b-tarde-7", start: "16:50", end: "17:35" },
     ],
+    weekdays: { 5: { "Tarde": makeFridayAfternoonSchedule("b") } },
   },
   "Carrinho C": {
     "Manhã": [
@@ -227,6 +280,7 @@ export const defaultCartSchedules: Record<string, CartScheduleTemplate> = {
       { id: "c-tarde-6", start: "16:05", end: "16:50" },
       { id: "c-tarde-7", start: "16:50", end: "17:35" },
     ],
+    weekdays: { 5: { "Tarde": makeFridayAfternoonSchedule("c") } },
   },
 };
 
@@ -245,10 +299,27 @@ const normalizeScheduleSlot = (slot: Partial<CartScheduleSlot> | undefined): Car
 
 export const buildCartSchedule = (cartName: string): CartScheduleTemplate => {
   const source = defaultCartSchedules[cartName];
-  if (!source) return { "Manhã": [], "Tarde": [] };
+  if (!source) {
+    return {
+      "Manhã": [],
+      "Tarde": [],
+      weekdays: { 5: { "Tarde": makeFridayAfternoonSchedule("custom") } },
+    };
+  }
   return {
     "Manhã": source["Manhã"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
     "Tarde": source["Tarde"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+    weekdays: Object.fromEntries(
+      Object.entries(source.weekdays ?? {}).map(([weekday, periods]) => [
+        weekday,
+        Object.fromEntries(
+          Object.entries(periods ?? {}).map(([period, slots]) => [
+            period,
+            (slots ?? []).map((slot) => ({ ...slot })),
+          ]),
+        ),
+      ]),
+    ) as CartScheduleTemplate["weekdays"],
   };
 };
 
@@ -269,10 +340,35 @@ export const normalizeCartSchedules = (value: unknown): Record<string, CartSched
           .map((slot) => normalizeScheduleSlot(slot))
           .filter((slot): slot is CartScheduleSlot => slot !== null)
       : [];
-    if (morning.length || afternoon.length) {
+    const weekdays: NonNullable<CartScheduleTemplate["weekdays"]> = {};
+    if (schedule.weekdays && typeof schedule.weekdays === "object") {
+      Object.entries(schedule.weekdays as Record<string, unknown>).forEach(([weekdayKey, dayValue]) => {
+        const weekday = Number(weekdayKey);
+        if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6 || !dayValue || typeof dayValue !== "object") return;
+        const day = dayValue as Record<string, unknown>;
+        const dayPeriods: Partial<Record<CartSchedulePeriod, CartScheduleSlot[]>> = {};
+        (["Manhã", "Tarde"] as const).forEach((period) => {
+          const slots = day[period];
+          if (Array.isArray(slots)) {
+            dayPeriods[period] = slots
+              .map((slot) => normalizeScheduleSlot(slot as Partial<CartScheduleSlot>))
+              .filter((slot): slot is CartScheduleSlot => slot !== null);
+          }
+        });
+        weekdays[weekday as CartScheduleWeekday] = dayPeriods;
+      });
+    }
+    if (!Array.isArray(weekdays[5]?.Tarde)) {
+      weekdays[5] = {
+        ...weekdays[5],
+        Tarde: makeFridayAfternoonSchedule(cartName.replace(/\W+/g, "-").toLowerCase() || "cart"),
+      };
+    }
+    if (morning.length || afternoon.length || Object.keys(weekdays).length) {
       fallback[cartName] = {
         "Manhã": morning,
         "Tarde": afternoon,
+        weekdays,
       };
     }
   });
@@ -708,6 +804,7 @@ type CampusDataValue = {
   updateCampusSettings: (settings: CampusSettings) => void;
   reservations: Reservation[];
   reservationsSyncError: string | null;
+  operationalStateSyncError: string | null;
   replaceReservations: (next: Reservation[]) => void;
   saveReservation: (
     data: Omit<Reservation, "id" | "status">,
@@ -869,9 +966,25 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     normalizeCartSchedules(readStorage(cartSchedulesStorageKey, cloneDefaultSchedules())),
   );
   const updateCartSchedules = (cartName: string, next: CartScheduleTemplate) => {
-    const normalized = {
+    const normalized: CartScheduleTemplate = {
       "Manhã": (next["Manhã"] ?? []).map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
       "Tarde": (next["Tarde"] ?? []).map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
+      weekdays: Object.fromEntries(
+        Object.entries(next.weekdays ?? {}).map(([weekday, periods]) => [
+          weekday,
+          Object.fromEntries(
+            (["Manhã", "Tarde"] as const)
+              .filter((period) => Array.isArray(periods?.[period]))
+              .map((period) => [
+                period,
+                periods?.[period]?.map((slot) => ({
+                  ...slot,
+                  id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                })).filter((slot) => slot.start && slot.end && slot.start < slot.end),
+              ]),
+          ),
+        ]),
+      ) as CartScheduleTemplate["weekdays"],
     };
     persistCartSchedules({ ...cartSchedules, [cartName]: normalized });
   };
@@ -893,6 +1006,17 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       nextSchedules[cartName] = {
         "Manhã": source["Manhã"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
         "Tarde": source["Tarde"].map((slot) => ({ ...slot, id: slot.id || `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })),
+        weekdays: Object.fromEntries(
+          Object.entries(source.weekdays ?? {}).map(([weekday, periods]) => [
+            weekday,
+            Object.fromEntries(
+              Object.entries(periods ?? {}).map(([period, slots]) => [
+                period,
+                (slots ?? []).map((slot) => ({ ...slot })),
+              ]),
+            ),
+          ]),
+        ) as CartScheduleTemplate["weekdays"],
       };
     });
     persistCartSchedules(nextSchedules);
@@ -998,6 +1122,208 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       ),
     }),
   );
+  const [operationalStateSyncError, setOperationalStateSyncError] = useState<string | null>(null);
+  const operationalStateReadyRef = useRef(false);
+  const operationalStateUpdatedAtRef = useRef<string | null>(null);
+  const operationalStateSaveQueueRef = useRef(Promise.resolve());
+  const operationalStateSyncedSignatureRef = useRef<string | null>(null);
+  const [operationalStateReady, setOperationalStateReady] = useState(false);
+  const operationalStateCurrent: OperationalState = {
+    [cartStorageKey]: carts,
+    [cartSchedulesStorageKey]: cartSchedules,
+    [wifiPointsStorageKey]: wifiPoints,
+    [wifiRoomsStorageKey]: wifiRooms,
+    [movementsStorageKey]: movements,
+    [movementSettingsStorageKey]: movementSettings,
+    "controle-carrinhos-campus-settings": campusSettings,
+  };
+  const operationalStateCurrentRef = useRef(operationalStateCurrent);
+  operationalStateCurrentRef.current = operationalStateCurrent;
+
+  useEffect(() => {
+    if (import.meta.env.MODE === "test") {
+      setOperationalStateReady(true);
+      return;
+    }
+    let active = true;
+    const applyOperationalState = (state: OperationalState) => {
+      const mergedState = {
+        ...operationalStateCurrentRef.current,
+        ...state,
+      };
+      if (getAuthenticatedRole() === "user") {
+        mergedState[wifiPointsStorageKey] = [];
+        mergedState[wifiRoomsStorageKey] = [];
+        mergedState[movementsStorageKey] = [];
+      }
+      operationalStateCurrentRef.current = mergedState;
+      for (const key of operationalStateStorageKeys) {
+        const value = mergedState[key];
+        if (value === undefined) continue;
+        if (key === cartStorageKey && Array.isArray(value)) {
+          setCarts(value as Cart[]);
+        } else if (key === cartSchedulesStorageKey && typeof value === "object" && !Array.isArray(value) && value !== null) {
+          setCartSchedules(normalizeCartSchedules(value as Record<string, CartScheduleTemplate>));
+        } else if (key === wifiPointsStorageKey && Array.isArray(value)) {
+          setWifiPoints(value as WifiPoint[]);
+        } else if (key === wifiRoomsStorageKey && Array.isArray(value)) {
+          setWifiRooms(value as typeof initialWifiRooms);
+        } else if (key === movementsStorageKey && Array.isArray(value)) {
+          const nextMovements = value as CartMovement[];
+          movementsRef.current = nextMovements;
+          setMovements(nextMovements);
+        } else if (key === movementSettingsStorageKey && typeof value === "object" && !Array.isArray(value) && value !== null) {
+          setMovementSettings({ ...defaultMovementSettings, ...value as Partial<MovementSettings> });
+        } else if (key === "controle-carrinhos-campus-settings" && typeof value === "object" && !Array.isArray(value) && value !== null) {
+          setCampusSettings({ ...defaultCampusSettings, ...value as Partial<CampusSettings> });
+        }
+        window.localStorage.setItem(key, JSON.stringify(value));
+      }
+      operationalStateSyncedSignatureRef.current = JSON.stringify(mergedState);
+    };
+    const refreshOperationalState = async () => {
+      if (!getAuthenticatedRole()) return;
+      try {
+        const result = await loadSharedOperationalState();
+        if (!active) return;
+        if (result.updatedAt === operationalStateUpdatedAtRef.current) return;
+        const localSignature = JSON.stringify(operationalStateCurrentRef.current);
+        if (
+          operationalStateSyncedSignatureRef.current !== null &&
+          localSignature !== operationalStateSyncedSignatureRef.current
+        ) {
+          setOperationalStateSyncError(
+            "Os dados operacionais foram alterados em outro dispositivo. Atualize a página para carregar a versão mais recente.",
+          );
+          return;
+        }
+        operationalStateUpdatedAtRef.current = result.updatedAt;
+        if (result.state) applyOperationalState(result.state);
+        else operationalStateSyncedSignatureRef.current = localSignature;
+        setOperationalStateSyncError(null);
+      } catch (error) {
+        if (!active) return;
+        setOperationalStateSyncError(
+          error instanceof Error
+            ? `Não foi possível sincronizar os dados operacionais: ${error.message}`
+            : "Não foi possível sincronizar os dados operacionais.",
+        );
+      }
+    };
+    const hydrateOperationalState = async () => {
+      const role = getAuthenticatedRole();
+      if (!role) {
+        operationalStateReadyRef.current = false;
+        setOperationalStateReady(false);
+        return;
+      }
+      try {
+        const result = await loadSharedOperationalState();
+        if (!active) return;
+        operationalStateUpdatedAtRef.current = result.updatedAt;
+        if (result.state) {
+          applyOperationalState(result.state);
+        } else if (role === "admin" || role === "operator") {
+          operationalStateSyncedSignatureRef.current =
+            JSON.stringify(operationalStateCurrentRef.current);
+          const initialState = Object.fromEntries(
+            operationalStateStorageKeys.flatMap((key) => {
+              const raw = window.localStorage.getItem(key);
+              if (!raw) return [];
+              try {
+                return [[key, JSON.parse(raw)]];
+              } catch {
+                throw new Error(`O cache local de ${key} está inválido.`);
+              }
+            }),
+          );
+          const saved = await saveSharedOperationalState(initialState, null);
+          if (!active) return;
+          operationalStateUpdatedAtRef.current = saved.updatedAt;
+          operationalStateSyncedSignatureRef.current =
+            JSON.stringify(operationalStateCurrentRef.current);
+        } else {
+          operationalStateSyncedSignatureRef.current =
+            JSON.stringify(operationalStateCurrentRef.current);
+        }
+        operationalStateReadyRef.current = true;
+        setOperationalStateReady(true);
+        setOperationalStateSyncError(null);
+      } catch (error) {
+        if (!active) return;
+        setOperationalStateSyncError(
+          error instanceof Error
+            ? `Não foi possível sincronizar os dados operacionais: ${error.message}`
+            : "Não foi possível sincronizar os dados operacionais.",
+        );
+      }
+    };
+    const unsubscribe = onAuthenticatedSessionChange(() => {
+      if (!getAuthenticatedRole()) {
+        operationalStateReadyRef.current = false;
+        setOperationalStateReady(false);
+        return;
+      }
+      void hydrateOperationalState();
+    });
+    const interval = window.setInterval(() => {
+      void refreshOperationalState();
+    }, 15_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshOperationalState();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    if (getAuthenticatedRole()) void hydrateOperationalState();
+    return () => {
+      active = false;
+      unsubscribe();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!operationalStateReady || !operationalStateReadyRef.current) return;
+    if (getAuthenticatedRole() !== "admin" && getAuthenticatedRole() !== "operator") return;
+    const state = operationalStateCurrent;
+    const timer = window.setTimeout(() => {
+      const save = operationalStateSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => saveSharedOperationalState(
+          state,
+          operationalStateUpdatedAtRef.current,
+        ));
+      operationalStateSaveQueueRef.current = save.then(
+        () => undefined,
+        () => undefined,
+      );
+      void save
+        .then((result) => {
+          operationalStateUpdatedAtRef.current = result.updatedAt;
+          operationalStateSyncedSignatureRef.current = JSON.stringify(state);
+          setOperationalStateSyncError(null);
+        })
+        .catch((error: unknown) => {
+          setOperationalStateSyncError(
+            error instanceof Error
+              ? `Não foi possível sincronizar os dados operacionais: ${error.message}`
+              : "Não foi possível sincronizar os dados operacionais.",
+          );
+        });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    operationalStateReady,
+    carts,
+    cartSchedules,
+    wifiPoints,
+    wifiRooms,
+    movements,
+    movementSettings,
+    campusSettings,
+  ]);
 
   const persistTeacher = (next: TeacherProfile) => {
     setTeacher(next);
@@ -1371,7 +1697,6 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     );
   };
   const deleteCartUnit = (cartId: string, unit: string) => {
-    if (getAuthenticatedSession()?.isSuperAdmin !== true) return false;
     const targetCart = carts.find((cart) => cart.id === cartId);
     if (!targetCart || (targetCart.deletedUnits ?? []).includes(unit)) return false;
     persistCarts(
@@ -1442,7 +1767,6 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     });
   };
   const addCartUnit = (cartId: string) => {
-    if (getAuthenticatedSession()?.isSuperAdmin !== true) return null;
     const targetCart = carts.find((cart) => cart.id === cartId);
     if (!targetCart) return null;
     const unit = `${targetCart.prefix}${targetCart.total + 1}`;
@@ -1460,7 +1784,6 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     return unit;
   };
   const deleteCart = (id: string) => {
-    if (getAuthenticatedSession()?.isSuperAdmin !== true) return false;
     const cart = carts.find((item) => item.id === id);
     if (!cart) return false;
     const nextSchedules = { ...cartSchedules };
@@ -1729,6 +2052,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         updateCampusSettings,
         reservations,
         reservationsSyncError,
+        operationalStateSyncError,
         replaceReservations,
         saveReservation,
         deleteReservation,

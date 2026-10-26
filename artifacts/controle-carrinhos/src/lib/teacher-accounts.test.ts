@@ -13,9 +13,9 @@ describe("teacher account API client", () => {
 
   it("sorts teacher accounts alphabetically by name using Portuguese collation", () => {
     const accounts = [
-      { id: "3", name: "Érica Souza", email: "erica@escola.com.br", segment: "Fundamental 1" as const, subject: "", mustSetPassword: true },
-      { id: "2", name: "Ana Costa", email: "ana.costa@escola.com.br", segment: "Fundamental 1" as const, subject: "", mustSetPassword: true },
-      { id: "1", name: "Ana Alves", email: "ana.alves@escola.com.br", segment: "Fundamental 1" as const, subject: "", mustSetPassword: true },
+      { id: "3", name: "Érica Souza", email: "erica@escola.com.br", segment: "Fundamental 1" as const, subject: "", className: "", mustSetPassword: true },
+      { id: "2", name: "Ana Costa", email: "ana.costa@escola.com.br", segment: "Fundamental 1" as const, subject: "", className: "", mustSetPassword: true },
+      { id: "1", name: "Ana Alves", email: "ana.alves@escola.com.br", segment: "Fundamental 1" as const, subject: "", className: "", mustSetPassword: true },
     ];
 
     expect(sortTeacherAccounts(accounts).map(({ name }) => name)).toEqual([
@@ -34,6 +34,7 @@ describe("teacher account API client", () => {
         email: "ana@escola.com.br",
         segment: "Fundamental 2",
         subject: "Ciências",
+        className: "7º ano A",
         mustSetPassword: false,
       },
     ]), { status: 200 })));
@@ -45,6 +46,7 @@ describe("teacher account API client", () => {
         email: "ana@escola.com.br",
         segment: "Fundamental 2",
         subject: "Ciências",
+        className: "7º ano A",
         mustSetPassword: false,
       },
     ]);
@@ -63,6 +65,7 @@ describe("teacher account API client", () => {
         email: "bruno@escola.com.br",
         segment: "Fundamental 1",
         subject: "",
+        className: "",
         mustSetPassword: true,
       },
     ]), { status: 201 }));
@@ -79,6 +82,7 @@ describe("teacher account API client", () => {
       email: "bruno@escola.com.br",
       segment: "Fundamental 1",
       subject: "",
+      className: "",
       mustSetPassword: true,
     }]);
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/teacher-accounts", {
@@ -109,6 +113,7 @@ describe("teacher account API client", () => {
         email: "invalid@escola.com.br",
         segment: "Unknown",
         subject: "",
+        className: "",
         mustSetPassword: false,
       }]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

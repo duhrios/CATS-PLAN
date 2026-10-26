@@ -5,9 +5,12 @@ import type { ReactNode } from 'react';
 import {
   CampusDataProvider,
   canCancelReservation,
+  cartScheduleWeekdays,
   defaultCartSchedules,
+  getCartScheduleForDate,
   initialAdminAccounts,
   initialCarts,
+  normalizeCartSchedules,
   useCampusData,
 } from './campus-data';
 import type { Cart } from './campus-data';
@@ -50,6 +53,53 @@ describe('Campus data core logic', () => {
     act(() => result.current.addCart(cart));
   };
 
+  it('offers schedule configuration only for weekdays', () => {
+    expect(cartScheduleWeekdays.map(({ label }) => label)).toEqual([
+      'Segunda-feira',
+      'Terça-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+    ]);
+  });
+
+  it('keeps legacy schedules and provides the spreadsheet Friday afternoon hours', () => {
+    const legacy = normalizeCartSchedules({
+      'Carrinho A': {
+        Manhã: [{ id: 'legacy-morning', start: '07:00', end: '07:45' }],
+        Tarde: [{ id: 'legacy-afternoon', start: '13:00', end: '13:45' }],
+      },
+    });
+
+    expect(legacy['Carrinho A']['Manhã']).toEqual([
+      { id: 'legacy-morning', start: '07:00', end: '07:45', label: undefined },
+    ]);
+    expect(getCartScheduleForDate(legacy['Carrinho A'], '2026-10-08', 'Tarde')).toEqual([
+      { id: 'legacy-afternoon', start: '13:00', end: '13:45', label: undefined },
+    ]);
+    expect(getCartScheduleForDate(legacy['Carrinho A'], '2026-10-09', 'Tarde').map(({ start, end }) => [start, end])).toEqual([
+      ['12:00', '12:45'],
+      ['12:45', '13:25'],
+      ['13:25', '14:05'],
+      ['14:05', '15:05'],
+      ['15:05', '15:45'],
+      ['15:45', '16:20'],
+      ['16:20', '17:00'],
+    ]);
+  });
+
+  it('uses configured weekday overrides, including an intentionally empty period', () => {
+    const schedule = {
+      ...defaultCartSchedules['Carrinho A'],
+      weekdays: {
+        ...defaultCartSchedules['Carrinho A'].weekdays,
+        2: { Tarde: [] },
+      },
+    };
+
+    expect(getCartScheduleForDate(schedule, '2026-10-06', 'Tarde')).toEqual([]);
+    expect(getCartScheduleForDate(schedule, '2026-10-07', 'Tarde')).toEqual(schedule['Tarde']);
+  });
   it('starts without built-in accounts or shared default credentials', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
 

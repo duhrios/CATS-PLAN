@@ -8,8 +8,8 @@ import {
   establishSession,
   getAuthSession,
   hashPassword,
+  requireAdmin,
   requireSameOrigin,
-  requireSuperAdmin,
 } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -29,7 +29,7 @@ const hasRoleName = async (role: "admin" | "operator", name: string, excludeId?:
   return matches.length > 0;
 };
 
-router.get("/auth/staff-accounts", requireSuperAdmin, async (_req, res) => {
+router.get("/auth/staff-accounts", requireAdmin, async (_req, res) => {
   const accounts = await db
     .select({
       id: usersTable.id,
@@ -54,7 +54,7 @@ router.get("/auth/staff-accounts", requireSuperAdmin, async (_req, res) => {
   })));
 });
 
-router.post("/auth/staff-accounts", requireSameOrigin, requireSuperAdmin, async (req, res) => {
+router.post("/auth/staff-accounts", requireSameOrigin, requireAdmin, async (req, res) => {
   const { name: rawName, password, role } = req.body ?? {};
   if (
     typeof rawName !== "string" ||
@@ -72,7 +72,11 @@ router.post("/auth/staff-accounts", requireSameOrigin, requireSuperAdmin, async 
   }
   const accountRole = role as "admin" | "operator";
   if (await hasRoleName(accountRole, name)) {
-    return res.status(409).json({ error: "Já existe uma conta com esse nome nesse perfil." });
+    return res.status(409).json({
+      error: accountRole === "admin"
+        ? "Já existe um administrador com esse nome. Se deseja criar um usuário TI, selecione Usuário TI."
+        : "Já existe um usuário TI com esse nome. Escolha outro nome.",
+    });
   }
 
   try {
@@ -101,7 +105,7 @@ router.post("/auth/staff-accounts", requireSameOrigin, requireSuperAdmin, async 
   }
 });
 
-router.put("/auth/staff-accounts/:id", requireSameOrigin, requireSuperAdmin, async (req, res) => {
+router.put("/auth/staff-accounts/:id", requireSameOrigin, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const { name: rawName, password } = req.body ?? {};
   if (!Number.isInteger(id) || id <= 0) {
@@ -122,8 +126,16 @@ router.put("/auth/staff-accounts/:id", requireSameOrigin, requireSuperAdmin, asy
   if (!current || !current.active || !["admin", "operator"].includes(current.role)) {
     return res.status(404).json({ error: "Conta administrativa não encontrada." });
   }
-  const accountRole = current.role as "admin" | "operator";
+  const session = getAuthSession(req);
   const configuredAdmin = process.env.ADMIN_USERNAME?.trim().toLocaleLowerCase("pt-BR");
+  const isProtectedSuperAdmin =
+    current.role === "admin" &&
+    process.env.ADMIN_SUPER_ADMIN !== "false" &&
+    current.name.trim().toLocaleLowerCase("pt-BR") === configuredAdmin;
+  if (isProtectedSuperAdmin && !session?.isSuperAdmin) {
+    return res.status(403).json({ error: "Somente o superadministrador pode alterar esta conta." });
+  }
+  const accountRole = current.role as "admin" | "operator";
   if (
     accountRole === "admin" &&
     process.env.ADMIN_SUPER_ADMIN !== "false" &&
@@ -153,7 +165,6 @@ router.put("/auth/staff-accounts/:id", requireSameOrigin, requireSuperAdmin, asy
   });
   if (!updated) return res.status(404).json({ error: "Conta administrativa não encontrada." });
 
-  const session = getAuthSession(req);
   if (session?.accountId === id) {
     establishSession(res, {
       role: session.role,
@@ -171,7 +182,7 @@ router.put("/auth/staff-accounts/:id", requireSameOrigin, requireSuperAdmin, asy
   });
 });
 
-router.delete("/auth/staff-accounts/:id", requireSameOrigin, requireSuperAdmin, async (req, res) => {
+router.delete("/auth/staff-accounts/:id", requireSameOrigin, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "Identificador da conta inválido." });

@@ -1,6 +1,11 @@
 import { BellOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/app-ui";
+import { getAuthenticatedRole } from "@/lib/auth-session";
+import {
+  notificationGroupForRole,
+  useNotificationSettings,
+} from "@/lib/notification-settings";
 
 const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
 
@@ -11,6 +16,10 @@ const toUint8Array = (value: string) => {
 };
 
 export function PushNotifications() {
+  const role = getAuthenticatedRole();
+  const group = notificationGroupForRole(role);
+  const { settings, loading: settingsLoading, error: settingsError } =
+    useNotificationSettings();
   const [supported, setSupported] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [busy, setBusy] = useState(false);
@@ -43,7 +52,14 @@ export function PushNotifications() {
     }
   }, []);
 
-  if (!supported || registered) return null;
+  if (
+    !supported ||
+    registered ||
+    !group ||
+    settingsLoading ||
+    settingsError ||
+    !settings[group].push
+  ) return null;
 
   const enable = async () => {
     setBusy(true);

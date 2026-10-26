@@ -7,9 +7,9 @@ import {
   establishSession,
   getAuthSession,
   hashPassword,
+  requireAdmin,
   requireSameOrigin,
   requireSession,
-  requireSuperAdmin,
 } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -221,7 +221,7 @@ router.put("/auth/teacher-profile", requireSameOrigin, requireSession, async (re
   }
 });
 
-router.get("/auth/teacher-accounts", requireSuperAdmin, async (_req, res) => {
+router.get("/auth/teacher-accounts", requireAdmin, async (_req, res) => {
   try {
     const [accounts, profiles] = await Promise.all([
       db.select({
@@ -240,6 +240,7 @@ router.get("/auth/teacher-accounts", requireSuperAdmin, async (_req, res) => {
       email: account.email,
       segment: profiles[String(account.id)]?.segment ?? "Fundamental 2",
       subject: profiles[String(account.id)]?.subject ?? "",
+      className: profiles[String(account.id)]?.className ?? "",
       mustSetPassword: !account.passwordHash,
     })));
   } catch (error) {
@@ -321,7 +322,7 @@ router.post("/auth/teacher-accounts/complete-registration", requireSameOrigin, a
   return res.status(201).json({ id: String(account.id), name: account.name });
 });
 
-router.post("/auth/teacher-accounts", requireSameOrigin, requireSuperAdmin, async (req, res) => {
+router.post("/auth/teacher-accounts", requireSameOrigin, requireAdmin, async (req, res) => {
   const entries: unknown[] = Array.isArray(req.body?.accounts) ? req.body.accounts : [req.body];
   if (entries.length === 0) {
     return res.status(400).json({ error: "Cadastre pelo menos um professor por vez." });
@@ -434,7 +435,7 @@ router.post("/auth/teacher-accounts", requireSameOrigin, requireSuperAdmin, asyn
   }
 });
 
-router.delete("/auth/teacher-accounts/:id", requireSameOrigin, requireSuperAdmin, async (req, res) => {
+router.delete("/auth/teacher-accounts/:id", requireSameOrigin, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "Identificador do professor inválido." });

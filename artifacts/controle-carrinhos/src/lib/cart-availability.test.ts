@@ -27,6 +27,14 @@ const schedules: Record<string, CartScheduleTemplate> = {
       { id: "a2", start: "07:45", end: "08:30" },
     ],
     Tarde: [{ id: "a3", start: "13:00", end: "13:45" }],
+    weekdays: {
+      5: {
+        Tarde: [
+          { id: "fri1", start: "14:30", end: "15:00" },
+          { id: "fri2", start: "15:00", end: "15:30" },
+        ],
+      },
+    },
   },
   "Carrinho B": {
     Manhã: [{ id: "b1", start: "07:00", end: "07:45" }],
@@ -79,6 +87,21 @@ describe("teacher cart schedule availability", () => {
           { id: "Manhã-b1", period: "Manhã", start: "07:00", end: "07:45", available: true },
         ],
       },
+    ]);
+  });
+
+  it("uses the configured schedule for the selected weekday", () => {
+    const friday = getCartAvailability(
+      [makeCart("a", "Carrinho A")],
+      schedules,
+      [],
+      "2026-10-09",
+      false,
+    );
+
+    expect(friday[0].slots.filter((slot) => slot.period === "Tarde").map(({ start, end }) => [start, end])).toEqual([
+      ["14:30", "15:00"],
+      ["15:00", "15:30"],
     ]);
   });
 

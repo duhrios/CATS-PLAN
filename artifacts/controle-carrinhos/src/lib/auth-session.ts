@@ -67,7 +67,7 @@ export const loginWithCredentials = async (
   }
   if (
     !result ||
-    result.role !== role ||
+    (result.role !== role && !(role === "operator" && result.role === "admin")) ||
     typeof result.name !== "string" ||
     typeof result.isSuperAdmin !== "boolean" ||
     typeof result.mustChangePassword !== "boolean" ||
@@ -77,6 +77,21 @@ export const loginWithCredentials = async (
   }
   setVerifiedSession(result);
   return result;
+};
+
+export const verifySuperAdminCredentials = async (
+  username: string,
+  password: string,
+) => {
+  const response = await fetch("/api/auth/verify-super-admin", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (response.ok) return;
+  const result = await response.json().catch(() => null) as { error?: string } | null;
+  throw new Error(result?.error ?? `Falha ao validar o superadministrador (${response.status}).`);
 };
 
 export const changeTeacherPassword = async (

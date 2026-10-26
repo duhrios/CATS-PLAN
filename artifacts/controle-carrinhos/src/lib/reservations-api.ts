@@ -22,6 +22,7 @@ export const onSharedReservationsRefresh = (
 
 type ReservationRecord = {
   id: number;
+  teacherId?: number | null;
   teacherName: string;
   segment: string;
   subject: string;
@@ -49,6 +50,9 @@ const requireResponse = async (response: Response) => {
 const fromRecord = (item: ReservationRecord): Reservation => ({
   id: item.id,
   teacher: item.teacherName,
+  ...(typeof item.teacherId === "number"
+    ? { teacherAccountId: String(item.teacherId) }
+    : {}),
   segment: item.className.trim().toLocaleLowerCase("pt-BR") === "contraturno"
     ? "Contraturno"
     : segments.includes(item.segment as Segment) ? item.segment as Segment : "Fundamental 2",
@@ -91,6 +95,9 @@ export async function saveSharedReservation(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         teacherName: reservation.teacher,
+        ...(reservation.teacherAccountId
+          ? { teacherId: reservation.teacherAccountId }
+          : {}),
         segment: reservation.segment,
         subject: reservation.subject,
         className: reservation.className,

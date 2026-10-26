@@ -47,15 +47,16 @@ import {
   todayISO,
 } from "@/components/app-ui";
 import { Calendar } from "@/components/ui/calendar";
-import { getAuthenticatedSession } from "@/lib/auth-session";
 import { type Period, useRoomDirectory } from "@/lib/room-directory";
 import {
   isReservationInProgress,
   canCancelReservation,
+  getCartScheduleForDate,
   segments,
   type Reservation,
   type ReservationKind,
   type Segment,
+  normalizeTeacherName,
   isCartTransitionConflict,
   reservationsOverlap,
   useCampusData,
@@ -65,23 +66,16 @@ import {
   loadSharedReservations,
   saveSharedReservation,
 } from "@/lib/reservations-api";
+import {
+  loadTeacherAccounts,
+  sortTeacherAccounts,
+  type TeacherAccessAccount,
+} from "@/lib/teacher-accounts";
 
 const isoToDate = (value: string) => new Date(`${value}T12:00:00`);
 const dateToISO = (value: Date) => value.toISOString().slice(0, 10);
 const isWeekendISO = (value: string) =>
   [0, 6].includes(isoToDate(value).getDay());
-
-type ScheduleSlot = { start: string; end: string; label?: string };
-
-const fridayAfternoonSchedule: ScheduleSlot[] = [
-  { start: "12:00", end: "12:45" },
-  { start: "12:45", end: "13:25" },
-  { start: "13:25", end: "14:05" },
-  { start: "14:05", end: "15:05" },
-  { start: "15:05", end: "15:45" },
-  { start: "15:45", end: "16:20" },
-  { start: "16:20", end: "17:00" },
-];
 
 const reservationConflictDetails = (reservations: Reservation[]) => {
   const conflicts: Array<{ reservation: Reservation; other: Reservation }> = [];
@@ -488,7 +482,7 @@ export function OverviewPage() {
   );
 }
 
-function ReservationModal({
+export function ReservationModal({
   reservation,
   initialDate: initialDateValue,
   mode = "admin",
@@ -512,9 +506,16 @@ function ReservationModal({
   const { carts, reservations, wifiRooms, wifiPoints, movementSettings, campusSettings, cartSchedules } = useCampusData();
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [teacherAccounts, setTeacherAccounts] = useState<TeacherAccessAccount[]>([]);
+  const [teacherAccountsLoading, setTeacherAccountsLoading] = useState(mode === "admin");
+  const [teacherAccountsError, setTeacherAccountsError] = useState("");
+  const [selectedTeacherAccountId, setSelectedTeacherAccountId] = useState(
+    mode === "admin" ? reservation?.teacherAccountId ?? "" : "",
+  );
   const scheduleFor = (cart: string, period: "Manhã" | "Tarde", date?: string) => {
-    if (date && period === "Tarde" && isFridayISO(date)) return fridayAfternoonSchedule;
-    return cartSchedules[cart]?.[period] ?? [];
+    const schedule = cartSchedules[cart];
+    if (!schedule) return [];
+    return date ? getCartScheduleForDate(schedule, date, period) : schedule[period] ?? [];
   };
   const initialPeriod = reservation?.period ?? ("Manhã" as Period);
   const initialSegment = reservation?.segment ?? teacher.segment;
@@ -533,7 +534,7 @@ function ReservationModal({
     initialSlots.find((slot) => slot.start === reservation?.start) ??
     initialSlots[0];
   const [form, setForm] = useState({
-    teacher: reservation?.teacher ?? teacher.name,
+    teacher: reservation?.teacher ?? (mode === "admin" ? "" : teacher.name),
     segment: initialSegment,
     subject: reservation?.subject ?? teacher.subject,
     kind: reservation?.kind ?? ("Aula" as ReservationKind),
@@ -547,6 +548,52 @@ function ReservationModal({
     quantity: String(reservation?.quantity ?? 1),
     reservedChromebooks: reservation?.reservedChromebooks?.join(", ") ?? "",
   });
+  useEffect(() => {
+    if (mode !== "admin") return;
+    let active = true;
+    void loadTeacherAccounts()
+      .then((accounts) => {
+        if (active) setTeacherAccounts(sortTeacherAccounts(accounts));
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setTeacherAccountsError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Não foi possível carregar os professores cadastrados.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setTeacherAccountsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
+  useEffect(() => {
+    if (mode !== "admin" || !reservation || selectedTeacherAccountId) return;
+    const matches = teacherAccounts.filter(
+      (account) =>
+        normalizeTeacherName(account.name) ===
+        normalizeTeacherName(reservation.teacher),
+    );
+    if (matches.length === 1) setSelectedTeacherAccountId(matches[0].id);
+  }, [mode, reservation, selectedTeacherAccountId, teacherAccounts]);
+  const selectedTeacherAccount = teacherAccounts.find(
+    (account) => account.id === selectedTeacherAccountId,
+  );
+  const selectedTeacherReserved = mode === "admin" && selectedTeacherAccount
+    ? reservations
+        .filter((item) =>
+          item.teacherAccountId === selectedTeacherAccount.id ||
+          (!item.teacherAccountId &&
+            normalizeTeacherName(item.teacher) ===
+              normalizeTeacherName(selectedTeacherAccount.name)),
+        )
+        .filter((item) => item.kind === "Reserva")
+        .reduce((total, item) => total + item.quantity, 0)
+    : teacherReserved;
   const eligibleEntries = classEntries.filter(
     (item) => item.segment === form.segment,
   );
@@ -641,9 +688,31 @@ function ReservationModal({
   const maxForTeacher = Math.max(
     0,
     campusSettings.reservationLimit -
-      teacherReserved +
+      selectedTeacherReserved +
       (reservation?.kind === "Reserva" ? reservation.quantity : 0),
   );
+  const selectTeacher = (accountId: string) => {
+    setSelectedTeacherAccountId(accountId);
+    setError("");
+    const account = teacherAccounts.find((item) => item.id === accountId);
+    if (!account) {
+      setForm((current) => ({ ...current, teacher: "" }));
+      return;
+    }
+    setForm((current) => {
+      const className = account.className;
+      return {
+        ...current,
+        teacher: account.name,
+        segment: account.segment,
+        subject: account.subject,
+        className,
+        room: className
+          ? roomForClass(className, current.period, account.segment)
+          : "",
+      };
+    });
+  };
 
   return (
     <Modal
@@ -655,6 +724,10 @@ function ReservationModal({
         onSubmit={async (event) => {
           event.preventDefault();
           if (saving) return;
+          if (mode === "admin" && !selectedTeacherAccount) {
+            setError("Selecione um professor com cadastro ativo.");
+            return;
+          }
           const quantity = Math.max(1, Number(form.quantity) || 1);
           if (isReserve && !campusSettings.reservationsEnabled) {
             setError("As reservas de Chromebooks estão desativadas pelo administrador.");
@@ -689,6 +762,9 @@ function ReservationModal({
           }
           const reservationData = {
             ...form,
+            ...(mode === "admin" && selectedTeacherAccount
+              ? { teacherAccountId: selectedTeacherAccount.id }
+              : {}),
             quantity,
             reservedChromebooks: form.reservedChromebooks.split(",").map((item) => item.trim()).filter(Boolean).slice(0, quantity),
             segment: form.segment,
@@ -731,16 +807,47 @@ function ReservationModal({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Professor(a)"
-            hint="Preenchido automaticamente pelo seu cadastro."
+            hint={mode === "admin"
+              ? "Selecione um professor com cadastro ativo; os dados do perfil serão preenchidos."
+              : "Preenchido automaticamente pelo seu cadastro."}
           >
-            <input
-              required
-              readOnly
-              value={form.teacher}
-              className={`${inputClass} bg-[hsl(var(--muted))]`}
-              data-testid="input-reservation-teacher"
-            />
+            {mode === "admin" ? (
+              <select
+                required
+                value={selectedTeacherAccountId}
+                disabled={teacherAccountsLoading || Boolean(teacherAccountsError) || teacherAccounts.length === 0}
+                onChange={(event) => selectTeacher(event.target.value)}
+                className={inputClass}
+                data-testid="select-reservation-teacher"
+              >
+                <option value="">
+                  {teacherAccountsLoading
+                    ? "Carregando professores..."
+                    : teacherAccounts.length
+                      ? "Selecione um professor"
+                      : "Nenhum professor cadastrado"}
+                </option>
+                {teacherAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} · {account.email}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                required
+                readOnly
+                value={form.teacher}
+                className={`${inputClass} bg-[hsl(var(--muted))]`}
+                data-testid="input-reservation-teacher"
+              />
+            )}
           </Field>
+          {mode === "admin" && teacherAccountsError && (
+            <p role="alert" className="sm:col-span-2 rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">
+              {teacherAccountsError}
+            </p>
+          )}
           <Field label="Tipo de solicitação">
             <select
               value={form.kind}
@@ -1655,7 +1762,6 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [unitSelectionMode, setUnitSelectionMode] = useState<
     "unavailable" | "reserved" | "deleted"
   >("unavailable");
-  const isSuperAdmin = getAuthenticatedSession()?.isSuperAdmin === true;
   const filtered = carts.filter(
     (cart) =>
       (filter === "Todos" || filter === "Reservas"
@@ -1879,35 +1985,31 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         >
                           Reserva
                         </button>
-                        {isSuperAdmin && (
-                          <button
-                            type="button"
-                            disabled={readOnly}
-                            onClick={() => setUnitSelectionMode("deleted")}
-                            className={cx(
-                              "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
-                              unitSelectionMode === "deleted"
-                                ? "bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))]"
-                                : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
-                            )}
-                          >
-                            <Trash2 size={12} /> Excluir
-                          </button>
-                        )}
-                        {isSuperAdmin && (
-                          <button
-                            type="button"
-                            disabled={readOnly}
-                            onClick={() => {
-                              const unit = addCartUnit(cart.id);
-                              if (unit) setExpandedCarts((current) => current.includes(cart.id) ? current : [...current, cart.id]);
-                            }}
-                            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[hsl(var(--primary))] transition hover:bg-[hsl(var(--muted))]"
-                            data-testid={`button-add-unit-${cart.id}`}
-                          >
-                            <Plus size={12} /> Adicionar unidade
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => setUnitSelectionMode("deleted")}
+                          className={cx(
+                            "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
+                            unitSelectionMode === "deleted"
+                              ? "bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))]"
+                              : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
+                          )}
+                        >
+                          <Trash2 size={12} /> Excluir
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            const unit = addCartUnit(cart.id);
+                            if (unit) setExpandedCarts((current) => current.includes(cart.id) ? current : [...current, cart.id]);
+                          }}
+                          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[hsl(var(--primary))] transition hover:bg-[hsl(var(--muted))]"
+                          data-testid={`button-add-unit-${cart.id}`}
+                        >
+                          <Plus size={12} /> Adicionar unidade
+                        </button>
                       </div>
                       <span className="shrink-0 font-data text-[11px] font-semibold">
                         {cart.prefix}1–{cart.prefix}
@@ -1993,22 +2095,20 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         : "Indisponibilizar carrinho inteiro"}
                     </button>
                     <div className="flex items-center gap-2">
-                      {isSuperAdmin && (
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => {
-                            const used = reservations.some((item) => item.cart === cart.name);
-                            const warning = used
-                              ? `Este carrinho aparece em agendamentos existentes. Excluir ${cart.name} mesmo assim?`
-                              : `Excluir ${cart.name}? Esta ação não pode ser desfeita.`;
-                            if (window.confirm(warning)) deleteCart(cart.id);
-                          }}
-                          data-testid={`button-delete-cart-${cart.id}`}
-                        >
-                          <Trash2 size={14} /> Excluir carrinho
-                        </Button>
-                      )}
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => {
+                          const used = reservations.some((item) => item.cart === cart.name);
+                          const warning = used
+                            ? `Este carrinho aparece em agendamentos existentes. Excluir ${cart.name} mesmo assim?`
+                            : `Excluir ${cart.name}? Esta ação não pode ser desfeita.`;
+                          if (window.confirm(warning)) deleteCart(cart.id);
+                        }}
+                        data-testid={`button-delete-cart-${cart.id}`}
+                      >
+                        <Trash2 size={14} /> Excluir carrinho
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -2762,6 +2862,16 @@ export function HistoryPage() {
   const [exported, setExported] = useState(false);
   const types = ["Todos", "Reserva", "Equipamento", "Wi-Fi", "Movimentação"];
   type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "TI" };
+  const formatHistoryDate = (value: string) => {
+    const date = new Date(`${value}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return "Data indisponível";
+    return new Intl.DateTimeFormat("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    }).format(date);
+  };
   const reservationHistory: HistoryEvent[] = reservations.flatMap((reservation) => [{
     id: `reservation-${reservation.id}`,
     time: reservation.start,
@@ -2776,7 +2886,13 @@ export function HistoryPage() {
   const movementHistory: HistoryEvent[] = movements.flatMap((movement) => {
     const reservation = reservations.find((item) => item.id === movement.reservationId);
     if (!reservation) return [];
-    const eventDate = (value?: string) => value ? dateToISO(new Date(value)) : reservation.date;
+    const eventDate = (value?: string) => {
+      if (!value) return reservation.date;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return reservation.date;
+      const pad = (part: number) => String(part).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    };
     const eventPerson = (value?: string) => value ?? reservation.teacher;
     const events: HistoryEvent[] = [];
     if (movement.movedAt) {
@@ -2859,7 +2975,11 @@ export function HistoryPage() {
     }
     return events;
   });
-  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory];
+  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory].sort(
+    (first, second) =>
+      second.date.localeCompare(first.date) ||
+      second.time.localeCompare(first.time),
+  );
   const localToday = (() => {
     const date = new Date();
     const pad = (value: number) => String(value).padStart(2, "0");
@@ -2951,27 +3071,41 @@ export function HistoryPage() {
             ))}
           </div>
         </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--border))] px-4 py-3 sm:px-5">
+          <p className="text-xs text-[hsl(var(--muted-foreground))]" role="status" data-testid="history-results-count">
+            {filtered.length} {filtered.length === 1 ? "atividade encontrada" : "atividades encontradas"}
+          </p>
+          <p className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
+            <Clock3 size={13} /> Mais recentes primeiro
+          </p>
+        </div>
         {filtered.length === 0 ? (
           <EmptyState
             title="Nenhuma atividade encontrada"
             message="Tente remover filtros ou buscar por outro termo."
           />
         ) : (
-          <div className="divide-y divide-[hsl(var(--border))]">
+          <div className="space-y-3 bg-[hsl(var(--muted)/.14)] p-3 sm:p-5">
             {filtered.map((event) => (
               <div
                 key={event.id}
-                className="flex gap-4 px-5 py-5 sm:px-6"
+                className="group flex gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-sm transition-shadow hover:shadow-md sm:gap-4 sm:p-4"
                 data-testid={`row-history-${event.id}`}
               >
-                <div className="w-12 shrink-0 pt-0.5">
-                  <p className="font-data text-xs font-semibold text-[hsl(var(--muted-foreground))]">
+                <div className="flex w-[88px] shrink-0 flex-col items-start gap-1.5 border-r border-[hsl(var(--border))] pr-3 sm:w-32">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary)/.08)] px-2 py-1 text-[10px] font-semibold capitalize text-[hsl(var(--primary))] sm:text-xs" data-testid={`date-history-${event.id}`}>
+                    <CalendarDays size={12} className="shrink-0" />
+                    {formatHistoryDate(event.date)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 font-data text-xs font-bold text-[hsl(var(--foreground))]">
+                    <Clock3 size={12} className="text-[hsl(var(--muted-foreground))]" />
                     {event.time}
-                  </p>
+                  </span>
                 </div>
                 <div
                   className={cx(
                     "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+                    event.tone === "neutral" && "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]",
                     event.tone === "good" &&
                       "bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]",
                     event.tone === "warm" &&
@@ -2984,6 +3118,8 @@ export function HistoryPage() {
                     <Wifi size={16} />
                   ) : event.type === "Reserva" ? (
                     <CalendarDays size={16} />
+                  ) : event.type === "Movimentação" ? (
+                    <Activity size={16} />
                   ) : (
                     <Laptop size={16} />
                   )}
@@ -2991,19 +3127,18 @@ export function HistoryPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-semibold">{event.title}</p>
-                    <StatusPill
-                      status={
-                        event.type === "Wi-Fi"
-                          ? "Atenção"
-                          : event.tone === "bad"
-                            ? "Atenção"
-                            : "Concluída"
-                      }
-                    />
+                    <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.45)] px-2 py-0.5 text-[10px] font-semibold text-[hsl(var(--muted-foreground))]">
+                      {event.type}
+                    </span>
                   </div>
                   <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">
                     {event.detail}
                   </p>
+                  {event.person && (
+                    <p className="mt-2 text-[10px] font-semibold text-[hsl(var(--muted-foreground))]">
+                      {event.profile ?? "Pessoa"} · {event.person}
+                    </p>
+                  )}
                 </div>
                 <div className="relative shrink-0">
                   <button type="button" className="rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]" aria-label={`Opções de ${event.title}`} onClick={() => setActiveMenu(activeMenu === String(event.id) ? null : String(event.id))} data-testid={`button-history-menu-${event.id}`}>

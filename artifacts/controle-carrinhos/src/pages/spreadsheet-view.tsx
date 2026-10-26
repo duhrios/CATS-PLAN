@@ -12,6 +12,8 @@ import {
   RotateCcw,
   GripVertical,
   Lightbulb,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
 import { Button, PageHeader, StatusPill } from "@/components/app-ui";
@@ -19,10 +21,13 @@ import {
   type Cart,
   type CartMovement,
   type Reservation,
+  getCartScheduleForDate,
   useCampusData,
 } from "@/lib/campus-data";
-import { useRoomDirectory } from "@/lib/room-directory";
+import { type ClassRoomEntry, useRoomDirectory } from "@/lib/room-directory";
+import { getAuthenticatedSession } from "@/lib/auth-session";
 import {
+  deleteSharedReservation,
   loadSharedReservations,
   requestSharedReservationsRefresh,
   moveSharedReservationsToCart,
@@ -97,6 +102,73 @@ const isInteractiveTarget = (target: EventTarget | null) =>
   target instanceof Element &&
   Boolean(target.closest("button, input, select, textarea, a, [contenteditable='true']"));
 
+function QuickBookingForm({
+  cartName,
+  start,
+  period,
+  editing,
+  teacher,
+  className,
+  room,
+  saving,
+  error,
+  classOptions,
+  roomOptions,
+  onTeacherChange,
+  onClassChange,
+  onRoomChange,
+  onSubmit,
+  onCancel,
+}: {
+  cartName: string;
+  start: string;
+  period: "Manhã" | "Tarde";
+  editing: boolean;
+  teacher: string;
+  className: string;
+  room: string;
+  saving: boolean;
+  error: string;
+  classOptions: ClassRoomEntry[];
+  roomOptions: string[];
+  onTeacherChange: (value: string) => void;
+  onClassChange: (value: string) => void;
+  onRoomChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const suffix = `${cartName}-${start}`;
+  return (
+    <form
+      className="space-y-1"
+      data-testid={`quick-book-form-${cartName}-${start}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <input autoFocus required maxLength={120} aria-label="Nome do professor" placeholder="Nome do professor" value={teacher} disabled={saving} onChange={(event) => onTeacherChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
+      <input required maxLength={80} aria-label="Ano ou série" placeholder="Ano / série" list={`quick-class-options-${suffix}`} value={className} disabled={saving} onChange={(event) => onClassChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
+      <datalist id={`quick-class-options-${suffix}`}>
+        {[...new Set(classOptions.filter((entry) => entry.period === period).map((entry) => entry.className))].map((option) => <option key={option} value={option} />)}
+      </datalist>
+      <input required maxLength={80} aria-label="Sala" placeholder="Sala" list={`quick-room-options-${suffix}`} value={room} disabled={saving} onChange={(event) => onRoomChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
+      <datalist id={`quick-room-options-${suffix}`}>
+        {roomOptions.map((option) => <option key={option} value={option} />)}
+      </datalist>
+      {error && <p role="alert" className="text-[10px] text-red-700">{error}</p>}
+      <div className="flex flex-wrap gap-1">
+        <button type="submit" disabled={saving} className="rounded bg-[#345779] px-1.5 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50">
+          {saving ? "Salvando..." : editing ? "Salvar edição" : "Reservar"}
+        </button>
+        <button type="button" disabled={saving} onClick={onCancel} className="rounded px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function QuickAccess({
   dates,
   cartNames,
@@ -109,6 +181,12 @@ function QuickAccess({
   onUndoReservations,
   periodFilter,
   readOnly,
+  canDirectBook,
+  onCreateReservation,
+  onUpdateReservation,
+  onDeleteReservation,
+  classOptions,
+  roomOptions,
 }: {
   dates: Date[];
   cartNames: string[];
@@ -121,6 +199,12 @@ function QuickAccess({
   onUndoReservations: (reservations: Reservation[]) => Promise<void>;
   periodFilter: PeriodFilter;
   readOnly: boolean;
+  canDirectBook: boolean;
+  onCreateReservation: (reservation: Omit<Reservation, "id" | "status">) => Promise<void>;
+  onUpdateReservation: (reservation: Omit<Reservation, "id" | "status">, id: number) => Promise<void>;
+  onDeleteReservation: (reservation: Reservation) => Promise<void>;
+  classOptions: ClassRoomEntry[];
+  roomOptions: string[];
 }) {
   const [selectedReservationIds, setSelectedReservationIds] = useState<number[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -130,6 +214,105 @@ function QuickAccess({
   const [moveMessage, setMoveMessage] = useState("");
   const [undoStack, setUndoStack] = useState<Reservation[][]>([]);
   const [undoing, setUndoing] = useState(false);
+  const [bookingTarget, setBookingTarget] = useState<string | null>(null);
+  const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
+  const [bookingTeacher, setBookingTeacher] = useState("");
+  const [bookingClass, setBookingClass] = useState("");
+  const [bookingRoom, setBookingRoom] = useState("");
+  const [bookingError, setBookingError] = useState("");
+  const [bookingSaving, setBookingSaving] = useState(false);
+  const [deletingReservationIds, setDeletingReservationIds] = useState<number[]>([]);
+  const [deleteError, setDeleteError] = useState("");
+  const createReservation = async (
+    target: { date: string; cart: string; start: string; end: string; period: "Manhã" | "Tarde" },
+  ) => {
+    const teacherName = bookingTeacher.trim().replace(/\s+/g, " ");
+    if (!teacherName) {
+      setBookingError("Informe o nome do professor.");
+      return;
+    }
+    const className = bookingClass.trim().replace(/\s+/g, " ");
+    if (!className) {
+      setBookingError("Informe o ano ou a série.");
+      return;
+    }
+    const room = bookingRoom.trim().replace(/\s+/g, " ");
+    if (!room) {
+      setBookingError("Informe a sala.");
+      return;
+    }
+    const classEntry = classOptions.find((entry) =>
+      entry.className.toLocaleLowerCase("pt-BR") === className.toLocaleLowerCase("pt-BR") &&
+      entry.period === target.period,
+    );
+    setBookingSaving(true);
+    setBookingError("");
+    try {
+      const data: Omit<Reservation, "id" | "status"> = editingReservation
+        ? (() => {
+            const { id: _id, status: _status, ...current } = editingReservation;
+            return {
+              ...current,
+              teacher: teacherName,
+              segment: classEntry?.segment ?? editingReservation.segment,
+              className,
+              room,
+            };
+          })()
+        : {
+            teacher: teacherName,
+            segment: classEntry?.segment ?? "Fundamental 2",
+            subject: "Aula",
+            className,
+            room,
+            period: target.period,
+            date: target.date,
+            start: target.start,
+            end: target.end,
+            cart: target.cart,
+            kind: "Aula",
+            quantity: 1,
+          };
+      if (editingReservation) {
+        await onUpdateReservation(data, editingReservation.id);
+      } else {
+        await onCreateReservation(data);
+      }
+      setBookingTarget(null);
+      setEditingReservation(null);
+      setBookingTeacher("");
+      setBookingClass("");
+      setBookingRoom("");
+    } catch (error) {
+      setBookingError(
+        error instanceof Error ? error.message : "Não foi possível reservar este horário.",
+      );
+    } finally {
+      setBookingSaving(false);
+    }
+  };
+  const startEditingReservation = (reservation: Reservation) => {
+    setBookingTarget(`${reservation.date}-${reservation.cart}-${reservation.period}-${reservation.start}-${reservation.end}`);
+    setEditingReservation(reservation);
+    setBookingTeacher(reservation.teacher);
+    setBookingClass(reservation.className);
+    setBookingRoom(reservation.room);
+    setBookingError("");
+  };
+  const deleteReservation = async (reservation: Reservation) => {
+    if (deletingReservationIds.includes(reservation.id)) return;
+    if (!window.confirm(`Excluir o agendamento de ${reservation.teacher} (${reservation.className})?`)) return;
+    setDeletingReservationIds((ids) => [...ids, reservation.id]);
+    setDeleteError("");
+    try {
+      await onDeleteReservation(reservation);
+      setSelectedReservationIds((ids) => ids.filter((id) => id !== reservation.id));
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Não foi possível excluir o agendamento.");
+    } finally {
+      setDeletingReservationIds((ids) => ids.filter((id) => id !== reservation.id));
+    }
+  };
   const undoMove = useCallback(async () => {
     const previousReservations = undoStack.at(-1);
     if (!previousReservations || undoing) return;
@@ -287,16 +470,16 @@ function QuickAccess({
           </p>
         )}
       </div>}
-      {!readOnly && (moveError || moveMessage) && (
+      {!readOnly && (moveError || moveMessage || deleteError) && (
         <p
-          role={moveError ? "alert" : "status"}
+          role={moveError || deleteError ? "alert" : "status"}
           className={`mb-3 rounded-xl border px-4 py-3 text-sm ${
-            moveError
+            moveError || deleteError
               ? "border-red-300 bg-red-50 text-red-800"
               : "border-emerald-300 bg-emerald-50 text-emerald-800"
           }`}
         >
-          {moveError || moveMessage}
+          {moveError || deleteError || moveMessage}
         </p>
       )}
       {!readOnly && undoStack.length > 0 && (
@@ -310,7 +493,10 @@ function QuickAccess({
         </button>
       )}
       <div className="overflow-x-auto rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm">
-        <div className="grid min-w-[3400px] grid-cols-5 gap-px bg-[#a9b7c8]">
+        <div
+          className="grid min-w-[3800px] grid-cols-[repeat(5,minmax(760px,1fr))] gap-px bg-[#a9b7c8]"
+          data-testid="quick-week-grid"
+        >
           {dates.map((date) => {
             const dateKey = formatDateKey(date);
             const dayReservations = reservations.filter(
@@ -324,7 +510,10 @@ function QuickAccess({
                     {dateFormatter.format(date)}
                   </span>
                 </header>
-                <div className="grid min-w-[650px] grid-cols-3 gap-1.5 p-2">
+                <div
+                  className="grid min-w-[740px] grid-cols-3 gap-1.5 p-2"
+                  data-testid="quick-day-grid"
+                >
                   {cartNames.map((cartName, cartIndex) => {
                     const schedule = cartSchedules[cartName];
                     const periods: Array<"Manhã" | "Tarde"> =
@@ -358,7 +547,7 @@ function QuickAccess({
                           {cartName}
                         </h2>
                         {periods.map((period) => {
-                          const slots = (schedule?.[period] ?? []).map((slot) => ({
+                          const slots = (schedule ? getCartScheduleForDate(schedule, dateKey, period) : []).map((slot) => ({
                             ...slot,
                             period,
                           }));
@@ -376,12 +565,15 @@ function QuickAccess({
                                   {period}
                                 </div>
                               )}
-                              <div className="grid grid-cols-[84px_minmax(0,1fr)] border-b border-[#b9c4d1] bg-[#f0f3f6] text-[10px] font-bold text-[#34445a]">
+                              <div
+                                className="grid grid-cols-[96px_minmax(0,1fr)] border-b border-[#b9c4d1] bg-[#f0f3f6] text-[10px] font-bold text-[#34445a]"
+                                data-testid="quick-time-grid"
+                              >
                                 <span className="border-r border-[#b9c4d1] px-1 py-1">Horário</span>
                                 <span className="px-1.5 py-1">Turma · Professor</span>
                               </div>
                               {rows.length === 0 ? (
-                                <div className="grid grid-cols-[84px_minmax(0,1fr)] text-[11px] text-slate-500">
+                                <div className="grid grid-cols-[96px_minmax(0,1fr)] text-[11px] text-slate-500">
                                   <span className="border-r border-[#d5dce5] px-1 py-2">—</span>
                                   <span className="px-1.5 py-2">Sem horários</span>
                                 </div>
@@ -413,7 +605,8 @@ function QuickAccess({
                                     period: slot.period,
                                   });
                                 } : undefined}
-                                className={`grid grid-cols-[84px_minmax(0,1fr)] border-b border-[#d5dce5] text-[11px] last:border-b-0 ${
+                                data-testid={`quick-schedule-row-${cartName}-${row.start}`}
+                                className={`grid grid-cols-[96px_minmax(0,1fr)] border-b border-[#b9c4d1] text-[11px] ${
                                   slot ? "transition-colors" : ""
                                 } ${
                                   isDropTarget
@@ -426,10 +619,96 @@ function QuickAccess({
                               </span>
                               <div className="min-w-0 px-1.5 py-1">
                                 {row.reservations.length === 0 ? (
-                                  <span className="text-slate-300">—</span>
+                                  canDirectBook && slot ? (
+                                    bookingTarget === targetKey ? (
+                                      <QuickBookingForm
+                                        cartName={cartName}
+                                        start={row.start}
+                                        period={period}
+                                        editing={false}
+                                        teacher={bookingTeacher}
+                                        className={bookingClass}
+                                        room={bookingRoom}
+                                        saving={bookingSaving}
+                                        error={bookingError}
+                                        classOptions={classOptions}
+                                        roomOptions={roomOptions}
+                                        onTeacherChange={(value) => { setBookingTeacher(value); setBookingError(""); }}
+                                        onClassChange={(value) => { setBookingClass(value); setBookingError(""); }}
+                                        onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
+                                        onSubmit={() => void createReservation({
+                                            date: dateKey,
+                                            cart: cartName,
+                                            start: slot.start,
+                                            end: slot.end,
+                                            period: slot.period,
+                                          })}
+                                        onCancel={() => {
+                                          setBookingTarget(null);
+                                          setEditingReservation(null);
+                                          setBookingTeacher("");
+                                          setBookingClass("");
+                                          setBookingRoom("");
+                                          setBookingError("");
+                                        }}
+                                      />
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        aria-label={`Reservar horário ${slot.start} para ${cartName}`}
+                                        onClick={() => {
+                                          setBookingTarget(targetKey);
+                                          setEditingReservation(null);
+                                          setBookingTeacher("");
+                                          setBookingClass("");
+                                          setBookingRoom("");
+                                          setBookingError("");
+                                        }}
+                                        className="w-full rounded px-1 py-0.5 text-left text-slate-300 hover:bg-[#e8eff7] hover:text-[#345779]"
+                                      >
+                                        — <span className="sr-only">Reservar para professor</span>
+                                      </button>
+                                    )
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )
                                 ) : (
                                   row.reservations.map((reservation) => (
-                                    <div
+                                    bookingTarget === targetKey &&
+                                    editingReservation?.id === reservation.id ? (
+                                      <QuickBookingForm
+                                        key={reservation.id}
+                                        cartName={cartName}
+                                        start={row.start}
+                                        period={period}
+                                        editing
+                                        teacher={bookingTeacher}
+                                        className={bookingClass}
+                                        room={bookingRoom}
+                                        saving={bookingSaving}
+                                        error={bookingError}
+                                        classOptions={classOptions}
+                                        roomOptions={roomOptions}
+                                        onTeacherChange={(value) => { setBookingTeacher(value); setBookingError(""); }}
+                                        onClassChange={(value) => { setBookingClass(value); setBookingError(""); }}
+                                        onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
+                                        onSubmit={() => void createReservation({
+                                          date: dateKey,
+                                          cart: cartName,
+                                          start: reservation.start,
+                                          end: reservation.end,
+                                          period: reservation.period,
+                                        })}
+                                        onCancel={() => {
+                                          setBookingTarget(null);
+                                          setEditingReservation(null);
+                                          setBookingTeacher("");
+                                          setBookingClass("");
+                                          setBookingRoom("");
+                                          setBookingError("");
+                                        }}
+                                      />
+                                    ) : <div
                                       key={reservation.id}
                                       role={!readOnly ? "button" : undefined}
                                       tabIndex={!readOnly ? 0 : undefined}
@@ -504,7 +783,39 @@ function QuickAccess({
                                           <p className="truncate text-slate-600">
                                             {reservation.teacher}
                                           </p>
+                                          <p className="truncate text-slate-500">
+                                            {reservation.room}
+                                          </p>
                                         </div>
+                                        {canDirectBook && (
+                                          <button
+                                            type="button"
+                                            aria-label={`Editar agendamento de ${reservation.teacher}`}
+                                            title="Editar turma, professor ou sala"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              startEditingReservation(reservation);
+                                            }}
+                                            className="shrink-0 rounded p-0.5 text-[#345779] hover:bg-[#e8eff7]"
+                                          >
+                                            <Pencil size={12} />
+                                          </button>
+                                        )}
+                                        {canDirectBook && (
+                                          <button
+                                            type="button"
+                                            aria-label={`Excluir agendamento de ${reservation.teacher}`}
+                                            title="Excluir agendamento"
+                                            disabled={deletingReservationIds.includes(reservation.id)}
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              void deleteReservation(reservation);
+                                            }}
+                                            className="ml-auto shrink-0 rounded p-0.5 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   ))
@@ -532,8 +843,10 @@ function QuickAccess({
       </div>
       <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
         {readOnly
-          ? "Visualização somente para consulta. São exibidos apenas carrinho, horário, turma e professor. Role horizontalmente para consultar os outros dias da semana."
-          : "Esta visão mostra somente carrinho, horário, turma e professor. Selecione uma aula e arraste-a para outro horário. Para mover várias, mantenha Ctrl pressionado ao selecionar e arraste uma delas para o nome do carrinho de destino; os horários originais serão mantidos. A alteração só aparece como concluída depois de salva na agenda. Role horizontalmente para consultar os outros dias da semana."}
+          ? "Visualização somente para consulta. São exibidos carrinho, horário, turma, sala e professor. Role horizontalmente para consultar os outros dias da semana."
+          : canDirectBook
+            ? "Clique em um horário vazio para preencher professor, turma/série e sala. Use o lápis para editar e a lixeira para excluir um agendamento. Para reorganizar, selecione uma aula e arraste-a para outro horário; mantenha Ctrl pressionado para selecionar várias e arraste até o nome do carrinho. Role horizontalmente para consultar os outros dias da semana."
+            : "Esta visão mostra carrinho, horário, turma, sala e professor. Selecione uma aula e arraste-a para outro horário. Para mover várias, mantenha Ctrl pressionado ao selecionar e arraste uma delas para o nome do carrinho de destino; os horários originais serão mantidos. A alteração só aparece como concluída depois de salva na agenda. Role horizontalmente para consultar os outros dias da semana."}
       </p>
     </section>
   );
@@ -821,7 +1134,9 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     movementSettings,
     replaceReservations,
   } = useCampusData();
-  const { floorForRoom } = useRoomDirectory();
+  const canDirectBook =
+    !readOnly && getAuthenticatedSession()?.role === "admin";
+  const { floorForRoom, classEntries = [], roomOptions = [] } = useRoomDirectory();
   const [mode, setMode] = useState<SpreadsheetMode>(() => readSpreadsheetMode(readOnly));
   const [teacherReservations, setTeacherReservations] = useState<Reservation[]>([]);
   const [teacherReservationsLoading, setTeacherReservationsLoading] = useState(readOnly);
@@ -935,6 +1250,33 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
       void requestSharedReservationsRefresh();
     }
   };
+  const createReservationFromSheet = async (
+    reservation: Omit<Reservation, "id" | "status">,
+  ) => {
+    if (readOnly || !canDirectBook) {
+      throw new Error("Somente a administração pode criar reservas diretamente na planilha.");
+    }
+    await saveSharedReservation(reservation);
+    replaceReservations(await loadSharedReservations());
+  };
+  const updateReservationFromSheet = async (
+    reservation: Omit<Reservation, "id" | "status">,
+    id: number,
+  ) => {
+    if (!canDirectBook) {
+      throw new Error("Somente a administração pode editar agendamentos pela planilha.");
+    }
+    await saveSharedReservation(reservation, id);
+    replaceReservations(await loadSharedReservations());
+  };
+  const deleteReservationFromSheet = async (reservation: Reservation) => {
+    if (!canDirectBook) {
+      throw new Error("Somente a administração pode excluir agendamentos pela planilha.");
+    }
+    await deleteSharedReservation(reservation.id);
+    replaceReservations(reservations.filter((current) => current.id !== reservation.id));
+    void requestSharedReservationsRefresh();
+  };
   const moveReservationsToCart = async (movedReservations: Reservation[]) => {
     if (readOnly) throw new Error("A visualização da planilha é somente para consulta.");
     if (movedReservations.length === 0) return;
@@ -965,7 +1307,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     <div className="animate-rise space-y-6">
       <PageHeader
         eyebrow={readOnly ? "Área do professor · Somente visualização" : "Área do TI e Administração"}
-        title="Visão - Planilha"
+        title="Planilha"
         description={readOnly
           ? "Consulte a visão rápida semanal dos agendamentos. Não é possível editar ou mover aulas."
           : "Consulte, organize e mova os agendamentos em formato de planilha semanal."}
@@ -1075,7 +1417,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
       <div className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
         <FileSpreadsheet size={15} />
         {mode === "quick"
-          ? "Layout inspirado na planilha enviada; somente carrinho, horário, turma e professor."
+          ? "Layout inspirado na planilha enviada; mostra carrinho, horário, turma, sala e professor."
           : "Todos os campos disponíveis do agendamento e do acompanhamento do carrinho."}
       </div>
 
@@ -1100,6 +1442,12 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           onUndoReservations={moveReservationsToCart}
           periodFilter={periodFilter}
           readOnly={readOnly}
+          canDirectBook={canDirectBook}
+          onCreateReservation={createReservationFromSheet}
+          onUpdateReservation={updateReservationFromSheet}
+          onDeleteReservation={deleteReservationFromSheet}
+          classOptions={classEntries}
+          roomOptions={roomOptions}
         />
       ) : (
         <CompleteAccess

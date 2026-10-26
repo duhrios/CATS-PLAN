@@ -2,7 +2,7 @@ import { and, eq, gte, lte } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { campusSettingsTable, cartsTable, reservationsTable, usersTable } from "@workspace/db/schema";
-import { getAuthSession, requireSameOrigin, requireSession, requireSuperAdmin } from "../lib/auth";
+import { getAuthSession, requireAdmin, requireSameOrigin, requireSession } from "../lib/auth";
 
 const router: IRouter = Router();
 export const teacherSpreadsheetSettingKey = "teacher-spreadsheet-enabled-v1";
@@ -32,7 +32,7 @@ router.get("/teacher-spreadsheet/settings", requireSession, async (_req, res) =>
 router.put(
   "/teacher-spreadsheet/settings",
   requireSameOrigin,
-  requireSuperAdmin,
+  requireAdmin,
   async (req, res) => {
     if (typeof req.body?.enabled !== "boolean") {
       return res.status(400).json({ error: "Informe se a visão rápida ficará habilitada para professores." });

@@ -15,6 +15,13 @@
       "when": 1790362496873,
       "tag": "0001_outstanding_moira_mactaggert",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791550977767,
+      "tag": "0002_magenta_tempest",
+      "breakpoints": true
     }
   ]
 }

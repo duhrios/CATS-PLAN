@@ -33,6 +33,8 @@ import { ReservationNotifications } from "@/components/reservation-notifications
 import { PushNotifications } from "@/components/push-notifications";
 import { PwaInstall } from "@/components/pwa-install";
 import { OperatorNotifications } from "@/components/operator-notifications";
+import { NotificationSettingsProvider } from "@/lib/notification-settings";
+import { getRoutePathname, isOperatorModeForLocation } from "@/lib/route-access";
 import {
   getAuthenticatedRole,
   getAuthenticatedSession,
@@ -46,25 +48,19 @@ const queryClient = new QueryClient();
 function Router() {
   const [location] = useLocation();
   const [, setLocation] = useLocation();
+  const pathname = getRoutePathname(location);
   const [storedRole, setStoredRole] = useState(getAuthenticatedRole);
   const [sessionChecking, setSessionChecking] = useState(true);
-  const userMode = location === "/usuario" || location.startsWith("/usuario/");
-  const isSuperAdmin = getAuthenticatedSession()?.isSuperAdmin === true;
+  const userMode = pathname === "/usuario" || pathname.startsWith("/usuario/");
   const mustChangePassword =
     getAuthenticatedSession()?.mustChangePassword === true;
-  const operatorMode =
-    location === "/operador" ||
-    location.startsWith("/operador/") ||
-    (storedRole === "operator" && location === "/salas") ||
-    (storedRole === "operator" && location === "/visao-planilha") ||
-    (storedRole === "operator" &&
-      ["/reservas", "/carrinhos", "/wifi"].includes(location));
+  const operatorMode = isOperatorModeForLocation(location, storedRole);
   const publicRoute = [
     "/",
     "/login",
     "/operador/login",
     "/admin/login",
-  ].includes(location);
+  ].includes(pathname);
   const adminOnlyRoute = [
     "/admin",
     "/professores",
@@ -72,12 +68,12 @@ function Router() {
     "/carrinhos",
     "/configuracao",
     "/visao-planilha",
-  ].some((path) => location === path || location.startsWith(`${path}/`));
+  ].some((path) => pathname === path || pathname.startsWith(`${path}/`));
   const userOnlyRoute =
-    location === "/usuario" || location.startsWith("/usuario/");
-  const teacherSpreadsheetRoute = location === "/visao-planilha";
+    pathname === "/usuario" || pathname.startsWith("/usuario/");
+  const teacherSpreadsheetRoute = pathname === "/visao-planilha";
   const operatorOnlyRoute =
-    location === "/operador" || location.startsWith("/operador/");
+    pathname === "/operador" || pathname.startsWith("/operador/");
   useEffect(() => {
     if (publicRoute) {
       setStoredRole(getAuthenticatedRole());
@@ -116,11 +112,11 @@ function Router() {
   }, [location, publicRoute]);
   if (!publicRoute && sessionChecking) return null;
   if (!publicRoute && !storedRole) return <RoleRedirect role="access" />;
-  if (mustChangePassword && location !== "/admin/alterar-senha") {
+  if (mustChangePassword && pathname !== "/admin/alterar-senha") {
     return <RoleRedirect role="password" />;
   }
   if (
-    location === "/admin/alterar-senha" &&
+    pathname === "/admin/alterar-senha" &&
     !mustChangePassword &&
     !sessionChecking
   ) {
@@ -131,12 +127,12 @@ function Router() {
       ? "user"
       : storedRole === "operator" &&
           adminOnlyRoute &&
-          location !== "/visao-planilha"
+          pathname !== "/visao-planilha"
         ? "operator"
-        : storedRole === "admin" && (userOnlyRoute || operatorOnlyRoute)
+        : storedRole === "admin" && userOnlyRoute
           ? "access"
-          : location.startsWith("/configuracao") &&
-              (!isSuperAdmin || storedRole !== "admin")
+          :           pathname.startsWith("/configuracao") &&
+                  storedRole !== "admin"
             ? storedRole === "operator"
               ? "operator"
               : "access"
@@ -145,18 +141,18 @@ function Router() {
     // Keep a shared shell (sidebar, navbar) outside the boundary so it
     // survives a page crash.
     <RoutedErrorBoundary>
-      {location === "/" ||
-      location === "/admin/login" ||
-      location === "/admin/alterar-senha" ||
-      location === "/login" ||
-      location === "/operador/login" ? (
-        location === "/" ? (
+      {pathname === "/" ||
+      pathname === "/admin/login" ||
+      pathname === "/admin/alterar-senha" ||
+      pathname === "/login" ||
+      pathname === "/operador/login" ? (
+        pathname === "/" ? (
           <AccessPage />
-        ) : location === "/admin/alterar-senha" ? (
+        ) : pathname === "/admin/alterar-senha" ? (
           <AdminInitialPasswordPage />
-        ) : location === "/admin/login" ? (
+        ) : pathname === "/admin/login" ? (
           <AdminLoginPage />
-        ) : location === "/login" ? (
+        ) : pathname === "/login" ? (
           <TeacherLoginPage />
         ) : (
           <OperatorLoginPage />
@@ -251,22 +247,24 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <CampusDataProvider>
-          <RoomDirectoryProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
-          </RoomDirectoryProvider>
-          <ReservationNotifications />
-          <OperatorNotifications />
-        </CampusDataProvider>
-        <Toaster />
-        <div className="fixed bottom-4 right-4 z-40">
-          <div className="flex flex-col items-end gap-2">
-            <PwaInstall />
-            <PushNotifications />
+        <NotificationSettingsProvider>
+          <CampusDataProvider>
+            <RoomDirectoryProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+            </RoomDirectoryProvider>
+            <ReservationNotifications />
+            <OperatorNotifications />
+          </CampusDataProvider>
+          <Toaster />
+          <div className="fixed bottom-4 right-4 z-40">
+            <div className="flex flex-col items-end gap-2">
+              <PwaInstall />
+              <PushNotifications />
+            </div>
           </div>
-        </div>
+        </NotificationSettingsProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

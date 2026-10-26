@@ -21,7 +21,7 @@ API Express
               └── Neon Postgres
 ```
 
-O frontend possui dados locais para modo de demonstração e testes. A API já possui persistência real no Neon para reservas; a migração das telas para a API deve ser feita progressivamente.
+O frontend mantém cache local para dados de demonstração e funcionamento otimista. A API usa sessões assinadas no servidor e persiste reservas, contas, salas/turmas, configurações de notificações, acesso à planilha e o estado operacional compartilhado no Neon.
 
 ## Estrutura do projeto
 
@@ -223,25 +223,46 @@ pnpm --filter @workspace/db reset
 
 Retorna o status da API.
 
-### `GET /api/reservations?date=YYYY-MM-DD`
+Rotas protegidas disponíveis:
 
-Lista reservas, opcionalmente filtradas por data.
+- **Sessão e acesso:** `/api/auth/session`, `/api/auth/login`,
+  `/api/auth/logout`, `/api/auth/password`, `/api/auth/initial-password` e
+  `/api/auth/verify-super-admin`.
+- **Reservas:** `GET`, `POST` e `PUT /api/reservations`, além de
+  `DELETE /api/reservations/:id`; `GET /api/carts` fornece a lista usada pela
+  API de reservas.
+- **Contas:** operações de listagem, cadastro, alteração e exclusão em
+  `/api/auth/staff-accounts` e `/api/auth/teacher-accounts`; primeiro acesso
+  docente é validado pelo servidor.
+- **Salas e turmas:** `GET` e `PUT /api/rooms`.
+- **Visão de planilha docente:** configurações em
+  `/api/teacher-spreadsheet/settings` e consulta semanal em
+  `/api/teacher-spreadsheet/reservations`.
+- **Notificações:** configurações em `/api/notifications/settings` e
+  subscriptions em `/api/push/*`.
+- **Estado operacional compartilhado:** `GET` e `PUT /api/operational-state`.
+  A leitura exige sessão; a gravação exige perfil TI ou administrador e usa
+  revisão para rejeitar gravações concorrentes em vez de sobrescrever dados
+  silenciosamente. A interface atualiza o cache ao abrir sessão, ao voltar à
+  aba e a cada 15 segundos; dados de movimentação e Wi-Fi não são enviados às
+  sessões de professores.
 
-### `POST /api/reservations`
+As rotas de escrita exigem sessão e validação de origem; operações
+administrativas também conferem o papel no servidor. Reservas são verificadas
+quanto a dados obrigatórios, horário, disponibilidade e conflitos no banco.
 
-Cria uma reserva e valida:
+O estado operacional compartilhado é armazenado como JSON versionado em
+`campus_settings` e cacheado localmente no navegador. A migração para tabelas
+normalizadas e sincronização automática de conflitos entre duas sessões de
+edição simultâneas ainda pode ser aprimorada; conflitos são apresentados ao
+usuário para evitar perda silenciosa de alterações.
 
-- campos obrigatórios;
-- horário inicial anterior ao final;
-- carrinho existente e disponível;
-- conflito de intervalo no mesmo carrinho;
-- inserção dentro de transação no PostgreSQL.
-
-Autenticação e autorização server-side ainda são necessárias antes do uso em produção.
-As sessões acima controlam a interface no navegador e não substituem validação
-de identidade/autorização na API. Os perfis atuais também são armazenados no
-navegador; autenticação compartilhada entre dispositivos requer persistência de
-contas e sessões no servidor.
+As rotas de escrita validam sessão, papel e origem no servidor. O cookie de
+sessão é assinado e `HttpOnly`; alterações no armazenamento local não concedem
+permissões. As contas e reservas persistidas no Neon são compartilhadas entre
+dispositivos. Carrinhos, horários, movimentações, pontos Wi-Fi e configurações
+operacionais são sincronizados pela rota de estado operacional; a sala/turma
+usa uma rota própria.
 
 ### PWA e notificações push
 
@@ -274,17 +295,26 @@ Execute a migração Drizzle antes de habilitar o recurso em produção.
 ## Testes e validação
 
 ```powershell
+pnpm run typecheck
 pnpm --filter @workspace/controle-carrinhos typecheck
 pnpm --filter @workspace/controle-carrinhos test
 pnpm --filter @workspace/controle-carrinhos build
-pnpm --filter @workspace/db typecheck
 pnpm --filter @workspace/api-server typecheck
+pnpm --filter @workspace/api-server test
 pnpm --filter @workspace/api-server build
+$env:PORT = "4173"
+$env:BASE_PATH = "/"
+pnpm --filter @workspace/mockup-sandbox build
 ```
+
+O workflow `.github/workflows/ci.yml` executa typecheck, testes e builds em
+pull requests e pushes para `main`/`master`.
 
 ## Deploy
 
-O frontend pode ser publicado como projeto Vercel apontando para `artifacts/controle-carrinhos`. A API deve ser publicada como função/serverless ou serviço Node separado; o servidor Express atual é adequado para execução Node tradicional e precisa de um adaptador de função para Vercel.
+O frontend e a API estão configurados como projetos Vercel separados; os
+arquivos `vercel.json` de cada aplicação definem seus comandos de build e
+rewrites.
 
 Variáveis mínimas da API:
 

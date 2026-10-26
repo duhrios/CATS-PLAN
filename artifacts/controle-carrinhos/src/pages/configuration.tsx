@@ -1,14 +1,25 @@
 import { AlertTriangle, CalendarX, Clock3, Database, Download, Factory, History, Plus, Trash2, Upload, Users, UserRound } from "lucide-react";
 import { PageHeader, SectionCard, Button, Field, Modal, inputClass } from "@/components/app-ui";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { buildCartSchedule, segments, useCampusData, type CartScheduleTemplate, type Reservation } from "@/lib/campus-data";
+import {
+  buildCartSchedule,
+  cartScheduleWeekdays,
+  getCartScheduleForWeekday,
+  hasCartScheduleWeekdayOverride,
+  segments,
+  useCampusData,
+  type CartScheduleTemplate,
+  type CartScheduleWeekday,
+  type Reservation,
+} from "@/lib/campus-data";
 import { loadSharedReservations, replaceSharedReservations } from "@/lib/reservations-api";
-import { endAuthSession, loginWithCredentials } from "@/lib/auth-session";
+import { getAuthenticatedSession, verifySuperAdminCredentials } from "@/lib/auth-session";
 import {
   loadTeacherSpreadsheetEnabled,
   saveTeacherSpreadsheetEnabled,
 } from "@/lib/teacher-spreadsheet";
 import * as XLSX from "xlsx";
+import { AdminNotifications } from "@/components/admin-notifications";
 
 const normalizeSpreadsheetHeader = (value: unknown) =>
   String(value ?? "")
@@ -50,10 +61,15 @@ export function ScheduleManagementPage() {
   const cartNames = useMemo(() => carts.length ? carts.map((cart) => cart.name) : Object.keys(cartSchedules), [carts, cartSchedules]);
   const [selectedCart, setSelectedCart] = useState<string>(cartNames[0] ?? "Carrinho A");
   const [period, setPeriod] = useState<"Manhã" | "Tarde">("Manhã");
+  const [weekday, setWeekday] = useState<CartScheduleWeekday>(1);
   const [draft, setDraft] = useState({ start: "07:00", end: "07:45", label: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [syncSource, setSyncSource] = useState<Record<string, boolean>>({});
   const [syncTarget, setSyncTarget] = useState<Record<string, boolean>>({});
+  const resetEditor = () => {
+    setEditingId(null);
+    setDraft({ start: "07:00", end: "07:45", label: "" });
+  };
 
   useEffect(() => {
     if (!cartNames.includes(selectedCart) && cartNames.length) {
@@ -73,7 +89,16 @@ export function ScheduleManagementPage() {
   }, [cartNames, selectedCart]);
 
   const schedule = cartSchedules[selectedCart] ?? buildCartSchedule(selectedCart);
-  const currentSlots = schedule[period] ?? [];
+  const currentSlots = getCartScheduleForWeekday(schedule, weekday, period);
+  const hasWeekdayOverride = hasCartScheduleWeekdayOverride(schedule, weekday, period);
+
+  const updateWeekdaySlots = (nextSlots: CartScheduleTemplate["Manhã"]) => {
+    const weekdaySchedules = { ...schedule.weekdays };
+    const daySchedule = { ...weekdaySchedules[weekday] };
+    daySchedule[period] = nextSlots;
+    weekdaySchedules[weekday] = daySchedule;
+    updateCartSchedules(selectedCart, { ...schedule, weekdays: weekdaySchedules });
+  };
 
   const handleSave = () => {
     const start = draft.start;
@@ -84,13 +109,24 @@ export function ScheduleManagementPage() {
           slot.id === editingId ? { ...slot, start, end, label: draft.label.trim() || undefined } : slot,
         )
       : [...currentSlots, { id: `slot-${Date.now()}`, start, end, label: draft.label.trim() || undefined }];
-    updateCartSchedules(selectedCart, { ...schedule, [period]: nextSlots });
+    updateWeekdaySlots(nextSlots);
     setDraft({ start: "07:00", end: "07:45", label: "" });
     setEditingId(null);
   };
 
   const handleDelete = (slotId: string) => {
-    updateCartSchedules(selectedCart, { ...schedule, [period]: currentSlots.filter((slot) => slot.id !== slotId) });
+    updateWeekdaySlots(currentSlots.filter((slot) => slot.id !== slotId));
+    if (editingId === slotId) resetEditor();
+  };
+
+  const handleUseDefaultSchedule = () => {
+    const weekdaySchedules = { ...schedule.weekdays };
+    const daySchedule = { ...weekdaySchedules[weekday] };
+    delete daySchedule[period];
+    if (Object.keys(daySchedule).length) weekdaySchedules[weekday] = daySchedule;
+    else delete weekdaySchedules[weekday];
+    updateCartSchedules(selectedCart, { ...schedule, weekdays: weekdaySchedules });
+    resetEditor();
   };
 
   const handleSync = () => {
@@ -119,7 +155,7 @@ export function ScheduleManagementPage() {
                   <button
                     key={cartName}
                     type="button"
-                    onClick={() => setSelectedCart(cartName)}
+                    onClick={() => { setSelectedCart(cartName); resetEditor(); }}
                     className={cartName === selectedCart ? "w-full rounded-xl border border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.08)] px-3 py-2 text-left text-sm font-semibold text-[hsl(var(--primary))]" : "w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-left text-sm font-medium text-[hsl(var(--foreground))]"}
                   >
                     {cartName}
@@ -131,8 +167,23 @@ export function ScheduleManagementPage() {
               <p className="mb-3 text-[11px] font-bold uppercase tracking-[.14em] text-[hsl(var(--muted-foreground))]">Período</p>
               <div className="flex gap-2">
                 {(["Manhã", "Tarde"] as const).map((value) => (
-                  <button key={value} type="button" onClick={() => setPeriod(value)} className={period === value ? "flex-1 rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]" : "flex-1 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))]"}>
+                  <button key={value} type="button" onClick={() => { setPeriod(value); resetEditor(); }} className={period === value ? "flex-1 rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]" : "flex-1 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))]"}>
                     {value}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-3">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[.14em] text-[hsl(var(--muted-foreground))]">Dia da semana</p>
+              <div className="grid grid-cols-2 gap-2">
+                {cartScheduleWeekdays.map((day) => (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => { setWeekday(day.value); resetEditor(); }}
+                    className={weekday === day.value ? "rounded-lg bg-[hsl(var(--primary))] px-2 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]" : "rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-2 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))]"}
+                  >
+                    {day.label}
                   </button>
                 ))}
               </div>
@@ -140,6 +191,16 @@ export function ScheduleManagementPage() {
           </div>
           <div className="space-y-4">
             <div className="overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-2">
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {cartScheduleWeekdays.find((day) => day.value === weekday)?.label} · {hasWeekdayOverride ? "Horário específico deste dia" : "Usando o horário padrão"}
+                </p>
+                {hasWeekdayOverride && (
+                  <Button type="button" variant="ghost" onClick={handleUseDefaultSchedule}>
+                    Usar horário padrão
+                  </Button>
+                )}
+              </div>
               <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-2 text-[11px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">
                 <span>Início</span>
                 <span>Fim</span>
@@ -176,7 +237,7 @@ export function ScheduleManagementPage() {
                 </label>
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                {editingId && <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setDraft({ start: "07:00", end: "07:45", label: "" }); }}>Cancelar</Button>}
+                {editingId && <Button type="button" variant="ghost" onClick={resetEditor}>Cancelar</Button>}
                 <Button type="button" onClick={handleSave}>
                   <span className="inline-flex items-center gap-2"><Plus size={14} /> {editingId ? "Salvar alterações" : "Adicionar horário"}</span>
                 </Button>
@@ -243,8 +304,12 @@ export function ConfigurationPage() {
   const [teacherSpreadsheetSaving, setTeacherSpreadsheetSaving] = useState(false);
   const [teacherSpreadsheetError, setTeacherSpreadsheetError] = useState("");
   const [pendingAction, setPendingAction] = useState<typeof actions[number] | null>(null);
+  const [superAdminUsername, setSuperAdminUsername] = useState(() =>
+    getAuthenticatedSession()?.isSuperAdmin ? getAuthenticatedSession()?.name ?? "" : "",
+  );
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [verifyingSuperAdmin, setVerifyingSuperAdmin] = useState(false);
   useEffect(() => {
     let active = true;
     void loadTeacherSpreadsheetEnabled()
@@ -282,30 +347,38 @@ export function ConfigurationPage() {
   };
   const run = (action: typeof actions[number]) => {
     setPendingAction(action);
+    setSuperAdminUsername(
+      getAuthenticatedSession()?.isSuperAdmin ? getAuthenticatedSession()?.name ?? "" : "",
+    );
+    setPassword("");
+    setPasswordError("");
+    setVerifyingSuperAdmin(false);
+  };
+  const dismissAction = () => {
+    if (verifyingSuperAdmin) return;
+    setPendingAction(null);
     setPassword("");
     setPasswordError("");
   };
-  const confirmAction = (event: FormEvent<HTMLFormElement>) => {
+  const confirmAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!pendingAction) return;
-    const currentAdminName = window.localStorage.getItem("controle-carrinhos-admin-name") ?? "";
-    void loginWithCredentials("admin", currentAdminName, password)
-      .then(async (session) => {
-        if (!session.isSuperAdmin) {
-          await endAuthSession();
-          setPasswordError("Esta ação exige a conta de superadministrador.");
-          return;
-        }
-        const [, label] = pendingAction;
-        if (window.confirm(`${label}? Esta ação não pode ser desfeita.`)) {
-          resetData(pendingAction[0]);
-          setPendingAction(null);
-          setPassword("");
-        }
-      })
-      .catch((error: unknown) => {
-        setPasswordError(error instanceof Error ? error.message : "Não foi possível validar a senha.");
-      });
+    setVerifyingSuperAdmin(true);
+    setPasswordError("");
+    try {
+      await verifySuperAdminCredentials(superAdminUsername, password);
+      const action = pendingAction;
+      if (window.confirm(`${action[1]}? Esta ação não pode ser desfeita.`)) {
+        resetData(action[0]);
+      }
+      setPendingAction(null);
+      setPassword("");
+      setSuperAdminUsername("");
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : "Não foi possível validar as credenciais do superadministrador.");
+    } finally {
+      setVerifyingSuperAdmin(false);
+    }
   };
   const exportAppointments = () => {
     const rows = reservations
@@ -405,6 +478,7 @@ export function ConfigurationPage() {
   };
   return <div className="animate-rise space-y-7">
     <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
+    <AdminNotifications />
     <SectionCard title="Acesso do professor à planilha" eyebrow="Permissões de visualização">
       <div className="space-y-3 p-4 sm:p-5">
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[hsl(var(--border))] p-4 text-sm">
@@ -484,16 +558,19 @@ export function ConfigurationPage() {
         </div>
       </div>
     </SectionCard>
-    {pendingAction && <Modal title="Confirmar ação protegida" onClose={() => setPendingAction(null)}>
+    {pendingAction && <Modal title="Confirmar ação protegida" onClose={dismissAction}>
       <form className="space-y-5 p-5 sm:p-6" onSubmit={confirmAction}>
-        <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">Digite novamente a senha do administrador para executar <strong>{pendingAction[1]}</strong>.</p>
-        <Field label="Senha do administrador">
-          <input autoFocus required type="password" value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError(""); }} className={inputClass} />
+        <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">Esta operação exige autorização do superadministrador. Informe as credenciais dele para executar <strong>{pendingAction[1]}</strong>.</p>
+        <Field label="Usuário do superadministrador">
+          <input autoFocus required autoComplete="username" value={superAdminUsername} onChange={(event) => { setSuperAdminUsername(event.target.value); setPasswordError(""); }} className={inputClass} />
+        </Field>
+        <Field label="Senha do superadministrador">
+          <input required autoComplete="current-password" type="password" value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError(""); }} className={inputClass} />
         </Field>
         {passwordError && <p role="alert" className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{passwordError}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => setPendingAction(null)}>Cancelar</Button>
-          <Button type="submit" variant={pendingAction[0] === "factory" ? "danger" : "primary"}><Trash2 size={14} /> Confirmar e executar</Button>
+          <Button type="button" variant="ghost" disabled={verifyingSuperAdmin} onClick={dismissAction}>Cancelar</Button>
+          <Button type="submit" disabled={verifyingSuperAdmin} variant={pendingAction[0] === "factory" ? "danger" : "primary"}><Trash2 size={14} /> {verifyingSuperAdmin ? "Validando..." : "Confirmar e executar"}</Button>
         </div>
       </form>
     </Modal>}

@@ -136,6 +136,7 @@ export const pushSubscriptionsTable = pgTable("push_subscriptions", {
   endpoint: text("endpoint").primaryKey(),
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
+  notificationGroup: text("notification_group"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

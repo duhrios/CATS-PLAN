@@ -1,6 +1,7 @@
 import {
   isCartTransitionConflict,
   reservationsOverlap,
+  getCartScheduleForDate,
   type Cart,
   type CartScheduleTemplate,
   type Reservation,
@@ -44,7 +45,7 @@ export const getCartAvailability = (
       id: cart.id,
       name: cart.name,
       slots: (["Manhã", "Tarde"] as const).flatMap((period) =>
-        (schedules[cart.name]?.[period] ?? [])
+        (schedules[cart.name] ? getCartScheduleForDate(schedules[cart.name], date, period) : [])
           .filter((slot) => !isCartTransitionConflict({
             cart: cart.name,
             start: slot.start,
