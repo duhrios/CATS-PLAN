@@ -235,7 +235,9 @@ describe('Campus data core logic', () => {
     expect(result.current.carts).toHaveLength(initialCarts.length);
     expect(result.current.cartSchedules["Carrinho A"]).toEqual(defaultCartSchedules["Carrinho A"]);
     expect(result.current.cartSchedules["Carrinho A"]).not.toEqual(result.current.cartSchedules["Carrinho B"]);
-    expect(() => result.current.updateCartSchedules('Carrinho A', { Manhã: [], Tarde: [] })).not.toThrow();
+    act(() => {
+      expect(() => result.current.updateCartSchedules('Carrinho A', { Manhã: [], Tarde: [] })).not.toThrow();
+    });
   });
 
   it('does not authenticate nonexistent teacher accounts', () => {
