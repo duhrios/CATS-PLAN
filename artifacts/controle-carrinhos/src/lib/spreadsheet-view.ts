@@ -248,7 +248,7 @@ export function getMondayOfWeek(date: Date): Date {
 
 export function getWeekDates(weekStart: Date): Date[] {
   const monday = getMondayOfWeek(weekStart);
-  return Array.from({ length: 7 }, (_, index) => {
+  return Array.from({ length: 5 }, (_, index) => {
     const date = new Date(monday);
     date.setDate(monday.getDate() + index);
     return date;

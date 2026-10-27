@@ -68,8 +68,9 @@ describe("app shell role navigation", () => {
 
     render(<AppShell role="operator"><main>TI</main></AppShell>);
 
-    expect(screen.getByRole("link", { name: /Visão do Dia/ })).toHaveAttribute("href", "/operador");
-    expect(screen.getByRole("link", { name: "Reserva" })).toHaveAttribute("href", "/reservas");
+    expect(screen.getByRole("link", { name: "Visão do dia" })).toHaveAttribute("href", "/operador");
+    expect(screen.getByRole("link", { name: "Reservas" })).toHaveAttribute("href", "/reservas");
+    expect(screen.getByRole("link", { name: "Pontos Wi-Fi" })).toHaveAttribute("href", "/wifi");
     expect(screen.queryByRole("link", { name: /Usuários/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("button-switch-role")).not.toBeInTheDocument();
   });

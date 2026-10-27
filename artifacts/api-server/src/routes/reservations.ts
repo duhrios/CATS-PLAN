@@ -80,6 +80,17 @@ const saveReservation = async (
   try {
     const body = req.body as Record<string, unknown>;
     const scheduledDate = requiredText(body.scheduledDate, "Data");
+    const parsedDate = new Date(`${scheduledDate}T12:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) ||
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== scheduledDate
+    ) {
+      throw new Error("Informe uma data válida.");
+    }
+    if (parsedDate.getUTCDay() === 0 || parsedDate.getUTCDay() === 6) {
+      throw new Error("Agendamentos só podem ser feitos de segunda a sexta-feira.");
+    }
     const startTime = requiredText(body.startTime, "Início");
     const endTime = requiredText(body.endTime, "Fim");
     const cartId = Number(body.cartId);

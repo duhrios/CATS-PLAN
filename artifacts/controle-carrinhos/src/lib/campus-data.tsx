@@ -90,6 +90,14 @@ export const isReservationInProgress = (reservation: Reservation) => {
 
 export const normalizeTeacherName = (name: string) =>
   name.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+export const isWeekdayISO = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value &&
+    date.getUTCDay() >= 1 &&
+    date.getUTCDay() <= 5;
+};
 export const profileFromTeacherAccount = ({
   name,
   email,
@@ -1603,6 +1611,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     data: Omit<Reservation, "id" | "status">,
     id?: number,
   ): boolean => {
+    if (!isWeekdayISO(data.date)) return false;
     if (data.kind === "Reserva" && !campusSettings.reservationsEnabled) return false;
     if (data.kind === "Reserva" && data.quantity > campusSettings.reservationLimit) return false;
     const assignedReserveUnits =

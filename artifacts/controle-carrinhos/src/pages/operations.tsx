@@ -50,6 +50,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { type Period, useRoomDirectory } from "@/lib/room-directory";
 import {
   isReservationInProgress,
+  isWeekdayISO,
   canCancelReservation,
   getCartScheduleForDate,
   segments,
@@ -74,9 +75,6 @@ import {
 
 const isoToDate = (value: string) => new Date(`${value}T12:00:00`);
 const dateToISO = (value: Date) => value.toISOString().slice(0, 10);
-const isWeekendISO = (value: string) =>
-  [0, 6].includes(isoToDate(value).getDay());
-
 const reservationConflictDetails = (reservations: Reservation[]) => {
   const conflicts: Array<{ reservation: Reservation; other: Reservation }> = [];
   reservations.forEach((reservation) =>
@@ -670,8 +668,7 @@ export function ReservationModal({
   const sameDayBlocked =
     mode === "user" && form.kind === "Aula" && form.date === todayISO();
   const isReserve = form.kind === "Reserva";
-  const weekendBlocked =
-    mode === "user" && form.kind === "Aula" && isWeekendISO(form.date);
+  const weekendBlocked = !isWeekdayISO(form.date);
   const availableSchedule = isReserve
     ? []
     : scheduleFor(form.cart, form.period, form.date).filter(
@@ -1083,7 +1080,7 @@ export function ReservationModal({
             </Field>
           )}
         </div>
-        {mode === "user" && (
+        {(mode === "user" || weekendBlocked) && (
           <div
             className={cx(
               "rounded-xl border px-3 py-3 text-xs leading-5",
@@ -1096,7 +1093,7 @@ export function ReservationModal({
             {sameDayBlocked
               ? "Não é possível criar ou alterar uma reserva de aula para hoje."
               : weekendBlocked
-                ? "Aulas só podem ser agendadas de segunda a sexta."
+                ? "Agendamentos só podem ser feitos de segunda a sexta-feira."
                 : isReserve
                   ? "Chromebooks de reserva podem ser solicitados em qualquer horário."
                   : "Reservas de aula do dia ficam bloqueadas para alteração."}

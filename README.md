@@ -176,7 +176,7 @@ pnpm --filter @workspace/db reset
   iniciada/concluída, as próximas aulas não pedem outra movimentação física e
   são concluídas automaticamente no horário. Se o carrinho for destinado a
   outra sala ou houver intervalo entre horários, uma nova movimentação é avisada.
-- **Visão - Planilha:** bloco exclusivo do TI e da Administração, com acesso
+- **Planilha:** bloco exclusivo do TI e da Administração, com acesso
   rápido em grade semanal inspirada na planilha de referência (carrinho,
   horários, turma e professor) e acesso completo com dados da reserva e do
   acompanhamento operacional. Acesso Rápido permite selecionar e arrastar
@@ -189,8 +189,8 @@ pnpm --filter @workspace/db reset
   Ctrl+Z (ou Cmd+Z no Mac) desfaz a última movimentação enquanto a planilha
   estiver aberta. O filtro de período mostra manhã, tarde ou ambos; a visão geral
   separa as linhas em blocos visuais para cada período.
-  A grade rápida
-  segue os dias úteis; o acesso completo também inclui reservas do fim de semana,
+  As visões rápida e completa exibem somente os dias úteis (segunda a sexta-feira),
+  e a API também rejeita novos agendamentos no fim de semana.
   reúne tudo em **Ver todas** ou mantém abas específicas por carrinho e permite
   exibir todas as colunas ou personalizar a seleção. As sugestões de otimização
   por piso aparecem abaixo da planilha nesta mesma página.
@@ -306,6 +306,17 @@ $env:PORT = "4173"
 $env:BASE_PATH = "/"
 pnpm --filter @workspace/mockup-sandbox build
 ```
+
+Para executar também 1.000 ciclos reais de criação, consulta, edição e exclusão
+de agendamentos (4.000 requisições HTTP) contra a branch Neon de testes isolada:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-heavy-tests.ps1
+```
+
+O script valida explicitamente que a conexão aponta para a branch efêmera
+`testes-cats-20261026`; não execute esse teste de carga contra produção.
+Os registros e o carrinho temporários criados durante a execução são removidos.
 
 O workflow `.github/workflows/ci.yml` executa typecheck, testes e builds em
 pull requests e pushes para `main`/`master`.

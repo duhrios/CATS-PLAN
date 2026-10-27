@@ -53,10 +53,10 @@ const teacherSpreadsheetNavItem = {
   icon: Table2,
 };
 const operatorNavItems = [
-  { href: "/operador", label: "Visão do Dia", icon: LayoutDashboard },
-  { href: "/reservas", label: "Reserva", icon: CalendarDays },
+  { href: "/operador", label: "Visão do dia", icon: LayoutDashboard },
+  { href: "/reservas", label: "Reservas", icon: CalendarDays },
   { href: "/salas", label: "Salas", icon: DoorOpen },
-  { href: "/wifi", label: "Pontos - Wifi", icon: Network },
+  { href: "/wifi", label: "Pontos Wi-Fi", icon: Network },
   { href: "/visao-planilha", label: "Planilha", icon: Table2 },
   { href: "/operador/configuracao", label: "Configuração", icon: Settings },
 ];

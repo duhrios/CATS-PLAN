@@ -10,6 +10,7 @@ import {
   getCartScheduleForDate,
   initialAdminAccounts,
   initialCarts,
+  isWeekdayISO,
   normalizeCartSchedules,
   useCampusData,
 } from './campus-data';
@@ -286,6 +287,32 @@ describe('Campus data core logic', () => {
       kind: 'Aula',
       quantity: 20,
     })).toBe(false);
+  });
+
+  it("allows scheduling only on weekdays in every reservation flow", () => {
+    expect(isWeekdayISO("2026-10-02")).toBe(true);
+    expect(isWeekdayISO("2026-10-03")).toBe(false);
+    expect(isWeekdayISO("2026-10-04")).toBe(false);
+    expect(isWeekdayISO("2026-02-30")).toBe(false);
+
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const reservation = {
+      teacher: "Professor Teste",
+      segment: "Fundamental 1" as const,
+      subject: "Ciências",
+      className: "5º ano A",
+      room: "Sala 1",
+      period: "Manhã" as const,
+      date: "2026-10-03",
+      start: "08:00",
+      end: "08:45",
+      cart: "Carrinho A",
+      kind: "Aula" as const,
+      quantity: 20,
+    };
+
+    expect(result.current.saveReservation(reservation)).toBe(false);
+    expect(result.current.saveReservation({ ...reservation, kind: "Reserva" })).toBe(false);
   });
 
   it('persists the activate/deactivate cart action and restores the catalog on factory reset', () => {
