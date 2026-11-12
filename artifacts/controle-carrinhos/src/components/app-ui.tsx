@@ -151,14 +151,16 @@ export function SectionCard({
   title,
   action,
   eyebrow,
+  defaultExpanded = false,
 }: {
   children: ReactNode;
   className?: string;
   title?: string;
   action?: ReactNode;
   eyebrow?: string;
+  defaultExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const contentId = useId();
   const sectionLabel = title ?? eyebrow ?? "seção";
 

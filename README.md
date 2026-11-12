@@ -308,14 +308,19 @@ pnpm --filter @workspace/mockup-sandbox build
 ```
 
 Para executar também 1.000 ciclos reais de criação, consulta, edição e exclusão
-de agendamentos (4.000 requisições HTTP) contra a branch Neon de testes isolada:
+de agendamentos (4.000 requisições HTTP) contra uma branch Neon de testes
+isolada, configure em `.env.local` as URLs da branch e os campos
+`TEST_NEON_PROJECT_ID`, `TEST_NEON_BRANCH_NAME`, `TEST_DATABASE_BRANCH_ID`,
+`TEST_ADMIN_USERNAME` e `TEST_ADMIN_PASSWORD`. Crie uma branch **schema-only**
+e uma conta administrativa exclusiva para testes antes da execução:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-heavy-tests.ps1
 ```
 
-O script valida explicitamente que a conexão aponta para a branch efêmera
-`testes-cats-20261026`; não execute esse teste de carga contra produção.
+O script confere via Neon CLI que a branch selecionada está pronta, é
+schema-only e não é a branch principal; também valida que o host direto
+corresponde à branch. Não execute esse teste de carga contra produção.
 Os registros e o carrinho temporários criados durante a execução são removidos.
 
 O workflow `.github/workflows/ci.yml` executa typecheck, testes e builds em

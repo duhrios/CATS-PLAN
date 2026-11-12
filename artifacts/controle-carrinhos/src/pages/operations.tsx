@@ -355,6 +355,7 @@ export function OverviewPage() {
         <SectionCard
           title="Pulso do dia"
           eyebrow="Acompanhamento em tempo real"
+          defaultExpanded
           action={
             <Link
               href="/reservas"
@@ -422,6 +423,7 @@ export function OverviewPage() {
         <SectionCard
           title="Pronto para a aula?"
           eyebrow="Checklist de abertura"
+          defaultExpanded
         >
           <div className="space-y-5 p-5 sm:p-6">
             <Link href="/carrinhos" className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]">
@@ -462,6 +464,7 @@ export function OverviewPage() {
       <SectionCard
         title="Últimas movimentações"
         eyebrow="Registro da operação"
+        defaultExpanded
         action={
           <Link
             href="/historico"
@@ -1416,7 +1419,11 @@ export function ReservationsPage({
         )}
       </div>
       <div className="grid gap-6 xl:grid-cols-[20rem_1fr]">
-        <SectionCard title="Calendário" eyebrow="Agendamentos por dia">
+        <SectionCard
+          title="Calendário"
+          eyebrow="Agendamentos por dia"
+          defaultExpanded={mode === "operator"}
+        >
           <div className="p-3">
             <Calendar
               mode="single"
@@ -1456,7 +1463,7 @@ export function ReservationsPage({
             )}
           </div>
         </SectionCard>
-        <SectionCard>
+        <SectionCard defaultExpanded>
           <div className="flex flex-col gap-3 border-b border-[hsl(var(--border))] p-4 sm:px-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="relative flex-1 sm:max-w-xs">
@@ -2428,6 +2435,7 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
           <SectionCard
             title="Antenas volantes"
             eyebrow="Acompanhe a antena e a sala atendida"
+            defaultExpanded
             action={<span className="rounded-full bg-[hsl(var(--accent)/.2)] px-3 py-1.5 text-xs font-semibold text-[hsl(34_60%_32%)]">{mobilePoints.length} cadastradas</span>}
           >
           {filtered.length === 0 ? (
@@ -2502,6 +2510,7 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
         <div id="wifi-rooms" className="scroll-mt-24">
           <SectionCard
             title={activePoint ? activePoint.point : "Salas e cobertura"}
+            defaultExpanded
             eyebrow={
               activePoint ? activePoint.name : "Organize as salas por cobertura"
             }
@@ -3018,7 +3027,7 @@ export function HistoryPage() {
           </Button>
         }
       />
-      <SectionCard>
+      <SectionCard defaultExpanded>
         <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/.18)] p-4 sm:p-5">
           <div className="relative">
             <Search

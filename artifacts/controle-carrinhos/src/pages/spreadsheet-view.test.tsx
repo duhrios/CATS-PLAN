@@ -112,12 +112,34 @@ describe("teacher spreadsheet view", () => {
 
     expect(quickTab).toHaveAttribute("aria-selected", "true");
     expect(completeTab).toHaveAttribute("aria-selected", "false");
+    const quickWeekScroll = screen.getByTestId("quick-week-scroll-container");
+    const quickWeekTopScroll = screen.getByTestId("quick-week-top-scroll-container");
+    expect(quickWeekTopScroll).toHaveAttribute("role", "region");
+    expect(quickWeekTopScroll).toHaveAttribute("tabindex", "0");
+    expect(quickWeekTopScroll.className).toContain("overflow-x-auto");
+    expect(quickWeekTopScroll).toHaveAttribute(
+      "aria-label",
+      "Barra superior de rolagem da planilha semanal",
+    );
+    expect(quickWeekScroll).toHaveAttribute("role", "region");
+    expect(quickWeekScroll).toHaveAttribute("tabindex", "0");
+    expect(quickWeekScroll.className).toContain("overflow-x-auto");
+    expect(quickWeekScroll.className).toContain("min-w-0");
+    expect(quickWeekScroll).toContainElement(screen.getByTestId("quick-week-grid"));
     expect(screen.getByTestId("quick-week-grid").className)
       .toContain("min-w-[3800px]");
     expect(screen.getAllByTestId("quick-day-grid")[0].className)
       .toContain("min-w-[740px]");
     expect(screen.getAllByTestId("quick-time-grid")[0].className)
       .toContain("grid-cols-[96px_minmax(0,1fr)]");
+
+    quickWeekTopScroll.scrollLeft = 320;
+    fireEvent.scroll(quickWeekTopScroll);
+    expect(quickWeekScroll.scrollLeft).toBe(320);
+
+    quickWeekScroll.scrollLeft = 640;
+    fireEvent.scroll(quickWeekScroll);
+    expect(quickWeekTopScroll.scrollLeft).toBe(640);
 
     fireEvent.click(completeTab);
     expect(completeTab).toHaveAttribute("aria-selected", "true");

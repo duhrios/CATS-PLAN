@@ -15,7 +15,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Button, PageHeader, StatusPill } from "@/components/app-ui";
 import {
   type Cart,
@@ -223,6 +223,12 @@ function QuickAccess({
   const [bookingSaving, setBookingSaving] = useState(false);
   const [deletingReservationIds, setDeletingReservationIds] = useState<number[]>([]);
   const [deleteError, setDeleteError] = useState("");
+  const topWeekScrollRef = useRef<HTMLDivElement>(null);
+  const weekScrollRef = useRef<HTMLDivElement>(null);
+  const syncWeekScroll = (source: "top" | "bottom", scrollLeft: number) => {
+    const target = source === "top" ? weekScrollRef.current : topWeekScrollRef.current;
+    if (target && target.scrollLeft !== scrollLeft) target.scrollLeft = scrollLeft;
+  };
   const createReservation = async (
     target: { date: string; cart: string; start: string; end: string; period: "Manhã" | "Tarde" },
   ) => {
@@ -492,9 +498,28 @@ function QuickAccess({
           Desfazer última mudança (Ctrl+Z)
         </button>
       )}
-      <div className="overflow-x-auto rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm">
+      <div
+        aria-label="Barra superior de rolagem da planilha semanal"
+        className="h-4 w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain"
+        data-testid="quick-week-top-scroll-container"
+        onScroll={(event) => syncWeekScroll("top", event.currentTarget.scrollLeft)}
+        ref={topWeekScrollRef}
+        role="region"
+        tabIndex={0}
+      >
+        <div aria-hidden="true" className="h-px min-w-[3804px]" />
+      </div>
+      <div
+        aria-label="Planilha semanal com rolagem horizontal"
+        className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm"
+        data-testid="quick-week-scroll-container"
+        onScroll={(event) => syncWeekScroll("bottom", event.currentTarget.scrollLeft)}
+        ref={weekScrollRef}
+        role="region"
+        tabIndex={0}
+      >
         <div
-          className="grid min-w-[3800px] grid-cols-[repeat(5,minmax(760px,1fr))] gap-px bg-[#a9b7c8]"
+          className="grid w-max min-w-[3800px] grid-cols-[repeat(5,minmax(760px,1fr))] gap-px bg-[#a9b7c8]"
           data-testid="quick-week-grid"
         >
           {dates.map((date) => {
@@ -1077,7 +1102,12 @@ function CompleteAccess({
         <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] p-10 text-center text-sm text-[hsl(var(--muted-foreground))]">
           Não há agendamentos para {selectedCart} nesta semana.
         </div>
-      ) : <div className="overflow-x-auto rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm">
+      ) : <div
+        aria-label="Planilha completa com rolagem horizontal"
+        className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm"
+        role="region"
+        tabIndex={0}
+      >
         <table className="w-full min-w-[920px] border-collapse text-left text-[11px]">
           <thead>
             <tr className="bg-[#345779] text-left text-white">
@@ -1304,7 +1334,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   };
 
   return (
-    <div className="animate-rise space-y-6">
+    <div className="animate-rise w-full min-w-0 max-w-full space-y-6">
       <PageHeader
         eyebrow={readOnly ? "Área do professor · Somente visualização" : "Área do TI e Administração"}
         title="Planilha"

@@ -145,7 +145,7 @@ export function ScheduleManagementPage() {
   return (
     <div className="animate-rise space-y-7">
       <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Horários" description="Gerencie os horários de cada carrinho, sincronize as faixas entre os veículos e mantenha a agenda escolar consistente." />
-      <SectionCard title="Configuração por carrinho" eyebrow="Agenda operacional">
+      <SectionCard title="Configuração por carrinho" eyebrow="Agenda operacional" defaultExpanded>
         <div className="grid gap-5 p-4 xl:grid-cols-[260px_1fr] xl:p-6">
           <div className="space-y-4">
             <div>

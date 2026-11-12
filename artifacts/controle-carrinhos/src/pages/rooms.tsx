@@ -136,6 +136,7 @@ export function RoomsPage() {
        <SectionCard
          title="Mapa de salas"
          eyebrow="Turmas por período"
+         defaultExpanded
          action={rooms.length > 0 && <Button size="sm" variant={selectionMode ? "secondary" : "ghost"} onClick={toggleSelectionMode} data-testid="button-toggle-room-selection">{selectionMode ? "Cancelar seleção" : "Selecionar"}</Button>}
        >
          {selectionMode && rooms.length > 0 && <div className="flex flex-col gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/.28)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6" data-testid="room-selection-toolbar">

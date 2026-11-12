@@ -23,6 +23,15 @@ e `.git`, arquivos `.env` locais e metadados do ambiente de desenvolvimento.
 - O conjunto de salas de teste não é carregado por padrão. Só é ativado em uma
   implantação explicitamente configurada com `VITE_ENABLE_CAMPUS_SEED=true`.
 - O catálogo operacional padrão contém os carrinhos A, B e C e seus horários.
+- Agendamentos de aulas e reservas são limitados a segunda a sexta-feira; a
+  regra é validada na interface, no estado do app e também pela API.
+- A planilha do TI/Admin oferece visão rápida e completa da semana útil, com
+  criação, edição, exclusão e organização dos agendamentos.
+- O estado operacional pode ser compartilhado entre dispositivos por meio da
+  API autenticada; dados de Wi-Fi e movimentações não são expostos a professores.
+- A Administração e o TI têm áreas e permissões próprias. Cadastros de
+  professores, salas, carrinhos, horários, movimentações e notificações usam
+  as funcionalidades atuais do aplicativo.
 - Não há senha ou conta administrativa padrão incluída no código. Configure
   credenciais exclusivas e `SESSION_SECRET` no ambiente privado da API antes de
   disponibilizar o sistema; sem elas, o login falha de forma segura.
@@ -59,9 +68,29 @@ e `.git`, arquivos `.env` locais e metadados do ambiente de desenvolvimento.
     Execute o gerador separadamente para cada senha e cadastre os resultados
     somente nas variáveis de ambiente da API. O servidor usa cookies assinados
     `HttpOnly`/`Secure` e não aceita o papel salvo no navegador como autenticação.
-    Professores precisam de contas ativas em `campus_users` com hash scrypt; a
-    ativação pelo navegador está desabilitada até existir um fluxo de convite
-    verificado pelo servidor.
+    Cadastre professores pela área administrativa/TI. O professor confirma o
+    e-mail cadastrado e define a própria senha no primeiro acesso; senhas são
+    armazenadas com hash scrypt. Não reutilize credenciais de teste em produção.
+
+## Testes
+
+Execute os testes automatizados, a verificação de tipos e os builds:
+
+```powershell
+pnpm run typecheck
+pnpm --filter @workspace/controle-carrinhos test
+pnpm --filter @workspace/api-server test
+$env:PORT = "4173"
+$env:BASE_PATH = "/"
+pnpm run build
+```
+
+O repositório também inclui 1.000 ciclos de integração para criação, consulta,
+edição e exclusão de agendamentos. Para executá-los, configure primeiro uma
+branch Neon isolada e **schema-only**, com uma conta administrativa exclusiva
+de teste, além das variáveis de teste descritas no README. O teste nunca deve
+ser executado contra produção; os agendamentos e o carrinho temporários são
+removidos ao final.
 
 ## Notificações push
 

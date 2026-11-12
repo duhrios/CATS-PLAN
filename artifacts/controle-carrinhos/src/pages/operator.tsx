@@ -954,6 +954,7 @@ export function OperatorPage() {
         <SectionCard
           title="Agendamentos futuros"
           eyebrow="Próximas movimentações"
+          defaultExpanded
         >
           <FutureReservations
             reservations={reservations}
@@ -965,6 +966,7 @@ export function OperatorPage() {
         <SectionCard
           title="Movimentações de hoje"
           eyebrow={`${visibleToday.length} agendamento${visibleToday.length === 1 ? "" : "s"} ${view === "completed" ? "concluído" : view === "notAttended" ? "não atendido" : "para atender"}`}
+          defaultExpanded
         >
           <div className="flex flex-wrap gap-2 border-b border-[hsl(var(--border))] px-5 pt-4 sm:px-6">
             <button

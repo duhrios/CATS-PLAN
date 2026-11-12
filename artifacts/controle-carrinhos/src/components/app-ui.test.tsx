@@ -47,5 +47,22 @@ describe("Modal", () => {
       expect(toggle).toHaveAccessibleName("Maximizar Contas de acesso");
       expect(screen.getByText("Lista de usuários").parentElement).toHaveAttribute("hidden");
     });
+
+    it("can start expanded and still allow minimizing its content", () => {
+      render(
+        <SectionCard title="Mapa de salas" defaultExpanded>
+          <p>Salas cadastradas</p>
+        </SectionCard>,
+      );
+
+      const toggle = screen.getByRole("button", { name: "Minimizar Mapa de salas" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("Salas cadastradas").parentElement).not.toHaveAttribute("hidden");
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.getByText("Salas cadastradas").parentElement).toHaveAttribute("hidden");
+    });
   });
 });

@@ -1,7 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const expectedBranchId = "br-still-dust-b65r7aqc";
 const integrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "1";
 const integrationDescribe = integrationEnabled ? describe : describe.skip;
 const lifecycleCases = Array.from({ length: 1_000 }, (_, index) => index);
@@ -17,14 +16,16 @@ integrationDescribe("reservation API load and lifecycle integration", () => {
   let cartsTable: typeof import("@workspace/db/schema")["cartsTable"] | undefined;
 
   beforeAll(async () => {
-    if (process.env.TEST_DATABASE_BRANCH_ID !== expectedBranchId) {
-      throw new Error("Integration tests are restricted to the isolated testes-cats branch.");
+    const expectedBranchId = process.env.TEST_DATABASE_BRANCH_ID;
+    const expectedHost = process.env.TEST_DATABASE_HOST;
+    if (!expectedBranchId || process.env.NEON_BRANCH !== expectedBranchId) {
+      throw new Error("Set TEST_DATABASE_BRANCH_ID to the isolated test branch ID.");
     }
     if (!process.env.DATABASE_URL || !process.env.DATABASE_URL_UNPOOLED) {
       throw new Error("Both pooled and direct test-branch database URLs are required.");
     }
     const hostname = new URL(process.env.DATABASE_URL_UNPOOLED).hostname;
-    if (!hostname.includes("ep-little-shape-b6l07w5y") || hostname.includes("-pooler")) {
+    if (!expectedHost || hostname !== expectedHost || hostname.includes("-pooler")) {
       throw new Error("Refusing to run load tests against an unexpected database endpoint.");
     }
 

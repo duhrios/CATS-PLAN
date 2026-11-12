@@ -14,9 +14,17 @@ function Get-EnvValue([string]$name) {
   return $entry.Substring($name.Length + 1).Trim().Trim('"')
 }
 
-$branchName = Get-EnvValue "NEON_BRANCH"
-if ($branchName -ne "testes-cats-20261026") {
-  throw "Refusing to run destructive/load integration tests outside the dedicated test branch."
+$linkedBranchId = Get-EnvValue "NEON_BRANCH"
+$projectId = Get-EnvValue "TEST_NEON_PROJECT_ID"
+$testBranchName = Get-EnvValue "TEST_NEON_BRANCH_NAME"
+$expectedBranchId = Get-EnvValue "TEST_DATABASE_BRANCH_ID"
+if (
+  -not $projectId -or
+  -not $testBranchName -or
+  -not $expectedBranchId -or
+  $linkedBranchId -notin @($expectedBranchId, $testBranchName)
+) {
+  throw "Configure TEST_NEON_PROJECT_ID and TEST_NEON_BRANCH_NAME for the selected test branch."
 }
 
 $databaseUrl = Get-EnvValue "DATABASE_URL"
@@ -24,28 +32,35 @@ $directDatabaseUrl = Get-EnvValue "DATABASE_URL_UNPOOLED"
 if (-not $databaseUrl -or -not $directDatabaseUrl) {
   throw "The isolated test branch must have pooled and direct DATABASE_URL values."
 }
-if (([Uri]$directDatabaseUrl).Host -notlike "ep-little-shape-b6l07w5y*" -or ([Uri]$directDatabaseUrl).Host -like "*-pooler*") {
+if (([Uri]$directDatabaseUrl).Host -like "*-pooler*") {
   throw "Refusing to run against an unexpected or pooled database endpoint."
 }
 
 $neon = Join-Path $env:APPDATA "npm\neon.cmd"
-$branch = (& $neon branch get $branchName --project-id orange-paper-53554576 -o json | ConvertFrom-Json)
-if ($branch.name -ne $branchName -or $branch.primary -or $branch.init_source -ne "parent-schema") {
+$branch = (& $neon branch get $testBranchName --project-id $projectId -o json | ConvertFrom-Json)
+if ($branch.name -ne $testBranchName -or $branch.primary -or $branch.init_source -ne "parent-schema" -or $branch.current_state -ne "ready") {
   throw "Neon did not confirm the expected non-production schema-only branch."
 }
 $branchId = $branch.id
-if ($branchId -ne "br-still-dust-b65r7aqc") {
-  throw "Refusing to run load tests against an unexpected branch ID."
+if ($branchId -ne $expectedBranchId) {
+  throw "The selected Neon branch ID does not match the test database configuration."
+}
+$expectedConnection = (& $neon connection-string $branchId --project-id $projectId).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Could not verify the branch connection with Neon CLI." }
+if (([Uri]$expectedConnection).Host -ne ([Uri]$directDatabaseUrl).Host) {
+  throw "DATABASE_URL_UNPOOLED does not match the verified test branch."
 }
 
 $env:DATABASE_URL = $databaseUrl
 $env:DATABASE_URL_UNPOOLED = $directDatabaseUrl
+$env:NEON_BRANCH = $branchId
 $env:TEST_DATABASE_BRANCH_ID = $branchId
+$env:TEST_DATABASE_HOST = ([Uri]$directDatabaseUrl).Host
 $env:RUN_DATABASE_INTEGRATION = "1"
 $env:TEST_ADMIN_USERNAME = Get-EnvValue "TEST_ADMIN_USERNAME"
 $env:TEST_ADMIN_PASSWORD = Get-EnvValue "TEST_ADMIN_PASSWORD"
 $env:SESSION_SECRET = Get-EnvValue "SESSION_SECRET"
-$env:ADMIN_USERNAME = "Administrador"
+$env:ADMIN_USERNAME = $env:TEST_ADMIN_USERNAME
 $env:ADMIN_SUPER_ADMIN = "true"
 $env:APP_BASE_URL = "http://localhost:4173"
 $env:NODE_ENV = "test"

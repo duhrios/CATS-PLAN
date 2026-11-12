@@ -451,7 +451,7 @@ export function AppShell({
             {sharedDataSyncError}
           </div>
         )}
-        <main className="app-grid min-h-[calc(100dvh-76px)] px-5 py-7 sm:px-8 lg:px-10">
+        <main className="app-grid min-h-[calc(100dvh-76px)] min-w-0 overflow-x-clip px-5 py-7 sm:px-8 lg:px-10">
           {children}
         </main>
       </div>

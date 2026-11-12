@@ -65,6 +65,7 @@ export function OperatorSettingsPage() {
       <SectionCard
         title="Lembretes de movimentação"
         eyebrow="Preferências deste dispositivo"
+        defaultExpanded
       >
         <div className="grid max-w-2xl gap-5 p-5">
           <Field
