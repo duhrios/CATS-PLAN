@@ -444,7 +444,41 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
             <div className="flex items-center gap-3 rounded-xl bg-[hsl(var(--muted)/.45)] p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"><UserRound size={19} /></span><div><p className="text-sm font-semibold">Perfil usado nas reservas</p><p className="text-xs text-[hsl(var(--muted-foreground))]">O nome abaixo será preenchido automaticamente.</p></div></div>
             <Field label="Nome do professor"><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={inputClass} placeholder="Ex.: Marina Lopes" data-testid="input-teacher-name" /></Field>
             <Field label="E-mail de acesso" hint="Use o mesmo e-mail cadastrado pela coordenação."><input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className={inputClass} placeholder="professor@escola.com.br" data-testid="input-teacher-email" /></Field>
-            <Field label="Segmento"><select value={form.segment} onChange={(event) => setForm({ ...form, segment: event.target.value as Segment, subject: "", className: "" })} className={inputClass} data-testid="select-teacher-segment">{segments.map((segment) => <option key={segment} value={segment}>{segment}</option>)}</select></Field>
+            <Field label="Segmento principal"><select value={form.segment} onChange={(event) => {
+              const segment = event.target.value as Segment;
+              setForm({
+                ...form,
+                segment,
+                subject: "",
+                className: "",
+                additionalSegments: (form.additionalSegments ?? []).filter((item) => item !== segment),
+              });
+            }} className={inputClass} data-testid="select-teacher-segment">{segments.map((segment) => <option key={segment} value={segment}>{segment}</option>)}</select></Field>
+            <fieldset className="space-y-2 rounded-xl border border-[hsl(var(--border))] p-3">
+              <legend className="px-1 text-xs font-semibold text-[hsl(var(--foreground))]">Também leciono em</legend>
+              {(["Fundamental 2", "Ensino Médio"] as Segment[])
+                .filter((segment) => segment !== form.segment)
+                .map((segment) => (
+                  <label key={segment} className="flex items-center gap-2 text-sm text-[hsl(var(--foreground))]">
+                    <input
+                      type="checkbox"
+                      checked={(form.additionalSegments ?? []).includes(segment)}
+                      onChange={(event) => setForm({
+                        ...form,
+                        additionalSegments: event.target.checked
+                          ? [...new Set([...(form.additionalSegments ?? []), segment])]
+                          : (form.additionalSegments ?? []).filter((item) => item !== segment),
+                      })}
+                      className="h-4 w-4 accent-[hsl(var(--primary))]"
+                      data-testid={`checkbox-additional-segment-${segment === "Ensino Médio" ? "medio" : "fundamental-2"}`}
+                    />
+                    {segment}
+                  </label>
+                ))}
+              <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+                A planilha exibirá salas e turmas cadastradas pelo TI apenas dos segmentos selecionados.
+              </p>
+            </fieldset>
             {showSubject ? <Field label="Matéria" hint="Obrigatória para Fundamental 2 e Ensino Médio."><input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} className={inputClass} placeholder="Ex.: Ciências" data-testid="input-teacher-subject" /></Field> : <p className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.3)] p-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Para Educação Infantil e Fundamental 1, selecione uma turma cadastrada pelo TI na sala correspondente.</p>}
             {showClass && <Field label="Turma" hint={classOptions.length ? "Selecione uma turma já vinculada a uma sala pelo TI." : "O TI precisa cadastrar uma sala e vincular as turmas antes de você continuar."}><select required value={form.className ?? ""} onChange={(event) => setForm({ ...form, className: event.target.value })} className={inputClass} data-testid="select-teacher-class" disabled={roomCatalogLoading || classOptions.length === 0}><option value="">{roomCatalogLoading ? "Carregando turmas..." : classOptions.length ? "Selecione sua turma" : "Nenhuma turma cadastrada"}</option>{classOptions.map((className) => <option key={className} value={className}>{className}</option>)}</select></Field>}
             <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.2)] p-4">

@@ -20,6 +20,7 @@ import {
 } from "@/lib/auth-session";
 import {
   loadSharedOperationalState,
+  mergeOperationalStateWithLocalChanges,
   operationalStateStorageKeys,
   saveSharedOperationalState,
   type OperationalState,
@@ -41,6 +42,7 @@ export type TeacherProfile = {
   segment: Segment;
   subject: string;
   className?: string;
+  additionalSegments?: Segment[];
 };
 export type TeacherAccount = TeacherProfile & {
   id: string;
@@ -75,6 +77,17 @@ export type CartMovement = {
   requestAgainAt?: string;
   confirmedBy?: string;
   confirmedAt?: string;
+};
+
+export type ReserveUnitAssignment = {
+  teacher: string;
+  date: string;
+  personType?: ReserveResponsiblePersonType;
+};
+export type ReserveResponsiblePersonType = "Professor" | "Funcionário/Autorizado";
+export type ReserveResponsiblePerson = {
+  name: string;
+  personType: ReserveResponsiblePersonType;
 };
 
 export const isReservationInProgress = (reservation: Reservation) => {
@@ -141,12 +154,18 @@ export const canCancelReservation = (
   reservation: Pick<Reservation, "date" | "start" | "end">,
   now = new Date(),
 ) => {
-  const startsAt = new Date(`${reservation.date}T${reservation.start}:00`);
-  const endsAt = new Date(`${reservation.date}T${reservation.end}:00`);
-  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) return false;
-  if (now.getTime() < startsAt.getTime()) return true;
-  return now.getTime() < endsAt.getTime() &&
-    now.getTime() <= startsAt.getTime() + 10 * 60 * 1000;
+  const parsedDate = new Date(`${reservation.date}T12:00:00Z`);
+  const start = reservation.start.slice(0, 5);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(reservation.date) ||
+    Number.isNaN(parsedDate.getTime()) ||
+    parsedDate.toISOString().slice(0, 10) !== reservation.date ||
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(start)
+  ) {
+    return false;
+  }
+  const startsAt = new Date(`${reservation.date}T${start}:00-03:00`);
+  return startsAt.getTime() - now.getTime() >= 24 * 60 * 60 * 1000;
 };
 
 export type Cart = {
@@ -162,7 +181,9 @@ export type Cart = {
   accent: string;
   unavailable: boolean;
   unavailableUnits: string[];
+  unavailableUnitReasons?: Record<string, string>;
   reservedUnits: string[];
+  reserveAssignments?: Record<string, ReserveUnitAssignment>;
   deletedUnits?: string[];
   reserveCapacity: number;
 };
@@ -734,6 +755,7 @@ export type CampusSettings = {
   reservationsEnabled: boolean;
   reservationLimit: number;
   reserveUnits: string[];
+  reserveResponsiblePeople?: ReserveResponsiblePerson[];
 };
 export const defaultCampusSettings: CampusSettings = {
   campusName: "",
@@ -742,6 +764,7 @@ export const defaultCampusSettings: CampusSettings = {
   reservationsEnabled: true,
   reservationLimit: 10,
   reserveUnits: [],
+  reserveResponsiblePeople: [],
 };
 export const emptyCartSchedules: Record<string, CartScheduleTemplate> = {};
 export const defaultMovementSettings: MovementSettings = {
@@ -810,6 +833,10 @@ type CampusDataValue = {
   updateMovementSettings: (settings: MovementSettings) => void;
   campusSettings: CampusSettings;
   updateCampusSettings: (settings: CampusSettings) => void;
+  rememberReserveResponsiblePerson: (
+    name: string,
+    personType: ReserveResponsiblePersonType,
+  ) => void;
   reservations: Reservation[];
   reservationsSyncError: string | null;
   operationalStateSyncError: string | null;
@@ -829,6 +856,11 @@ type CampusDataValue = {
   deleteCart: (id: string) => boolean;
   toggleCartUnavailable: (id: string) => void;
   toggleCartUnitUnavailable: (cartId: string, unit: string) => void;
+  setCartUnitUnavailableReason: (cartId: string, unit: string, reason: string) => void;
+  updateReserveUnitAssignments: (
+    units: string[],
+    assignment: ReserveUnitAssignment | null,
+  ) => void;
   deleteCartUnit: (cartId: string, unit: string) => boolean;
   toggleCartUnitReserved: (cartId: string, unit: string) => void;
   restoreReservedUnits: (units?: string[]) => void;
@@ -948,19 +980,47 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           : savedSettings.campusName ?? defaultCampusSettings.campusName,
     };
   });
+  const campusSettingsRef = useRef(campusSettings);
+  campusSettingsRef.current = campusSettings;
   const [carts, setCarts] = useState<Cart[]>(() =>
     readStorage<Partial<Cart>[]>(cartStorageKey, cloneDefaultCarts()).map(
       (cart) => {
         const unavailableUnits = Array.from(new Set(cart.unavailableUnits ?? []));
         const deletedUnits = Array.from(new Set(cart.deletedUnits ?? []));
+        const unavailableUnitReasons = Object.fromEntries(
+          Object.entries(cart.unavailableUnitReasons ?? {}).filter(
+            ([unit, reason]) =>
+              unavailableUnits.includes(unit) &&
+              typeof reason === "string" &&
+              reason.trim().length > 0,
+          ),
+        );
         const reservedUnits = Array.from(
           new Set((cart.reservedUnits ?? []).filter((unit) => !unavailableUnits.includes(unit) && !deletedUnits.includes(unit))),
+        );
+        const validCartUnits = new Set(
+          Array.from(
+            { length: Math.max(0, cart.total ?? 0) },
+            (_, index) => `${cart.prefix}${index + 1}`,
+          ).filter((unit) => !deletedUnits.includes(unit)),
+        );
+        const reserveAssignments = Object.fromEntries(
+          Object.entries(cart.reserveAssignments ?? {}).filter(
+            ([unit, assignment]) =>
+              validCartUnits.has(unit) &&
+              typeof assignment?.teacher === "string" &&
+              assignment.teacher.trim().length > 0 &&
+              typeof assignment.date === "string" &&
+              /^\d{4}-\d{2}-\d{2}$/.test(assignment.date),
+          ),
         );
         return {
           ...cart,
           unavailable: cart.unavailable ?? false,
           unavailableUnits,
+          unavailableUnitReasons,
           reservedUnits,
+          reserveAssignments,
           deletedUnits,
           available: Math.max(0, (cart.total ?? 0) - unavailableUnits.length - deletedUnits.length),
           reserveCapacity:
@@ -1225,12 +1285,26 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         setOperationalStateReady(false);
         return;
       }
+      const localStateAtRequestStart = operationalStateCurrentRef.current;
       try {
         const result = await loadSharedOperationalState();
         if (!active) return;
         operationalStateUpdatedAtRef.current = result.updatedAt;
         if (result.state) {
-          applyOperationalState(result.state);
+          const {
+            state,
+            syncedState,
+            hasLocalChanges,
+          } = mergeOperationalStateWithLocalChanges(
+            localStateAtRequestStart,
+            operationalStateCurrentRef.current,
+            result.state,
+          );
+          applyOperationalState(state);
+          if (hasLocalChanges) {
+            operationalStateSyncedSignatureRef.current =
+              JSON.stringify(syncedState);
+          }
         } else if (role === "admin" || role === "operator") {
           operationalStateSyncedSignatureRef.current =
             JSON.stringify(operationalStateCurrentRef.current);
@@ -1603,8 +1677,33 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   };
   const updateCampusSettings = (settings: CampusSettings) => {
     const next = { ...defaultCampusSettings, ...settings, reservationLimit: Math.max(1, settings.reservationLimit) };
+    campusSettingsRef.current = next;
     setCampusSettings(next);
     window.localStorage.setItem("controle-carrinhos-campus-settings", JSON.stringify(next));
+  };
+  const rememberReserveResponsiblePerson = (
+    name: string,
+    personType: ReserveResponsiblePersonType,
+  ) => {
+    const normalizedName = name.trim().replace(/\s+/g, " ");
+    if (!normalizedName) return;
+    const currentSettings = campusSettingsRef.current;
+    const existingPeople = currentSettings.reserveResponsiblePeople ?? [];
+    const existingIndex = existingPeople.findIndex(
+      (person) =>
+        person.name.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR") ===
+        normalizedName.toLocaleLowerCase("pt-BR"),
+    );
+    const reserveResponsiblePeople = [...existingPeople];
+    if (existingIndex === -1) {
+      reserveResponsiblePeople.push({ name: normalizedName, personType });
+    } else {
+      reserveResponsiblePeople[existingIndex] = {
+        ...reserveResponsiblePeople[existingIndex],
+        personType,
+      };
+    }
+    updateCampusSettings({ ...currentSettings, reserveResponsiblePeople });
   };
 
   const saveReservation = (
@@ -1620,6 +1719,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
             const candidates = carts
             .filter((cart) => cart.reserveCapacity > 0 || cart.reservedUnits.length > 0)
             .flatMap((cart) => cart.reservedUnits.filter((unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit)))
+            .filter((unit) => !carts.some((cart) => cart.reserveAssignments?.[unit]))
             .filter((unit) => !reservations.some((item) => item.kind === "Reserva" && item.id !== id && item.reservedChromebooks?.includes(unit)))
             .reverse();
             const reserved = candidates.filter((unit) =>
@@ -1628,7 +1728,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
             const fallback = candidates.filter((unit) => !reserved.includes(unit));
             return [...reserved, ...fallback].slice(0, data.quantity);
           })()
-        : data.reservedChromebooks;
+        : data.reservedChromebooks?.filter(
+            (unit) => !carts.some((cart) => cart.reserveAssignments?.[unit]),
+          );
     if (data.kind === "Reserva" && (!assignedReserveUnits || assignedReserveUnits.length < data.quantity)) return false;
     if (isCartTransitionConflict(data, movementSettings.allowCartATransitionScheduling)) return false;
     const selectedCart = carts.find((cart) => cart.name === data.cart);
@@ -1691,6 +1793,13 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         return {
           ...cart,
           unavailableUnits,
+          unavailableUnitReasons: unavailableUnits.includes(unit)
+            ? cart.unavailableUnitReasons
+            : Object.fromEntries(
+                Object.entries(cart.unavailableUnitReasons ?? {}).filter(
+                  ([unavailableUnit]) => unavailableUnit !== unit,
+                ),
+              ),
           reservedUnits: unavailableUnits.includes(unit)
             ? cart.reservedUnits.filter((item) => item !== unit)
             : cart.reservedUnits,
@@ -1705,6 +1814,48 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       }),
     );
   };
+  const setCartUnitUnavailableReason = (
+    cartId: string,
+    unit: string,
+    reason: string,
+  ) => {
+    persistCarts(
+      carts.map((cart) => {
+        if (cart.id !== cartId) return cart;
+        const unavailableUnitReasons = { ...(cart.unavailableUnitReasons ?? {}) };
+        const normalizedReason = reason.trim().slice(0, 500);
+        if (normalizedReason) unavailableUnitReasons[unit] = normalizedReason;
+        else delete unavailableUnitReasons[unit];
+        return { ...cart, unavailableUnitReasons };
+      }),
+    );
+  };
+  const updateReserveUnitAssignments = (
+    units: string[],
+    assignment: ReserveUnitAssignment | null,
+  ) => {
+    const selectedUnits = new Set(units);
+    if (selectedUnits.size === 0) return;
+    persistCarts(
+      carts.map((cart) => {
+        const assignedUnits = new Set(
+          units.filter(
+            (unit) =>
+              selectedUnits.has(unit) &&
+              (cart.reservedUnits.includes(unit) ||
+                cart.reserveAssignments?.[unit] !== undefined),
+          ),
+        );
+        if (assignedUnits.size === 0) return cart;
+        const reserveAssignments = { ...(cart.reserveAssignments ?? {}) };
+        for (const unit of assignedUnits) {
+          if (assignment) reserveAssignments[unit] = assignment;
+          else delete reserveAssignments[unit];
+        }
+        return { ...cart, reserveAssignments };
+      }),
+    );
+  };
   const deleteCartUnit = (cartId: string, unit: string) => {
     const targetCart = carts.find((cart) => cart.id === cartId);
     if (!targetCart || (targetCart.deletedUnits ?? []).includes(unit)) return false;
@@ -1715,7 +1866,17 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
               ...cart,
               deletedUnits: [...(cart.deletedUnits ?? []), unit],
               unavailableUnits: cart.unavailableUnits.filter((item) => item !== unit),
+              unavailableUnitReasons: Object.fromEntries(
+                Object.entries(cart.unavailableUnitReasons ?? {}).filter(
+                  ([unavailableUnit]) => unavailableUnit !== unit,
+                ),
+              ),
               reservedUnits: cart.reservedUnits.filter((item) => item !== unit),
+              reserveAssignments: Object.fromEntries(
+                Object.entries(cart.reserveAssignments ?? {}).filter(
+                  ([assignedUnit]) => assignedUnit !== unit,
+                ),
+              ),
               available: Math.max(
                 0,
                 cart.total -
@@ -2010,7 +2171,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
 
   const reserveAvailable = useMemo(
     () =>
-      carts.reduce((total, cart) => total + cart.reservedUnits.length, 0) -
+      carts.reduce(
+        (total, cart) =>
+          total + cart.reservedUnits.filter((unit) => !cart.reserveAssignments?.[unit]).length,
+        0,
+      ) -
       reservations
         .filter((item) => item.kind === "Reserva")
         .reduce((total, item) => total + item.quantity, 0),
@@ -2059,6 +2224,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         updateMovementSettings,
         campusSettings,
         updateCampusSettings,
+        rememberReserveResponsiblePerson,
         reservations,
         reservationsSyncError,
         operationalStateSyncError,
@@ -2075,6 +2241,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         deleteCart,
         toggleCartUnavailable,
         toggleCartUnitUnavailable,
+        setCartUnitUnavailableReason,
+        updateReserveUnitAssignments,
         deleteCartUnit,
         toggleCartUnitReserved,
         restoreReservedUnits,

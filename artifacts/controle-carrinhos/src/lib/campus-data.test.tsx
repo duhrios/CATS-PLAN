@@ -152,6 +152,88 @@ describe('Campus data core logic', () => {
     expect(storedCart.total).toBe(61);
   });
 
+  it("keeps manually assigned reserve Chromebooks out of teachers' available stock until cleared", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const availableBeforeAssignment = result.current.reserveAvailable;
+    const cart = result.current.carts.find((item) => item.code === "B");
+    const units = cart?.reservedUnits.slice(0, 2) ?? [];
+    const unit = units[0];
+    expect(unit).toBeDefined();
+    expect(units).toHaveLength(2);
+
+    act(() => {
+      result.current.updateReserveUnitAssignments(
+        units,
+        { teacher: "Ana Souza", date: "2026-10-12" },
+      );
+    });
+
+    expect(result.current.reserveAvailable).toBe(availableBeforeAssignment - 2);
+    expect(
+      result.current.carts.find((item) => item.code === "B")
+        ?.reserveAssignments?.[unit!],
+    ).toEqual({ teacher: "Ana Souza", date: "2026-10-12" });
+    const storedCart = JSON.parse(
+      window.localStorage.getItem("controle-carrinhos-carts") ?? "[]",
+    ).find((item: { code: string }) => item.code === "B");
+    expect(storedCart.reserveAssignments[unit!]).toEqual({
+      teacher: "Ana Souza",
+      date: "2026-10-12",
+    });
+    expect(result.current.saveReservation({
+      teacher: "Outro professor",
+      segment: "Fundamental 1",
+      subject: "Reserva",
+      className: "3º ano A",
+      room: "Sala 12",
+      period: "Manhã",
+      date: "2026-10-12",
+      start: "08:00",
+      end: "08:45",
+      cart: "Reservas",
+      kind: "Reserva",
+      quantity: 1,
+      reservedChromebooks: [unit!],
+    })).toBe(false);
+
+    act(() => {
+      result.current.updateReserveUnitAssignments(units, null);
+    });
+    expect(result.current.reserveAvailable).toBe(availableBeforeAssignment);
+    for (const assignedUnit of units) {
+      expect(
+        result.current.carts.find((item) => item.code === "B")
+          ?.reserveAssignments?.[assignedUnit],
+      ).toBeUndefined();
+    }
+  });
+
+  it("remembers reserve borrowers by normalized name for future suggestions", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+
+    act(() => {
+      result.current.rememberReserveResponsiblePerson(
+        "  Mauricio   Silva ",
+        "Funcionário/Autorizado",
+      );
+      result.current.rememberReserveResponsiblePerson(
+        "Mauricio Silva",
+        "Funcionário/Autorizado",
+      );
+    });
+
+    expect(result.current.campusSettings.reserveResponsiblePeople).toEqual([
+      { name: "Mauricio Silva", personType: "Funcionário/Autorizado" },
+    ]);
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("controle-carrinhos-campus-settings") ?? "{}",
+      ).reserveResponsiblePeople,
+    ).toEqual([
+      { name: "Mauricio Silva", personType: "Funcionário/Autorizado" },
+    ]);
+  });
+
   it('creates, updates and deletes reservations while preserving overlap validation', () => {
     const { result } = renderHook(() => useCampusData(), { wrapper     });
     addTestCart(result);
@@ -334,17 +416,40 @@ describe('Campus data core logic', () => {
     expect(result.current.wifiPoints).toHaveLength(0);
   });
 
-  it('allows teachers to cancel future classes and classes within ten minutes of starting only', () => {
+  it("persists a deleted Wi-Fi point without restoring it from local storage", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    let pointId = "";
+    act(() => {
+      pointId = result.current.addWifiPoint({
+        name: "Ponto de teste",
+        point: "AP-TEST",
+        type: "Ponto fixo",
+        location: "Sala de teste",
+        assignedRoom: "Sala de teste",
+        status: "Disponível",
+      });
+    });
+
+    act(() => result.current.deleteWifiPoint(pointId));
+
+    expect(result.current.wifiPoints.some((point) => point.id === pointId)).toBe(false);
+    expect(JSON.parse(
+      window.localStorage.getItem("controle-carrinhos-wifi-points") ?? "[]",
+    )).toEqual([]);
+  });
+
+  it('allows teachers to cancel only at least 24 hours before the class', () => {
     const reservation = {
       date: '2026-09-25',
       start: '07:00',
       end: '07:45',
     };
 
-    expect(canCancelReservation(reservation, new Date('2026-09-24T23:59:00'))).toBe(true);
-    expect(canCancelReservation(reservation, new Date('2026-09-25T07:10:00'))).toBe(true);
-    expect(canCancelReservation(reservation, new Date('2026-09-25T07:10:01'))).toBe(false);
-    expect(canCancelReservation(reservation, new Date('2026-09-25T08:00:00'))).toBe(false);
+    expect(canCancelReservation(reservation, new Date('2026-09-24T06:59:59-03:00'))).toBe(true);
+    expect(canCancelReservation(reservation, new Date('2026-09-24T07:00:00-03:00'))).toBe(true);
+    expect(canCancelReservation(reservation, new Date('2026-09-24T07:00:01-03:00'))).toBe(false);
+    expect(canCancelReservation(reservation, new Date('2026-09-25T06:00:00-03:00'))).toBe(false);
+    expect(canCancelReservation(reservation, new Date('2026-09-25T08:00:00-03:00'))).toBe(false);
   });
 
   it('automatically assigns available units to a reserve request', () => {
@@ -390,6 +495,35 @@ describe('Campus data core logic', () => {
     act(() => result.current.toggleCartUnitReserved('a', 'A1'));
     expect(result.current.carts.find((cart) => cart.id === 'a')?.reservedUnits).toContain('A1');
     expect(result.current.reserveAvailable).toBe(20);
+  });
+
+  it("persists an observation for an unavailable Chromebook and clears it when restored", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+
+    act(() => result.current.toggleCartUnitUnavailable("b", "B7"));
+    act(() =>
+      result.current.setCartUnitUnavailableReason(
+        "b",
+        "B7",
+        "Tela quebrada",
+      ),
+    );
+
+    expect(
+      result.current.carts.find((cart) => cart.id === "b")
+        ?.unavailableUnitReasons?.B7,
+    ).toBe("Tela quebrada");
+    const persistedCart = JSON.parse(
+      window.localStorage.getItem("controle-carrinhos-carts") ?? "[]",
+    ).find((cart: { id: string }) => cart.id === "b");
+    expect(persistedCart.unavailableUnitReasons.B7).toBe("Tela quebrada");
+
+    act(() => result.current.toggleCartUnitUnavailable("b", "B7"));
+
+    expect(
+      result.current.carts.find((cart) => cart.id === "b")
+        ?.unavailableUnitReasons?.B7,
+    ).toBeUndefined();
   });
 
   it('restores all or selected reserved units to their original carts', () => {

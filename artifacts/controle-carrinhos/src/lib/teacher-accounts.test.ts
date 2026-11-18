@@ -35,6 +35,7 @@ describe("teacher account API client", () => {
         segment: "Fundamental 2",
         subject: "Ciências",
         className: "7º ano A",
+        additionalSegments: ["Ensino Médio"],
         mustSetPassword: false,
       },
     ]), { status: 200 })));
@@ -47,6 +48,7 @@ describe("teacher account API client", () => {
         segment: "Fundamental 2",
         subject: "Ciências",
         className: "7º ano A",
+        additionalSegments: ["Ensino Médio"],
         mustSetPassword: false,
       },
     ]);

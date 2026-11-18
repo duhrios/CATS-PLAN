@@ -17,7 +17,12 @@ const parseProfile = (value: unknown): SavedTeacherProfile => {
     !("subject" in value) ||
     typeof value.subject !== "string" ||
     !("className" in value) ||
-    typeof value.className !== "string"
+    typeof value.className !== "string" ||
+    ("additionalSegments" in value &&
+      (!Array.isArray(value.additionalSegments) ||
+        !value.additionalSegments.every((segment) =>
+          segments.includes(segment as Segment),
+        )))
   ) {
     throw new Error("O servidor retornou um perfil docente inválido.");
   }
@@ -27,6 +32,9 @@ const parseProfile = (value: unknown): SavedTeacherProfile => {
     segment: value.segment as Segment,
     subject: value.subject,
     className: value.className,
+    ...("additionalSegments" in value
+      ? { additionalSegments: value.additionalSegments as Segment[] }
+      : {}),
   };
 };
 

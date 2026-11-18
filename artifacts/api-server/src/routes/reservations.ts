@@ -1,10 +1,34 @@
 import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
-import { cartsTable, reservationsTable, usersTable } from "@workspace/db/schema";
+import {
+  campusSettingsTable,
+  cartsTable,
+  reservationsTable,
+  usersTable,
+} from "@workspace/db/schema";
 import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
+import { isReservationCancellationAllowed } from "../lib/reservation-rules";
+import { getRoomDirectory } from "../lib/room-directory";
+import {
+  teacherCanReserveRoom,
+  type TeacherRoomProfile,
+  type TeacherRoomSelection,
+} from "../lib/teacher-room-access";
+import { availableReserveUnitsFromState } from "./reserve-inventory";
 
 const router: IRouter = Router();
+const teacherProfileSettingKey = "teacher-profiles-v1";
+const teacherSegments = [
+  "Educação Infantil",
+  "Fundamental 1",
+  "Fundamental 2",
+  "Ensino Médio",
+  "Contraturno",
+] as const;
+type TeacherSegment = (typeof teacherSegments)[number];
+const isTeacherSegment = (value: unknown): value is TeacherSegment =>
+  typeof value === "string" && teacherSegments.includes(value as TeacherSegment);
 
 const requiredText = (value: unknown, field: string) => {
   if (typeof value !== "string" || !value.trim()) {
@@ -137,6 +161,72 @@ const saveReservation = async (
     if (!Number.isInteger(cartId)) throw new Error("Carrinho inválido.");
     if (startTime >= endTime) throw new Error("O horário inicial deve ser anterior ao final.");
 
+    if (session?.role === "user" && kind === "Aula") {
+      const [profileSetting] = await db
+        .select({ value: campusSettingsTable.value })
+        .from(campusSettingsTable)
+        .where(eq(campusSettingsTable.key, teacherProfileSettingKey))
+        .limit(1);
+      if (!profileSetting) {
+        return res.status(403).json({
+          error: "Complete seu perfil docente antes de reservar uma sala.",
+        });
+      }
+
+      let profileMap: unknown;
+      try {
+        profileMap = JSON.parse(profileSetting.value);
+      } catch {
+        return res.status(500).json({ error: "Os perfis docentes salvos estão inválidos." });
+      }
+      if (!profileMap || typeof profileMap !== "object" || Array.isArray(profileMap)) {
+        return res.status(500).json({ error: "Os perfis docentes salvos estão inválidos." });
+      }
+      const rawProfile = (profileMap as Record<string, unknown>)[String(session.accountId)];
+      if (!rawProfile || typeof rawProfile !== "object" || Array.isArray(rawProfile)) {
+        return res.status(403).json({
+          error: "Complete seu perfil docente antes de reservar uma sala.",
+        });
+      }
+      const profileRecord = rawProfile as Record<string, unknown>;
+      const profileSegment = profileRecord.segment;
+      const additionalSegments = profileRecord.additionalSegments ?? [];
+      if (
+        !isTeacherSegment(profileSegment) ||
+        typeof profileRecord.subject !== "string" ||
+        typeof profileRecord.className !== "string" ||
+        !Array.isArray(additionalSegments) ||
+        !additionalSegments.every(isTeacherSegment)
+      ) {
+        return res.status(500).json({ error: "O perfil docente salvo está inválido." });
+      }
+      const profile: TeacherRoomProfile = {
+        segment: profileSegment,
+        className: profileRecord.className,
+        additionalSegments,
+      };
+      const segment = requiredText(body.segment, "Segmento");
+      const period = requiredText(body.period, "Período");
+      if (
+        !isTeacherSegment(segment) ||
+        (period !== "Manhã" && period !== "Tarde")
+      ) {
+        return res.status(400).json({ error: "Informe um segmento e período válidos." });
+      }
+      const selection: TeacherRoomSelection = {
+        segment,
+        className: requiredText(body.className, "Turma"),
+        room: requiredText(body.room, "Sala"),
+        period,
+      };
+      const { rooms } = await getRoomDirectory();
+      if (!teacherCanReserveRoom(profile, rooms, selection)) {
+        return res.status(403).json({
+          error: "A turma ou sala não está cadastrada para seu perfil, segmento e horário.",
+        });
+      }
+    }
+
     const [cart] = await db.select().from(cartsTable).where(eq(cartsTable.id, cartId)).limit(1);
     if (!cart || (kind === "Aula" && cart.unavailable)) {
       return res.status(409).json({ error: "Carrinho indisponível." });
@@ -159,6 +249,47 @@ const saveReservation = async (
         throw new Error("Já existe um agendamento para este carrinho nesse intervalo.");
       }
 
+      const quantity =
+        Number.isInteger(body.quantity) && Number(body.quantity) > 0
+          ? Number(body.quantity)
+          : 1;
+      if (kind === "Reserva") {
+        const [operationalState] = await tx
+          .select({ value: campusSettingsTable.value })
+          .from(campusSettingsTable)
+          .where(eq(campusSettingsTable.key, "operational-state-v1"))
+          .for("update")
+          .limit(1);
+        let state: unknown = null;
+        if (operationalState) {
+          try {
+            state = JSON.parse(operationalState.value);
+          } catch {
+            throw new Error("O estoque operacional salvo está inválido.");
+          }
+        }
+        const availableUnits = availableReserveUnitsFromState(state);
+        const otherReservations = await tx
+          .select({
+            id: reservationsTable.id,
+            quantity: reservationsTable.quantity,
+          })
+          .from(reservationsTable)
+          .where(and(
+            eq(reservationsTable.kind, "Reserva"),
+            ...(reservationId ? [ne(reservationsTable.id, reservationId)] : []),
+          ));
+        const requestedUnits = otherReservations.reduce(
+          (total, reservation) => total + reservation.quantity,
+          quantity,
+        );
+        if (requestedUnits > availableUnits.length) {
+          throw new Error(
+            `Há somente ${Math.max(0, availableUnits.length - requestedUnits + quantity)} Chromebook(s) disponível(is) para reserva.`,
+          );
+        }
+      }
+
       const values = {
         ...(session?.role === "user"
           ? { teacherId: session.accountId }
@@ -176,7 +307,7 @@ const saveReservation = async (
         endTime,
         cartId,
         kind,
-        quantity: Number.isInteger(body.quantity) && Number(body.quantity) > 0 ? Number(body.quantity) : 1,
+        quantity,
       };
       const [reservation] = reservationId
         ? await tx.update(reservationsTable)
@@ -264,13 +395,27 @@ router.delete("/reservations/:id", requireSameOrigin, requireSession, async (req
   const session = getAuthSession(req);
   if (session?.role === "user") {
     const [reservation] = await db
-      .select({ teacherId: reservationsTable.teacherId })
+      .select({
+        teacherId: reservationsTable.teacherId,
+        scheduledDate: reservationsTable.scheduledDate,
+        startTime: reservationsTable.startTime,
+      })
       .from(reservationsTable)
       .where(eq(reservationsTable.id, reservationId))
       .limit(1);
     if (!reservation) return res.status(404).json({ error: "Agendamento não encontrado." });
     if (!session.accountId || reservation.teacherId !== session.accountId) {
       return res.status(403).json({ error: "Você só pode remover seus próprios agendamentos." });
+    }
+    if (
+      !isReservationCancellationAllowed(
+        reservation.scheduledDate,
+        reservation.startTime,
+      )
+    ) {
+      return res.status(409).json({
+        error: "O cancelamento deve ser feito com pelo menos 24 horas de antecedência. No dia do agendamento, procure o TI.",
+      });
     }
   }
   const [deleted] = await db

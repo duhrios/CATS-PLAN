@@ -1708,7 +1708,7 @@ export function ReservationsPage({
                                           Cancelar agendamento
                                         </Button>
                                       </div>
-                                      {!canCancelReservation(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Cancelamento encerrado: permitido até 10 minutos após o início.</span>}
+                                      {!canCancelReservation(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Cancelamento disponível até 24 horas antes. Depois desse prazo, inclusive no dia, procure o TI.</span>}
                                     </div>
                                   </div>
                                 </td>
@@ -1748,6 +1748,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
     deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
+    setCartUnitUnavailableReason,
     deleteCartUnit,
     toggleCartUnitReserved,
     restoreReservedUnits,
@@ -1766,6 +1767,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [unitSelectionMode, setUnitSelectionMode] = useState<
     "unavailable" | "reserved" | "deleted"
   >("unavailable");
+  const [unavailableObservationUnit, setUnavailableObservationUnit] =
+    useState<{ cartId: string; unit: string } | null>(null);
+  const [unavailableObservationDraft, setUnavailableObservationDraft] = useState("");
   const filtered = carts.filter(
     (cart) =>
       (filter === "Todos" || filter === "Reservas"
@@ -1832,6 +1836,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
       <SectionCard
         title="Inventário operacional"
         eyebrow="Cada Chromebook é identificado individualmente: A1, A2, B1..."
+        defaultExpanded
         action={
           <div className="flex items-center gap-2">
             <select
@@ -1966,7 +1971,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         <button
                           type="button"
                           disabled={readOnly}
-                          onClick={() => setUnitSelectionMode("unavailable")}
+                          onClick={() => {
+                            setUnitSelectionMode("unavailable");
+                          }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
                             unitSelectionMode === "unavailable"
@@ -1979,7 +1986,10 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         <button
                           type="button"
                           disabled={readOnly}
-                          onClick={() => setUnitSelectionMode("reserved")}
+                          onClick={() => {
+                            setUnitSelectionMode("reserved");
+                            setUnavailableObservationUnit(null);
+                          }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
                             unitSelectionMode === "reserved"
@@ -1992,7 +2002,10 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         <button
                           type="button"
                           disabled={readOnly}
-                          onClick={() => setUnitSelectionMode("deleted")}
+                          onClick={() => {
+                            setUnitSelectionMode("deleted");
+                            setUnavailableObservationUnit(null);
+                          }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
                             unitSelectionMode === "deleted"
@@ -2026,6 +2039,8 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           cart.unavailable ||
                           cart.unavailableUnits.includes(unit);
                         const reserved = cart.reservedUnits.includes(unit);
+                        const observation =
+                          cart.unavailableUnitReasons?.[unit] ?? "";
                         return (
                           <button
                             type="button"
@@ -2041,7 +2056,14 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                                   toggleCartUnitReserved(cart.id, unit);
                                 }
                               } else {
-                                toggleCartUnitUnavailable(cart.id, unit);
+                                if (!unavailable) {
+                                  toggleCartUnitUnavailable(cart.id, unit);
+                                }
+                                setUnavailableObservationUnit({
+                                  cartId: cart.id,
+                                  unit,
+                                });
+                                setUnavailableObservationDraft(observation);
                               }
                             }}
                             className={cx(
@@ -2052,7 +2074,8 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                                   ? "border-[hsl(var(--primary)/.55)] bg-[hsl(var(--primary)/.08)] text-[hsl(var(--primary))] line-through"
                                 : "border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/.6)]",
                             )}
-                            aria-label={`${unit}: ${unitSelectionMode === "deleted" ? "excluir unidade" : unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "marcar disponível" : "marcar indisponível"}`}
+                            title={observation ? `Motivo: ${observation}` : undefined}
+                            aria-label={`${unit}: ${unitSelectionMode === "deleted" ? "excluir unidade" : unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "editar observação de indisponibilidade" : "marcar indisponível"}`}
                             data-testid={`button-unit-${unit}`}
                           >
                             {unit}
@@ -2060,6 +2083,76 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         );
                       })}
                     </div>
+                    {!readOnly &&
+                      unavailableObservationUnit?.cartId === cart.id &&
+                      units.includes(unavailableObservationUnit.unit) && (
+                      <div
+                        className="mt-4 rounded-xl border border-[hsl(var(--destructive)/.25)] bg-[hsl(var(--destructive)/.05)] p-4"
+                        data-testid={`unit-observation-panel-${unavailableObservationUnit.unit}`}
+                      >
+                        <label
+                          htmlFor={`unit-observation-${unavailableObservationUnit.unit}`}
+                          className="block text-xs font-bold text-[hsl(var(--foreground))]"
+                        >
+                          Observação · {unavailableObservationUnit.unit}
+                        </label>
+                        <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                          Informe por que este Chromebook está indisponível.
+                        </p>
+                        <textarea
+                          id={`unit-observation-${unavailableObservationUnit.unit}`}
+                          aria-label={`Observação do Chromebook ${unavailableObservationUnit.unit}`}
+                          maxLength={500}
+                          rows={3}
+                          value={unavailableObservationDraft}
+                          onChange={(event) =>
+                            setUnavailableObservationDraft(event.target.value)
+                          }
+                          placeholder="Ex.: tela quebrada, carregador ausente ou em manutenção."
+                          className={`${inputClass} mt-2 resize-y`}
+                          data-testid={`input-unit-observation-${unavailableObservationUnit.unit}`}
+                        />
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                            {unavailableObservationDraft.length}/500 caracteres
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            {cart.unavailableUnits.includes(
+                              unavailableObservationUnit.unit,
+                            ) && !cart.unavailable && (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  toggleCartUnitUnavailable(
+                                    cart.id,
+                                    unavailableObservationUnit.unit,
+                                  );
+                                  setUnavailableObservationUnit(null);
+                                  setUnavailableObservationDraft("");
+                                }}
+                                data-testid={`button-restore-unit-${unavailableObservationUnit.unit}`}
+                              >
+                                Marcar disponível
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setCartUnitUnavailableReason(
+                                  cart.id,
+                                  unavailableObservationUnit.unit,
+                                  unavailableObservationDraft,
+                                );
+                              }}
+                              data-testid={`button-save-unit-observation-${unavailableObservationUnit.unit}`}
+                            >
+                              Salvar observação
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                      )}
                     {activeTotal > 12 && (
                       <button
                         type="button"

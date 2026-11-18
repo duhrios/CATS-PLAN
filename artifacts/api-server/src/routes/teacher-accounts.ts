@@ -16,7 +16,12 @@ const router: IRouter = Router();
 const profileSettingKey = "teacher-profiles-v1";
 const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio", "Contraturno"] as const;
 type TeacherSegment = (typeof segments)[number];
-type TeacherProfileMetadata = { segment: TeacherSegment; subject: string; className: string };
+type TeacherProfileMetadata = {
+  segment: TeacherSegment;
+  subject: string;
+  className: string;
+  additionalSegments?: TeacherSegment[];
+};
 type TeacherProfileMetadataMap = Record<string, TeacherProfileMetadata>;
 
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ");
@@ -49,7 +54,14 @@ const getTeacherProfiles = async (): Promise<TeacherProfileMetadataMap> => {
       typeof profile !== "object" ||
       !isTeacherSegment(profile.segment) ||
       typeof profile.subject !== "string" ||
-      (profile.className !== undefined && typeof profile.className !== "string")
+      (profile.className !== undefined && typeof profile.className !== "string") ||
+      (profile.additionalSegments !== undefined &&
+        (!Array.isArray(profile.additionalSegments) ||
+          !profile.additionalSegments.every((segment: unknown) =>
+            (segment === "Fundamental 2" || segment === "Ensino Médio") &&
+            segment !== profile.segment,
+          ) ||
+          new Set(profile.additionalSegments).size !== profile.additionalSegments.length))
     ) {
       throw new Error("Um dos perfis docentes persistidos tem um formato inválido.");
     }
@@ -57,6 +69,9 @@ const getTeacherProfiles = async (): Promise<TeacherProfileMetadataMap> => {
       segment: profile.segment,
       subject: profile.subject,
       className: typeof profile.className === "string" ? profile.className : "",
+      ...(Array.isArray(profile.additionalSegments)
+        ? { additionalSegments: profile.additionalSegments }
+        : {}),
     };
   }
   return profiles;
@@ -76,6 +91,21 @@ const validateProfile = (value: unknown) => {
   if (!profile || !isTeacherSegment(profile.segment)) {
     return { error: "Selecione um segmento válido." } as const;
   }
+  const additionalSegments = profile.additionalSegments === undefined
+    ? []
+    : profile.additionalSegments;
+  if (
+    !Array.isArray(additionalSegments) ||
+    !additionalSegments.every((segment) =>
+      (segment === "Fundamental 2" || segment === "Ensino Médio") &&
+      segment !== profile.segment,
+    ) ||
+    new Set(additionalSegments).size !== additionalSegments.length
+  ) {
+    return {
+      error: "Os segmentos adicionais devem ser Fundamental 2 ou Ensino Médio, sem repetir o segmento principal.",
+    } as const;
+  }
   const subject = typeof profile.subject === "string" ? profile.subject.trim() : "";
   if (subject.length > 120 || (requiresSubject(profile.segment) && !subject)) {
     return { error: requiresSubject(profile.segment)
@@ -86,7 +116,16 @@ const validateProfile = (value: unknown) => {
   if (className.length > 120) {
     return { error: "A turma não pode exceder 120 caracteres." } as const;
   }
-  return { profile: { segment: profile.segment, subject, className } } as const;
+  return {
+    profile: {
+      segment: profile.segment,
+      subject,
+      className,
+      ...(additionalSegments.length > 0
+        ? { additionalSegments: additionalSegments as TeacherSegment[] }
+        : {}),
+    },
+  } as const;
 };
 
 const getAuthenticatedTeacher = async (req: Parameters<typeof requireSession>[0]) => {
@@ -241,6 +280,9 @@ router.get("/auth/teacher-accounts", requireAdmin, async (_req, res) => {
       segment: profiles[String(account.id)]?.segment ?? "Fundamental 2",
       subject: profiles[String(account.id)]?.subject ?? "",
       className: profiles[String(account.id)]?.className ?? "",
+      ...(profiles[String(account.id)]?.additionalSegments
+        ? { additionalSegments: profiles[String(account.id)].additionalSegments }
+        : {}),
       mustSetPassword: !account.passwordHash,
     })));
   } catch (error) {

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryPage, ReservationModal } from "./operations";
+import { CartsPage, HistoryPage, ReservationModal } from "./operations";
 
 const { useCampusData, loadTeacherAccounts } = vi.hoisted(() => ({
   useCampusData: vi.fn(),
@@ -172,5 +172,71 @@ describe("reservation activity history", () => {
       "20 de outubro de 2026",
     );
     expect(screen.getByTestId("history-results-count")).toHaveTextContent("2 atividades encontradas");
+  });
+});
+
+describe("cart unit availability observations", () => {
+  it("opens an observation when marking a Chromebook unavailable and saves the reason", () => {
+    const toggleCartUnitUnavailable = vi.fn();
+    const setCartUnitUnavailableReason = vi.fn();
+    useCampusData.mockReturnValue({
+      carts: [{
+        id: "cart-a",
+        name: "Carrinho A",
+        code: "A",
+        prefix: "A",
+        total: 2,
+        available: 2,
+        location: "Sala TI",
+        status: "Pronto",
+        lastCheck: "2026-01-01",
+        accent: "bg-blue-500",
+        unavailable: false,
+        unavailableUnits: [],
+        reservedUnits: [],
+        deletedUnits: [],
+        reserveCapacity: 0,
+      }],
+      addCart: vi.fn(),
+      addCartUnit: vi.fn(),
+      deleteCart: vi.fn(),
+      toggleCartUnavailable: vi.fn(),
+      toggleCartUnitUnavailable,
+      setCartUnitUnavailableReason,
+      deleteCartUnit: vi.fn(),
+      toggleCartUnitReserved: vi.fn(),
+      restoreReservedUnits: vi.fn(),
+      reservations: [],
+      reserveAvailable: 0,
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+      updateCampusSettings: vi.fn(),
+    });
+
+    render(<CartsPage />);
+    const inventoryToggle = screen.getByRole("button", {
+      name: "Minimizar Inventário operacional",
+    });
+    expect(inventoryToggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(inventoryToggle);
+    expect(screen.getByRole("button", {
+      name: "Maximizar Inventário operacional",
+    })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Maximizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByTestId("button-unit-A1"));
+
+    expect(toggleCartUnitUnavailable).toHaveBeenCalledWith("cart-a", "A1");
+    expect(screen.getByTestId("unit-observation-panel-A1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Observação do Chromebook A1"), {
+      target: { value: "  Tela quebrada  " },
+    });
+    fireEvent.click(screen.getByTestId("button-save-unit-observation-A1"));
+
+    expect(setCartUnitUnavailableReason).toHaveBeenCalledWith(
+      "cart-a",
+      "A1",
+      "  Tela quebrada  ",
+    );
   });
 });

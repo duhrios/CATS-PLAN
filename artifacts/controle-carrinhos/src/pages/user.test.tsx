@@ -78,10 +78,7 @@ describe("teacher dashboard cart availability", () => {
       "07:00–07:45 · Livre",
     );
     expect(screen.queryByText(/Chromebooks disponíveis/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("link-user-book-next-date")).toHaveAttribute(
-      "href",
-      `/usuario/reservas?nova=1&data=${nextBookableWeekday(new Date())}`,
-    );
+    expect(screen.queryByTestId("link-user-book-next-date")).not.toBeInTheDocument();
   });
 
   it("lets the teacher navigate days, reset the date, and filter availability by period", () => {
@@ -92,17 +89,13 @@ describe("teacher dashboard cart availability", () => {
       }),
     );
 
-    const bookingLink = screen.getByTestId("link-user-book-next-date");
     const initialDate = nextBookableWeekday(new Date());
     const nextDayDate = new Date(`${initialDate}T12:00:00`);
     nextDayDate.setDate(nextDayDate.getDate() + 1);
     const expectedNextDay = `${nextDayDate.getFullYear()}-${String(nextDayDate.getMonth() + 1).padStart(2, "0")}-${String(nextDayDate.getDate()).padStart(2, "0")}`;
 
     fireEvent.click(screen.getByTestId("button-availability-next-day"));
-    expect(bookingLink).toHaveAttribute(
-      "href",
-      `/usuario/reservas?nova=1&data=${expectedNextDay}`,
-    );
+    expect(screen.getByTestId("input-availability-date")).toHaveValue(expectedNextDay);
     expect(screen.getByRole("button", { name: /dia anterior/i })).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("select-availability-period"), {
@@ -113,17 +106,11 @@ describe("teacher dashboard cart availability", () => {
     expect(screen.getByText(/horários estão livres/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("button-availability-today"));
-    expect(bookingLink).toHaveAttribute(
-      "href",
-      `/usuario/reservas?nova=1&data=${initialDate}`,
-    );
+    expect(screen.getByTestId("input-availability-date")).toHaveValue(initialDate);
 
     fireEvent.change(screen.getByTestId("input-availability-date"), {
       target: { value: "2026-11-12" },
     });
-    expect(bookingLink).toHaveAttribute(
-      "href",
-      "/usuario/reservas?nova=1&data=2026-11-12",
-    );
+    expect(screen.getByTestId("input-availability-date")).toHaveValue("2026-11-12");
   });
 });

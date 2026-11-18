@@ -20,6 +20,7 @@ describe("teacher profile API", () => {
       segment: "Fundamental 1",
       subject: "",
       className: "2º ano A",
+      additionalSegments: ["Ensino Médio"],
     };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(profile), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

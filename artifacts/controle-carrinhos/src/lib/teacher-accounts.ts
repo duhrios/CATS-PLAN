@@ -10,6 +10,7 @@ export type TeacherAccessAccount = {
   segment: Segment;
   subject: string;
   className: string;
+  additionalSegments?: Segment[];
   mustSetPassword: boolean;
 };
 
@@ -42,6 +43,11 @@ const parseTeacherAccount = (value: unknown): TeacherAccessAccount => {
     typeof value.subject !== "string" ||
     !("className" in value) ||
     typeof value.className !== "string" ||
+    ("additionalSegments" in value &&
+      (!Array.isArray(value.additionalSegments) ||
+        !value.additionalSegments.every((segment) =>
+          segment === "Fundamental 2" || segment === "Ensino Médio",
+        ))) ||
     !("mustSetPassword" in value) ||
     typeof value.mustSetPassword !== "boolean"
   ) {
@@ -54,6 +60,11 @@ const parseTeacherAccount = (value: unknown): TeacherAccessAccount => {
     segment: value.segment,
     subject: value.subject,
     className: value.className,
+    ...("additionalSegments" in value &&
+      Array.isArray(value.additionalSegments) &&
+      value.additionalSegments.length > 0
+      ? { additionalSegments: value.additionalSegments }
+      : {}),
     mustSetPassword: value.mustSetPassword,
   };
 };

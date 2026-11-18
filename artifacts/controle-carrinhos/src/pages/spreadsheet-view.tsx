@@ -2,29 +2,41 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
+  Clock3,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   FileSpreadsheet,
+  Info,
   List,
   Table2,
   Eye,
+  Laptop,
   RotateCcw,
   GripVertical,
   Lightbulb,
   Pencil,
+  Save,
   Trash2,
+  X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent } from "react";
 import { Button, PageHeader, StatusPill } from "@/components/app-ui";
 import {
   type Cart,
   type CartMovement,
   type Reservation,
+  type ReserveResponsiblePerson,
+  type ReserveResponsiblePersonType,
+  type ReserveUnitAssignment,
+  type Segment,
+  type TeacherProfile,
+  defaultCampusSettings,
   getCartScheduleForDate,
   useCampusData,
 } from "@/lib/campus-data";
 import { type ClassRoomEntry, useRoomDirectory } from "@/lib/room-directory";
+import { type TeacherAccessAccount, loadTeacherAccounts } from "@/lib/teacher-accounts";
 import { getAuthenticatedSession } from "@/lib/auth-session";
 import {
   deleteSharedReservation,
@@ -50,10 +62,53 @@ import {
   prepareQuickAccessMove,
   type CompleteViewColumnKey,
 } from "@/lib/spreadsheet-view";
+import { loadTeacherProfile } from "@/lib/teacher-profile";
 import { loadTeacherSpreadsheetReservations } from "@/lib/teacher-spreadsheet";
 
-type SpreadsheetMode = "quick" | "complete";
+type SpreadsheetMode = "quick" | "complete" | "reserve";
 type PeriodFilter = "Todos" | "Manhã" | "Tarde";
+type TeacherBookingSlot = {
+  key: string;
+  date: string;
+  cart: string;
+  start: string;
+  end: string;
+  period: "Manhã" | "Tarde";
+  room: string;
+};
+const teacherClassKey = (entry: Pick<ClassRoomEntry, "segment" | "className">) =>
+  `${entry.segment}::${entry.className}`;
+const teacherProfileSegments = (profile: TeacherAccessAccount) =>
+  [...new Set([profile.segment, ...(profile.additionalSegments ?? [])])];
+const teacherProfileDefaultClass = (profile: TeacherAccessAccount) =>
+  profile.segment === "Contraturno"
+    ? "Contraturno"
+    : profile.segment === "Educação Infantil" || profile.segment === "Fundamental 1"
+      ? profile.className.trim()
+      : "";
+const roomsForTeacherProfileClass = (
+  profile: TeacherAccessAccount,
+  className: string,
+  period: "Manhã" | "Tarde",
+  classOptions: ClassRoomEntry[],
+) => {
+  const normalizedClassName = normalizeSuggestionText(className);
+  if (!normalizedClassName) return [];
+  const segments = teacherProfileSegments(profile);
+  const profileClass = teacherProfileDefaultClass(profile);
+  const primaryProfileClass =
+    (profile.segment === "Educação Infantil" || profile.segment === "Fundamental 1") &&
+    profileClass &&
+    normalizedClassName === normalizeSuggestionText(profileClass);
+  return [...new Set(classOptions
+    .filter((entry) =>
+      entry.period === period &&
+      normalizeSuggestionText(entry.className) === normalizedClassName &&
+      segments.includes(entry.segment) &&
+      (!primaryProfileClass || entry.segment === profile.segment),
+    )
+    .map((entry) => entry.room))];
+};
 
 const weekdayFormatter = new Intl.DateTimeFormat("pt-BR", {
   weekday: "long",
@@ -75,6 +130,148 @@ const completeColumnsStorageKey = "controle-carrinhos-complete-view-columns";
 const completeCartStorageKey = "controle-carrinhos-complete-view-cart";
 const spreadsheetModeStorageKey = "controle-carrinhos-view-mode";
 
+const normalizeSuggestionText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("pt-BR");
+
+function ResponsibleNameCombobox({
+  label,
+  value,
+  suggestions,
+  onChange,
+  onSelect,
+  placeholder,
+  className,
+  testId,
+  required = false,
+  disabled = false,
+  autoFocus = false,
+}: {
+  label: string;
+  value: string;
+  suggestions: string[];
+  onChange: (value: string) => void;
+  onSelect: (value: string) => void;
+  placeholder?: string;
+  className: string;
+  testId?: string;
+  required?: boolean;
+  disabled?: boolean;
+  autoFocus?: boolean;
+}) {
+  const listId = `responsible-suggestions-${useId()}`;
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const query = normalizeSuggestionText(value);
+  const queryWords = query.split(" ").filter(Boolean);
+  const filteredSuggestions = queryWords.length === 0
+    ? []
+    : suggestions.filter((name) => {
+        const normalizedName = normalizeSuggestionText(name);
+        const nameWords = normalizedName.split(" ");
+        const initials = nameWords.map((word) => word[0] ?? "").join("");
+        return (
+          queryWords.every((queryWord) =>
+            nameWords.some((word) => word.startsWith(queryWord)),
+          ) ||
+          (queryWords.length === 1 && initials.startsWith(query.replace(/\s/g, "")))
+        );
+      }).slice(0, 8);
+  const suggestionsVisible = isOpen && filteredSuggestions.length > 0;
+  const selectSuggestion = (name: string) => {
+    onSelect(name);
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  return (
+    <div className="relative min-w-0">
+      <input
+        role="combobox"
+        aria-label={label}
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        aria-expanded={suggestionsVisible}
+        aria-controls={listId}
+        aria-activedescendant={
+          suggestionsVisible && activeIndex >= 0
+            ? `${listId}-option-${activeIndex}`
+            : undefined
+        }
+        maxLength={120}
+        autoFocus={autoFocus}
+        required={required}
+        disabled={disabled}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setIsOpen(true);
+          setActiveIndex(-1);
+        }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        onKeyDown={(event) => {
+          if (!suggestionsVisible) {
+            if (event.key === "ArrowDown" && filteredSuggestions.length > 0) {
+              event.preventDefault();
+              setIsOpen(true);
+              setActiveIndex(0);
+            }
+            return;
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setActiveIndex((current) => (current + 1) % filteredSuggestions.length);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveIndex((current) =>
+              current <= 0 ? filteredSuggestions.length - 1 : current - 1,
+            );
+          } else if (event.key === "Enter" && activeIndex >= 0) {
+            event.preventDefault();
+            selectSuggestion(filteredSuggestions[activeIndex]);
+          } else if (event.key === "Escape") {
+            setIsOpen(false);
+            setActiveIndex(-1);
+          }
+        }}
+        className={className}
+        data-testid={testId}
+      />
+      {suggestionsVisible && (
+        <div
+          id={listId}
+          role="listbox"
+          aria-label={`Sugestões para ${label}`}
+          className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-[#c0ccda] bg-white py-1 shadow-lg"
+        >
+          {filteredSuggestions.map((name, index) => (
+            <div
+              key={name}
+              id={`${listId}-option-${index}`}
+              role="option"
+              aria-selected={activeIndex === index}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => selectSuggestion(name)}
+              className={`cursor-pointer px-3 py-2 text-sm text-[#173252] ${
+                activeIndex === index ? "bg-[#e8eff7]" : "hover:bg-[#f5f8fb]"
+              }`}
+            >
+              {name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatWeekLabel(dates: Date[]) {
   if (dates.length === 0) return "";
   return `${dateFormatter.format(dates[0])} – ${dateFormatter.format(dates.at(-1)!)}`;
@@ -90,7 +287,7 @@ function readSpreadsheetMode(readOnly: boolean): SpreadsheetMode {
   if (readOnly) return "quick";
   try {
     const savedMode = window.localStorage.getItem(spreadsheetModeStorageKey);
-    return savedMode === "complete" || savedMode === "quick"
+    return savedMode === "complete" || savedMode === "reserve" || savedMode === "quick"
       ? savedMode
       : "quick";
   } catch {
@@ -114,7 +311,10 @@ function QuickBookingForm({
   error,
   classOptions,
   roomOptions,
+  teacherSuggestions,
+  teacherSuggestionsError,
   onTeacherChange,
+  onTeacherSelect,
   onClassChange,
   onRoomChange,
   onSubmit,
@@ -131,7 +331,10 @@ function QuickBookingForm({
   error: string;
   classOptions: ClassRoomEntry[];
   roomOptions: string[];
+  teacherSuggestions: string[];
+  teacherSuggestionsError: string;
   onTeacherChange: (value: string) => void;
+  onTeacherSelect: (value: string) => void;
   onClassChange: (value: string) => void;
   onRoomChange: (value: string) => void;
   onSubmit: () => void;
@@ -147,7 +350,24 @@ function QuickBookingForm({
         onSubmit();
       }}
     >
-      <input autoFocus required maxLength={120} aria-label="Nome do professor" placeholder="Nome do professor" value={teacher} disabled={saving} onChange={(event) => onTeacherChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
+      <ResponsibleNameCombobox
+        label="Nome do professor"
+        placeholder="Nome do professor"
+        value={teacher}
+        suggestions={teacherSuggestions}
+        onChange={onTeacherChange}
+        onSelect={onTeacherSelect}
+        className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]"
+        testId="quick-book-teacher"
+        required
+        disabled={saving}
+        autoFocus
+      />
+      {teacherSuggestionsError && (
+        <p role="alert" className="text-[10px] text-red-700">
+          Não foi possível carregar as sugestões de professores: {teacherSuggestionsError}. A reserva manual continua disponível.
+        </p>
+      )}
       <input required maxLength={80} aria-label="Ano ou série" placeholder="Ano / série" list={`quick-class-options-${suffix}`} value={className} disabled={saving} onChange={(event) => onClassChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
       <datalist id={`quick-class-options-${suffix}`}>
         {[...new Set(classOptions.filter((entry) => entry.period === period).map((entry) => entry.className))].map((option) => <option key={option} value={option} />)}
@@ -182,6 +402,12 @@ function QuickAccess({
   periodFilter,
   readOnly,
   canDirectBook,
+  canTeacherBook,
+  currentTeacherName,
+  teacherProfiles,
+  teacherProfilesError,
+  teacherSegments,
+  teacherProfileClassName,
   onCreateReservation,
   onUpdateReservation,
   onDeleteReservation,
@@ -200,6 +426,12 @@ function QuickAccess({
   periodFilter: PeriodFilter;
   readOnly: boolean;
   canDirectBook: boolean;
+  canTeacherBook: boolean;
+  currentTeacherName: string;
+  teacherProfiles: TeacherAccessAccount[];
+  teacherProfilesError: string;
+  teacherSegments: Segment[];
+  teacherProfileClassName: string;
   onCreateReservation: (reservation: Omit<Reservation, "id" | "status">) => Promise<void>;
   onUpdateReservation: (reservation: Omit<Reservation, "id" | "status">, id: number) => Promise<void>;
   onDeleteReservation: (reservation: Reservation) => Promise<void>;
@@ -217,18 +449,184 @@ function QuickAccess({
   const [bookingTarget, setBookingTarget] = useState<string | null>(null);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [bookingTeacher, setBookingTeacher] = useState("");
+  const [bookingTeacherProfileId, setBookingTeacherProfileId] = useState<string | null>(null);
   const [bookingClass, setBookingClass] = useState("");
   const [bookingRoom, setBookingRoom] = useState("");
   const [bookingError, setBookingError] = useState("");
   const [bookingSaving, setBookingSaving] = useState(false);
+  const [teacherBookingSlots, setTeacherBookingSlots] = useState<TeacherBookingSlot[]>([]);
+  const [teacherBookingClass, setTeacherBookingClass] = useState("");
+  const [teacherBookingError, setTeacherBookingError] = useState("");
+  const [teacherBookingMessage, setTeacherBookingMessage] = useState("");
+  const [teacherBookingSaving, setTeacherBookingSaving] = useState(false);
+  const selectedBookingTeacherProfile = teacherProfiles.find(
+    (profile) => profile.id === bookingTeacherProfileId,
+  );
+  const bookingProfileSegments = selectedBookingTeacherProfile
+    ? teacherProfileSegments(selectedBookingTeacherProfile)
+    : [];
+  const bookingClassOptions = (period: "Manhã" | "Tarde") => {
+    if (!selectedBookingTeacherProfile) return classOptions;
+    const profileClass = teacherProfileDefaultClass(selectedBookingTeacherProfile);
+    return classOptions.filter((entry) =>
+      entry.period === period &&
+      bookingProfileSegments.includes(entry.segment) &&
+      (
+        !profileClass ||
+        entry.segment !== selectedBookingTeacherProfile.segment ||
+        normalizeSuggestionText(entry.className) === normalizeSuggestionText(profileClass)
+      ),
+    );
+  };
+  const bookingRoomOptions = (period: "Manhã" | "Tarde") => {
+    if (!selectedBookingTeacherProfile) return roomOptions;
+    const roomsForClass = roomsForTeacherProfileClass(
+      selectedBookingTeacherProfile,
+      bookingClass,
+      period,
+      classOptions,
+    );
+    if (roomsForClass.length > 0) return roomsForClass;
+    return [...new Set(classOptions
+      .filter((entry) =>
+        entry.period === period &&
+        bookingProfileSegments.includes(entry.segment),
+      )
+      .map((entry) => entry.room))];
+  };
+  const selectBookingTeacher = (name: string, period: "Manhã" | "Tarde") => {
+    const profile = teacherProfiles.find(
+      (entry) => normalizeSuggestionText(entry.name) === normalizeSuggestionText(name),
+    );
+    setBookingTeacher(name);
+    setBookingTeacherProfileId(profile?.id ?? null);
+    setBookingError("");
+    if (!profile) {
+      setBookingClass("");
+      setBookingRoom("");
+      return;
+    }
+    const defaultClass = teacherProfileDefaultClass(profile);
+    setBookingClass(defaultClass);
+    const rooms = roomsForTeacherProfileClass(profile, defaultClass, period, classOptions);
+    setBookingRoom(rooms.length === 1 ? rooms[0] : "");
+  };
+  const changeBookingTeacher = (name: string) => {
+    if (bookingTeacherProfileId) {
+      setBookingClass("");
+      setBookingRoom("");
+    }
+    setBookingTeacherProfileId(null);
+    setBookingTeacher(name);
+    setBookingError("");
+  };
+  const teacherClassOptions = useMemo(() => {
+    const options = classOptions.filter((entry) => {
+      if (!teacherSegments.includes(entry.segment) || entry.segment === "Contraturno") return false;
+      if (
+        (entry.segment === "Educação Infantil" || entry.segment === "Fundamental 1") &&
+        entry.segment === teacherSegments[0]
+      ) {
+        return Boolean(teacherProfileClassName) &&
+          entry.className.trim().toLocaleLowerCase("pt-BR") ===
+            teacherProfileClassName.trim().toLocaleLowerCase("pt-BR");
+      }
+      return true;
+    });
+    return [...new Map(options.map((entry) => [teacherClassKey(entry), entry])).values()]
+      .sort((first, second) =>
+        first.segment.localeCompare(second.segment, "pt-BR") ||
+        first.className.localeCompare(second.className, "pt-BR", { numeric: true }),
+      );
+  }, [classOptions, teacherProfileClassName, teacherSegments]);
+  const selectedTeacherClass = teacherClassOptions.find(
+    (entry) => teacherClassKey(entry) === teacherBookingClass,
+  );
+  const roomsForTeacherClassAndSlot = useCallback((
+    teacherClass: ClassRoomEntry | undefined,
+    slot: TeacherBookingSlot,
+  ) => teacherClass
+    ? [...new Set(classOptions
+        .filter((entry) =>
+          entry.segment === teacherClass.segment &&
+          entry.className === teacherClass.className &&
+          entry.period === slot.period &&
+          teacherSegments.includes(entry.segment),
+        )
+        .map((entry) => entry.room))]
+    : [], [classOptions, teacherSegments]);
+  useEffect(() => {
+    if (
+      !canTeacherBook ||
+      teacherBookingClass ||
+      (teacherSegments[0] !== "Educação Infantil" &&
+        teacherSegments[0] !== "Fundamental 1") ||
+      !teacherProfileClassName
+    ) {
+      return;
+    }
+    const profileClass = teacherClassOptions.find((entry) =>
+      entry.segment === teacherSegments[0] &&
+      entry.className.trim().toLocaleLowerCase("pt-BR") ===
+        teacherProfileClassName.trim().toLocaleLowerCase("pt-BR"),
+    );
+    if (profileClass) {
+      setTeacherBookingClass(teacherClassKey(profileClass));
+      setTeacherBookingSlots((slots) => slots.map((slot) => {
+        const rooms = roomsForTeacherClassAndSlot(profileClass, slot);
+        return { ...slot, room: rooms.length === 1 ? rooms[0] : "" };
+      }));
+    }
+  }, [
+    canTeacherBook,
+    roomsForTeacherClassAndSlot,
+    teacherBookingClass,
+    teacherClassOptions,
+    teacherProfileClassName,
+    teacherSegments,
+  ]);
+  const roomOptionsForTeacherSlot = (slot: TeacherBookingSlot) =>
+    roomsForTeacherClassAndSlot(selectedTeacherClass, slot);
+  const setTeacherBookingClassSelection = (key: string) => {
+    setTeacherBookingClass(key);
+    const selected = teacherClassOptions.find((entry) => teacherClassKey(entry) === key);
+    setTeacherBookingSlots((slots) => slots.map((slot) => {
+      const rooms = roomsForTeacherClassAndSlot(selected, slot);
+      return { ...slot, room: rooms.length === 1 ? rooms[0] : "" };
+    }));
+    setTeacherBookingError("");
+  };
   const [deletingReservationIds, setDeletingReservationIds] = useState<number[]>([]);
   const [deleteError, setDeleteError] = useState("");
   const topWeekScrollRef = useRef<HTMLDivElement>(null);
   const weekScrollRef = useRef<HTMLDivElement>(null);
-  const syncWeekScroll = (source: "top" | "bottom", scrollLeft: number) => {
-    const target = source === "top" ? weekScrollRef.current : topWeekScrollRef.current;
-    if (target && target.scrollLeft !== scrollLeft) target.scrollLeft = scrollLeft;
+  const pendingWeekScrollSourceRef = useRef<"top" | "bottom" | null>(null);
+  const weekScrollFrameRef = useRef<number | null>(null);
+  const syncWeekScroll = (source: "top" | "bottom") => {
+    pendingWeekScrollSourceRef.current = source;
+    if (weekScrollFrameRef.current !== null) return;
+    const requestFrame = window.requestAnimationFrame?.bind(window) ??
+      ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
+    weekScrollFrameRef.current = requestFrame(() => {
+      weekScrollFrameRef.current = null;
+      const pendingSource = pendingWeekScrollSourceRef.current;
+      pendingWeekScrollSourceRef.current = null;
+      if (!pendingSource) return;
+      const sourceElement = pendingSource === "top" ? topWeekScrollRef.current : weekScrollRef.current;
+      const target = pendingSource === "top" ? weekScrollRef.current : topWeekScrollRef.current;
+      if (sourceElement && target && target.scrollLeft !== sourceElement.scrollLeft) {
+        target.scrollLeft = sourceElement.scrollLeft;
+      }
+    });
   };
+  useEffect(() => () => {
+    if (weekScrollFrameRef.current === null) return;
+    if (window.cancelAnimationFrame) {
+      window.cancelAnimationFrame(weekScrollFrameRef.current);
+    } else {
+      window.clearTimeout(weekScrollFrameRef.current);
+    }
+  }, []);
   const createReservation = async (
     target: { date: string; cart: string; start: string; end: string; period: "Manhã" | "Tarde" },
   ) => {
@@ -247,10 +645,14 @@ function QuickAccess({
       setBookingError("Informe a sala.");
       return;
     }
-    const classEntry = classOptions.find((entry) =>
+    const matchingClassEntries = classOptions.filter((entry) =>
       entry.className.toLocaleLowerCase("pt-BR") === className.toLocaleLowerCase("pt-BR") &&
-      entry.period === target.period,
+      entry.period === target.period &&
+      (!selectedBookingTeacherProfile || bookingProfileSegments.includes(entry.segment)),
     );
+    const classEntry = matchingClassEntries.find(
+      (entry) => entry.segment === selectedBookingTeacherProfile?.segment,
+    ) ?? matchingClassEntries[0];
     setBookingSaving(true);
     setBookingError("");
     try {
@@ -287,6 +689,7 @@ function QuickAccess({
       setBookingTarget(null);
       setEditingReservation(null);
       setBookingTeacher("");
+      setBookingTeacherProfileId(null);
       setBookingClass("");
       setBookingRoom("");
     } catch (error) {
@@ -297,10 +700,77 @@ function QuickAccess({
       setBookingSaving(false);
     }
   };
+  const createTeacherReservations = async () => {
+    const className = teacherBookingClass.trim().replace(/\s+/g, " ");
+    if (!className) {
+      setTeacherBookingError("Informe a turma ou série para os horários selecionados.");
+      return;
+    }
+    if (!currentTeacherName.trim() || teacherBookingSlots.length === 0) {
+      setTeacherBookingError("Selecione ao menos um horário livre para reservar.");
+      return;
+    }
+    if (!selectedTeacherClass) {
+      setTeacherBookingError("Selecione uma turma cadastrada no seu perfil.");
+      return;
+    }
+    const bookings = teacherBookingSlots.map((slot) => ({
+      slot,
+      room: slot.room.trim(),
+      allowedRooms: roomOptionsForTeacherSlot(slot),
+    }));
+    if (bookings.some(({ room, allowedRooms }) => !room || !allowedRooms.includes(room))) {
+      setTeacherBookingError("Escolha, para cada horário, uma sala cadastrada pelo TI para sua turma e segmento.");
+      return;
+    }
+
+    setTeacherBookingSaving(true);
+    setTeacherBookingError("");
+    setTeacherBookingMessage("");
+    let completed = 0;
+    try {
+      for (const { slot, room } of bookings) {
+        await onCreateReservation({
+          teacher: currentTeacherName,
+          segment: selectedTeacherClass.segment,
+          subject: "Aula",
+          className: selectedTeacherClass.className,
+          room,
+          period: slot.period,
+          date: slot.date,
+          start: slot.start,
+          end: slot.end,
+          cart: slot.cart,
+          kind: "Aula",
+          quantity: 1,
+        });
+        completed += 1;
+      }
+      setTeacherBookingSlots([]);
+      setTeacherBookingClass("");
+      setTeacherBookingMessage(
+        `${completed} ${completed === 1 ? "horário reservado" : "horários reservados"} para ${currentTeacherName}.`,
+      );
+    } catch (error) {
+      setTeacherBookingError(
+        completed > 0
+          ? `${completed} horário(s) foram reservados; não foi possível concluir os demais. ${error instanceof Error ? error.message : ""}`.trim()
+          : error instanceof Error
+            ? error.message
+            : "Não foi possível reservar os horários selecionados.",
+      );
+      if (completed > 0) {
+        setTeacherBookingSlots((slots) => slots.slice(completed));
+      }
+    } finally {
+      setTeacherBookingSaving(false);
+    }
+  };
   const startEditingReservation = (reservation: Reservation) => {
     setBookingTarget(`${reservation.date}-${reservation.cart}-${reservation.period}-${reservation.start}-${reservation.end}`);
     setEditingReservation(reservation);
     setBookingTeacher(reservation.teacher);
+    setBookingTeacherProfileId(null);
     setBookingClass(reservation.className);
     setBookingRoom(reservation.room);
     setBookingError("");
@@ -488,6 +958,164 @@ function QuickAccess({
           {moveError || deleteError || moveMessage}
         </p>
       )}
+      {canTeacherBook && (teacherBookingError || teacherBookingMessage) && (
+        <p
+          role={teacherBookingError ? "alert" : "status"}
+          className={`mb-3 rounded-xl border px-4 py-3 text-sm ${
+            teacherBookingError
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-emerald-300 bg-emerald-50 text-emerald-800"
+          }`}
+        >
+          {teacherBookingError || teacherBookingMessage}
+        </p>
+      )}
+      {canTeacherBook && teacherBookingSlots.length > 0 && (
+        <section
+          aria-label="Reservar horários selecionados"
+          className="mb-4 overflow-hidden rounded-2xl border border-[#cbd8e6] bg-white shadow-sm"
+          data-testid="teacher-booking-panel"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5ebf2] bg-gradient-to-r from-[#f3f7fc] to-white px-4 py-4 sm:px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e2edf9] text-[#245b8f]">
+                <CalendarDays size={19} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-[#173252]">Reservar horários selecionados</h2>
+                <p className="mt-1 truncate text-xs text-[#5f6f82]">
+                  Professor: <strong className="font-semibold text-[#34445a]">{currentTeacherName}</strong>
+                </p>
+              </div>
+              <span className="hidden shrink-0 rounded-full border border-[#d5e2f0] bg-white px-2.5 py-1 text-xs font-semibold text-[#345779] sm:inline-flex">
+                {teacherBookingSlots.length} {teacherBookingSlots.length === 1 ? "horário" : "horários"}
+              </span>
+            </div>
+            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+              <span className="rounded-full border border-[#d5e2f0] bg-white px-2.5 py-1 text-xs font-semibold text-[#345779] sm:hidden">
+                {teacherBookingSlots.length} {teacherBookingSlots.length === 1 ? "horário" : "horários"}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setTeacherBookingSlots([]);
+                  setTeacherBookingError("");
+                  setTeacherBookingMessage("");
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#cbd8e6] bg-white px-3 py-2 text-xs font-semibold text-[#34445a] transition hover:border-[#9baec4] hover:bg-[#f5f8fb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#245b8f] focus-visible:ring-offset-2"
+              >
+                <X size={14} aria-hidden="true" />
+                Cancelar seleção
+              </button>
+            </div>
+          </div>
+          <div className="space-y-4 p-4 sm:p-5">
+            <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,0.85fr)] lg:items-end">
+              <label className="space-y-1.5 text-xs font-semibold text-[#34445a]">
+                Turma ou série
+                <select
+                  value={teacherBookingClass}
+                  onChange={(event) => setTeacherBookingClassSelection(event.target.value)}
+                  disabled={
+                    teacherClassOptions.length === 1 &&
+                    (teacherSegments[0] === "Educação Infantil" ||
+                      teacherSegments[0] === "Fundamental 1") &&
+                    Boolean(teacherProfileClassName)
+                  }
+                  className="h-11 w-full rounded-xl border border-[#cbd8e6] bg-white px-3 text-sm font-normal text-[#263950] shadow-sm outline-none transition focus:border-[#4b78a8] focus:ring-2 focus:ring-[#245b8f]/15 disabled:bg-[#f5f7fa]"
+                  data-testid="teacher-booking-class"
+                  required
+                >
+                  <option value="">Selecione sua turma</option>
+                  {teacherClassOptions.map((entry) => (
+                    <option key={teacherClassKey(entry)} value={teacherClassKey(entry)}>
+                      {entry.className} · {entry.segment}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex min-h-11 items-center gap-2 rounded-xl bg-[#f5f8fb] px-3 py-2 text-xs leading-5 text-[#5f6f82]">
+                <Info size={16} className="shrink-0 text-[#4c739c]" aria-hidden="true" />
+                <p>
+                  {teacherSegments.length > 1
+                    ? `Opções limitadas ao seu perfil: ${teacherSegments.join(" e ")}.`
+                    : `Opções limitadas ao seu perfil: ${teacherSegments[0] ?? "segmento cadastrado"}.`}
+                </p>
+              </div>
+            </div>
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              {teacherBookingSlots.map((slot, index) => {
+                const allowedRooms = roomOptionsForTeacherSlot(slot);
+                return (
+                  <div
+                    key={slot.key}
+                    className="grid gap-3 rounded-xl border border-[#e1e8f0] bg-[#fbfcfe] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(200px,0.65fr)] sm:items-center sm:p-3.5"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eaf1f8] text-[#345779]">
+                        <CalendarDays size={16} aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#263950]">
+                          {dateFormatter.format(new Date(`${slot.date}T12:00:00`))}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#5f6f82]">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock3 size={13} aria-hidden="true" />
+                            {slot.start}–{slot.end}
+                          </span>
+                          <span className="font-medium text-[#45617f]">{slot.cart} · {slot.period}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <label className="space-y-1.5 text-xs font-semibold text-[#34445a]" htmlFor={`teacher-booking-room-${index}`}>
+                      Sala cadastrada
+                      <select
+                        id={`teacher-booking-room-${index}`}
+                        value={slot.room}
+                        onChange={(event) => {
+                          setTeacherBookingSlots((current) => current.map((item) =>
+                            item.key === slot.key ? { ...item, room: event.target.value } : item,
+                          ));
+                          setTeacherBookingError("");
+                        }}
+                        className="h-10 w-full rounded-lg border border-[#cbd8e6] bg-white px-3 text-sm font-normal text-[#263950] outline-none transition focus:border-[#4b78a8] focus:ring-2 focus:ring-[#245b8f]/15 disabled:bg-[#f5f7fa]"
+                        required
+                        data-testid={`teacher-booking-room-${index}`}
+                        disabled={!selectedTeacherClass || allowedRooms.length === 0}
+                      >
+                        <option value="">
+                          {allowedRooms.length ? "Selecione a sala" : "Sem sala cadastrada neste período"}
+                        </option>
+                        {allowedRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-[#e5ebf2] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="flex items-start gap-2 text-xs leading-5 text-[#5f6f82]">
+                <Info size={15} className="mt-0.5 shrink-0 text-[#7890a8]" aria-hidden="true" />
+                <span>
+                  Seu nome vem do seu acesso. As salas seguem o cadastro do TI; horários já ocupados não podem ser editados por esta tela.
+                </span>
+              </p>
+              <button
+                type="button"
+                disabled={teacherBookingSaving}
+                onClick={() => void createTeacherReservations()}
+                className="inline-flex h-11 w-full shrink-0 items-center justify-center rounded-xl bg-[#245b8f] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#194775] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#245b8f] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                data-testid="teacher-booking-submit"
+              >
+                {teacherBookingSaving
+                  ? "Salvando..."
+                  : `Reservar ${teacherBookingSlots.length} ${teacherBookingSlots.length === 1 ? "horário" : "horários"}`}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
       {!readOnly && undoStack.length > 0 && (
         <button
           type="button"
@@ -502,7 +1130,7 @@ function QuickAccess({
         aria-label="Barra superior de rolagem da planilha semanal"
         className="h-4 w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain"
         data-testid="quick-week-top-scroll-container"
-        onScroll={(event) => syncWeekScroll("top", event.currentTarget.scrollLeft)}
+        onScroll={() => syncWeekScroll("top")}
         ref={topWeekScrollRef}
         role="region"
         tabIndex={0}
@@ -513,7 +1141,7 @@ function QuickAccess({
         aria-label="Planilha semanal com rolagem horizontal"
         className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] shadow-sm"
         data-testid="quick-week-scroll-container"
-        onScroll={(event) => syncWeekScroll("bottom", event.currentTarget.scrollLeft)}
+        onScroll={() => syncWeekScroll("bottom")}
         ref={weekScrollRef}
         role="region"
         tabIndex={0}
@@ -656,10 +1284,25 @@ function QuickAccess({
                                         room={bookingRoom}
                                         saving={bookingSaving}
                                         error={bookingError}
-                                        classOptions={classOptions}
-                                        roomOptions={roomOptions}
-                                        onTeacherChange={(value) => { setBookingTeacher(value); setBookingError(""); }}
-                                        onClassChange={(value) => { setBookingClass(value); setBookingError(""); }}
+                                        classOptions={bookingClassOptions(period)}
+                                        roomOptions={bookingRoomOptions(period)}
+                                        teacherSuggestions={teacherProfiles.map((profile) => profile.name)}
+                                        teacherSuggestionsError={teacherProfilesError}
+                                        onTeacherChange={changeBookingTeacher}
+                                        onTeacherSelect={(value) => selectBookingTeacher(value, period)}
+                                        onClassChange={(value) => {
+                                          setBookingClass(value);
+                                          setBookingError("");
+                                          if (selectedBookingTeacherProfile) {
+                                            const rooms = roomsForTeacherProfileClass(
+                                              selectedBookingTeacherProfile,
+                                              value,
+                                              period,
+                                              classOptions,
+                                            );
+                                            setBookingRoom(rooms.length === 1 ? rooms[0] : "");
+                                          }
+                                        }}
                                         onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
                                         onSubmit={() => void createReservation({
                                             date: dateKey,
@@ -672,6 +1315,7 @@ function QuickAccess({
                                           setBookingTarget(null);
                                           setEditingReservation(null);
                                           setBookingTeacher("");
+                                          setBookingTeacherProfileId(null);
                                           setBookingClass("");
                                           setBookingRoom("");
                                           setBookingError("");
@@ -685,6 +1329,7 @@ function QuickAccess({
                                           setBookingTarget(targetKey);
                                           setEditingReservation(null);
                                           setBookingTeacher("");
+                                          setBookingTeacherProfileId(null);
                                           setBookingClass("");
                                           setBookingRoom("");
                                           setBookingError("");
@@ -695,7 +1340,54 @@ function QuickAccess({
                                       </button>
                                     )
                                   ) : (
-                                    <span className="text-slate-300">—</span>
+                                    canTeacherBook && slot ? (
+                                      <button
+                                        type="button"
+                                        aria-pressed={teacherBookingSlots.some((item) => item.key === targetKey)}
+                                        aria-label={`${teacherBookingSlots.some((item) => item.key === targetKey) ? "Remover seleção de" : "Selecionar"} ${slot.start} ${slot.period}, ${dateFormatter.format(date)}, ${cartName}`}
+                                        data-testid={`teacher-book-slot-${targetKey}`}
+                                        onClick={() => {
+                                          setTeacherBookingSlots((current) =>
+                                            current.some((item) => item.key === targetKey)
+                                              ? current.filter((item) => item.key !== targetKey)
+                                              : [...current, {
+                                                  key: targetKey,
+                                                  date: dateKey,
+                                                  cart: cartName,
+                                                  start: slot.start,
+                                                  end: slot.end,
+                                                  period: slot.period,
+                                                  room: (() => {
+                                                    const rooms = selectedTeacherClass
+                                                      ? [...new Set(classOptions
+                                                          .filter((entry) =>
+                                                            entry.segment === selectedTeacherClass.segment &&
+                                                            entry.className === selectedTeacherClass.className &&
+                                                            entry.period === slot.period &&
+                                                            teacherSegments.includes(entry.segment),
+                                                          )
+                                                          .map((entry) => entry.room))]
+                                                      : [];
+                                                    return rooms.length === 1 ? rooms[0] : "";
+                                                  })(),
+                                                }],
+                                          );
+                                          setTeacherBookingError("");
+                                          setTeacherBookingMessage("");
+                                        }}
+                                        className={`w-full rounded px-1 py-0.5 text-left ${
+                                          teacherBookingSlots.some((item) => item.key === targetKey)
+                                            ? "bg-[#d9ead3] font-semibold text-[#244421] outline outline-1 outline-[#54804c]"
+                                            : "text-slate-400 hover:bg-[#e8eff7] hover:text-[#345779]"
+                                        }`}
+                                      >
+                                        {teacherBookingSlots.some((item) => item.key === targetKey)
+                                          ? "Selecionado"
+                                          : "Livre · selecionar"}
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-300">—</span>
+                                    )
                                   )
                                 ) : (
                                   row.reservations.map((reservation) => (
@@ -712,10 +1404,25 @@ function QuickAccess({
                                         room={bookingRoom}
                                         saving={bookingSaving}
                                         error={bookingError}
-                                        classOptions={classOptions}
-                                        roomOptions={roomOptions}
-                                        onTeacherChange={(value) => { setBookingTeacher(value); setBookingError(""); }}
-                                        onClassChange={(value) => { setBookingClass(value); setBookingError(""); }}
+                                        classOptions={bookingClassOptions(period)}
+                                        roomOptions={bookingRoomOptions(period)}
+                                        teacherSuggestions={teacherProfiles.map((profile) => profile.name)}
+                                        teacherSuggestionsError={teacherProfilesError}
+                                        onTeacherChange={changeBookingTeacher}
+                                        onTeacherSelect={(value) => selectBookingTeacher(value, period)}
+                                        onClassChange={(value) => {
+                                          setBookingClass(value);
+                                          setBookingError("");
+                                          if (selectedBookingTeacherProfile) {
+                                            const rooms = roomsForTeacherProfileClass(
+                                              selectedBookingTeacherProfile,
+                                              value,
+                                              period,
+                                              classOptions,
+                                            );
+                                            setBookingRoom(rooms.length === 1 ? rooms[0] : "");
+                                          }
+                                        }}
                                         onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
                                         onSubmit={() => void createReservation({
                                           date: dateKey,
@@ -728,6 +1435,7 @@ function QuickAccess({
                                           setBookingTarget(null);
                                           setEditingReservation(null);
                                           setBookingTeacher("");
+                                          setBookingTeacherProfileId(null);
                                           setBookingClass("");
                                           setBookingRoom("");
                                           setBookingError("");
@@ -868,7 +1576,7 @@ function QuickAccess({
       </div>
       <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
         {readOnly
-          ? "Visualização somente para consulta. São exibidos carrinho, horário, turma, sala e professor. Role horizontalmente para consultar os outros dias da semana."
+          ? "Selecione os horários livres que deseja reservar. Seu nome será preenchido automaticamente; informe a turma e a sala de cada horário. Role horizontalmente para consultar os outros dias da semana."
           : canDirectBook
             ? "Clique em um horário vazio para preencher professor, turma/série e sala. Use o lápis para editar e a lixeira para excluir um agendamento. Para reorganizar, selecione uma aula e arraste-a para outro horário; mantenha Ctrl pressionado para selecionar várias e arraste até o nome do carrinho. Role horizontalmente para consultar os outros dias da semana."
             : "Esta visão mostra carrinho, horário, turma, sala e professor. Selecione uma aula e arraste-a para outro horário. Para mover várias, mantenha Ctrl pressionado ao selecionar e arraste uma delas para o nome do carrinho de destino; os horários originais serão mantidos. A alteração só aparece como concluída depois de salva na agenda. Role horizontalmente para consultar os outros dias da semana."}
@@ -1155,6 +1863,979 @@ function CompleteAccess({
   );
 }
 
+type ReserveBookingForm = Pick<
+  Reservation,
+  "teacher" | "className" | "room" | "date" | "start" | "end" | "quantity"
+>;
+
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+function ReserveAccess({
+  dates,
+  reservations,
+  reserveUnits,
+  reserveStockCount,
+  reserveAssignments,
+  teacherNames,
+  rememberedPeople,
+  onUpdateReserveUnitAssignments,
+  onRememberResponsiblePerson,
+  periodFilter,
+  canEdit,
+  onUpdateReservation,
+}: {
+  dates: Date[];
+  reservations: Reservation[];
+  reserveUnits: string[];
+  reserveStockCount: number;
+  reserveAssignments: Array<{ unit: string } & ReserveUnitAssignment>;
+  teacherNames: string[];
+  rememberedPeople: ReserveResponsiblePerson[];
+  onUpdateReserveUnitAssignments: (
+    units: string[],
+    assignment: ReserveUnitAssignment | null,
+  ) => void;
+  onRememberResponsiblePerson: (
+    name: string,
+    personType: ReserveResponsiblePersonType,
+  ) => void;
+  periodFilter: PeriodFilter;
+  canEdit: boolean;
+  onUpdateReservation: (
+    reservation: Omit<Reservation, "id" | "status">,
+    id: number,
+  ) => Promise<void>;
+}) {
+  const dateKeys = new Set(dates.map(formatDateKey));
+  const bookings = reservations
+    .filter(
+      (reservation) =>
+        reservation.kind === "Reserva" &&
+        dateKeys.has(reservation.date) &&
+        (periodFilter === "Todos" || reservation.period === periodFilter),
+    )
+    .sort(
+      (first, second) =>
+        first.date.localeCompare(second.date) ||
+        first.start.localeCompare(second.start) ||
+        first.teacher.localeCompare(second.teacher, "pt-BR"),
+    );
+  const allocations = new Map<number, string[]>();
+  const unitBookings = new Map<string, Reservation[]>();
+  const orderedReservations = reservations
+    .filter((reservation) => reservation.kind === "Reserva")
+    .sort(
+      (first, second) =>
+        first.date.localeCompare(second.date) ||
+        first.start.localeCompare(second.start) ||
+        first.end.localeCompare(second.end) ||
+        first.id - second.id,
+    );
+  orderedReservations.forEach((reservation) => {
+    const preferredUnits = reservation.reservedChromebooks?.filter((unit) =>
+      reserveUnits.includes(unit),
+    ) ?? [];
+    const candidates = [
+      ...new Set([...preferredUnits, ...reserveUnits]),
+    ].filter((unit) => {
+      const currentBookings = unitBookings.get(unit) ?? [];
+      return currentBookings.every(
+        (current) =>
+          current.date !== reservation.date ||
+          current.start >= reservation.end ||
+          reservation.start >= current.end,
+      );
+    });
+    const assigned = candidates.slice(0, reservation.quantity);
+    allocations.set(reservation.id, assigned);
+    assigned.forEach((unit) => {
+      unitBookings.set(unit, [
+        ...(unitBookings.get(unit) ?? []),
+        reservation,
+      ]);
+    });
+  });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState<ReserveBookingForm | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
+  const [assignmentTeacher, setAssignmentTeacher] = useState("");
+  const [assignmentPersonType, setAssignmentPersonType] =
+    useState<ReserveResponsiblePersonType>("Professor");
+  const [assignmentDate, setAssignmentDate] = useState(getLocalDateKey);
+  const [assignmentError, setAssignmentError] = useState("");
+  const [editingAssignmentUnit, setEditingAssignmentUnit] = useState<string | null>(null);
+  const [editingAssignment, setEditingAssignment] =
+    useState<ReserveUnitAssignment | null>(null);
+  const [serverTeacherNames, setServerTeacherNames] = useState<string[]>([]);
+  const [teacherSuggestionError, setTeacherSuggestionError] = useState("");
+  const dragSelectingRef = useRef(false);
+  const dragBaseUnitRef = useRef<string | null>(null);
+  const dragBaseSelectionRef = useRef<string[]>([]);
+  const dragPathRef = useRef<string[]>([]);
+  const dragMovedRef = useRef(false);
+  const dragAdditiveRef = useRef(false);
+  const mouseSelectionStartedRef = useRef(false);
+  useEffect(() => {
+    if (selectedUnits.length === 0) return;
+    const clearSelectionOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      dragSelectingRef.current = false;
+      dragPathRef.current = [];
+      setSelectedUnits([]);
+      setAssignmentError("");
+    };
+    window.addEventListener("keydown", clearSelectionOnEscape);
+    return () => window.removeEventListener("keydown", clearSelectionOnEscape);
+  }, [selectedUnits.length]);
+  useEffect(() => {
+    if (!canEdit) return;
+    let active = true;
+    void loadTeacherAccounts()
+      .then((accounts) => {
+        if (active) {
+          setServerTeacherNames(
+            accounts.map((account) => account.name.trim()).filter(Boolean),
+          );
+          setTeacherSuggestionError("");
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setTeacherSuggestionError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Não foi possível carregar os professores cadastrados.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [canEdit]);
+  const normalizePersonName = (name: string) =>
+    name.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+  const allTeacherNames = [...new Set([...teacherNames, ...serverTeacherNames])];
+  const registeredTeacherNames = new Set(allTeacherNames.map(normalizePersonName));
+  const personTypeForAssignment = (
+    assignment: { teacher: string; personType?: ReserveResponsiblePersonType },
+  ): ReserveResponsiblePersonType =>
+    assignment.personType ??
+    rememberedPeople.find(
+      (person) => normalizePersonName(person.name) === normalizePersonName(assignment.teacher),
+    )?.personType ??
+    (registeredTeacherNames.has(normalizePersonName(assignment.teacher))
+      ? "Professor"
+      : "Funcionário/Autorizado");
+  const manualRequests = Array.from(
+    reserveAssignments.reduce((groups, assignment) => {
+      if (
+        !dateKeys.has(assignment.date) ||
+        personTypeForAssignment(assignment) !== "Professor"
+      ) {
+        return groups;
+      }
+
+      const key = `${normalizePersonName(assignment.teacher)}\u0000${assignment.date}`;
+      const group = groups.get(key) ?? {
+        teacher: assignment.teacher,
+        date: assignment.date,
+        units: [] as string[],
+      };
+      group.units.push(assignment.unit);
+      groups.set(key, group);
+      return groups;
+    }, new Map<string, { teacher: string; date: string; units: string[] }>())
+      .values(),
+  )
+    .map((request) => ({
+      ...request,
+      units: request.units.sort((first, second) =>
+        first.localeCompare(second, "pt-BR", { numeric: true }),
+      ),
+    }))
+    .sort(
+      (first, second) =>
+        first.date.localeCompare(second.date) ||
+        first.teacher.localeCompare(second.teacher, "pt-BR"),
+    );
+  const manualRequestMatchesReservation = (request: {
+    teacher: string;
+    date: string;
+  }, reservation: Reservation) =>
+    request.date === reservation.date &&
+    normalizePersonName(request.teacher) === normalizePersonName(reservation.teacher);
+  const manualRequestForReservation = (reservation: Reservation) => {
+    const request = manualRequests.find((item) =>
+      manualRequestMatchesReservation(item, reservation),
+    );
+    if (!request) return undefined;
+    const firstMatchingReservation = bookings.find((booking) =>
+      manualRequestMatchesReservation(request, booking),
+    );
+    return firstMatchingReservation?.id === reservation.id ? request : undefined;
+  };
+  const unlinkedManualRequests = manualRequests.filter(
+    (request) =>
+      !bookings.some((booking) =>
+        manualRequestMatchesReservation(request, booking),
+      ),
+  );
+  const knownPersonTypeForName = (
+    name: string,
+  ): ReserveResponsiblePersonType | undefined => {
+    const normalizedName = normalizePersonName(name);
+    if (registeredTeacherNames.has(normalizedName)) return "Professor";
+    const remembered = rememberedPeople.find(
+      (person) => normalizePersonName(person.name) === normalizedName,
+    );
+    if (remembered) return remembered.personType;
+    const previouslyUsed = reserveAssignments.find(
+      (assignment) => normalizePersonName(assignment.teacher) === normalizedName,
+    );
+    return previouslyUsed ? personTypeForAssignment(previouslyUsed) : undefined;
+  };
+  const sortedAssignments = reserveAssignments
+    .map((assignment) => ({
+      ...assignment,
+      personType: personTypeForAssignment(assignment),
+    }))
+    .sort((first, second) =>
+      first.personType.localeCompare(second.personType, "pt-BR") ||
+      first.teacher.localeCompare(second.teacher, "pt-BR") ||
+      first.unit.localeCompare(second.unit, "pt-BR", { numeric: true }),
+    );
+  const assignmentGroups = Array.from(
+    sortedAssignments.reduce((groups, assignment) => {
+      const key = `${assignment.personType}\u0000${normalizePersonName(assignment.teacher)}`;
+      const group = groups.get(key) ?? {
+        teacher: assignment.teacher,
+        personType: assignment.personType,
+        assignments: [],
+      };
+      group.assignments.push(assignment);
+      groups.set(key, group);
+      return groups;
+    }, new Map<string, {
+      teacher: string;
+      personType: ReserveResponsiblePersonType;
+      assignments: typeof sortedAssignments;
+    }>()).values(),
+  );
+  const responsibleSuggestions = [...new Set([
+    ...allTeacherNames,
+    ...rememberedPeople.map((person) => person.name),
+    ...reserveAssignments.map((assignment) => assignment.teacher),
+  ])].sort((first, second) => first.localeCompare(second, "pt-BR"));
+  const selectReserveUnit = (
+    unit: string,
+    additive: boolean,
+  ) => {
+    setSelectedUnits((current) => {
+      if (!additive) {
+        return current.length === 1 && current.includes(unit) ? [] : [unit];
+      }
+      return current.includes(unit)
+        ? current.filter((selected) => selected !== unit)
+        : [...current, unit];
+    });
+  };
+  const updateAssignmentTeacher = (name: string) => {
+    setAssignmentTeacher(name);
+    if (!name.trim()) {
+      setAssignmentPersonType("Professor");
+      return;
+    }
+    const knownPersonType = knownPersonTypeForName(name);
+    if (knownPersonType) setAssignmentPersonType(knownPersonType);
+  };
+  const updateEditingAssignmentTeacher = (name: string) => {
+    const knownPersonType = knownPersonTypeForName(name);
+    setEditingAssignment((current) =>
+      current
+        ? {
+            ...current,
+            teacher: name,
+            ...(knownPersonType ? { personType: knownPersonType } : {}),
+          }
+        : current,
+    );
+  };
+  const saveManualAssignment = () => {
+    const teacher = assignmentTeacher.trim().replace(/\s+/g, " ");
+    const date = new Date(`${assignmentDate}T12:00:00`);
+    if (selectedUnits.length === 0) {
+      setAssignmentError("Selecione ao menos um Chromebook disponível.");
+      return;
+    }
+    if (!teacher) {
+      setAssignmentError("Informe o nome de quem está responsável pelos Chromebooks.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(assignmentDate) ||
+      Number.isNaN(date.getTime()) ||
+      getLocalDateKey(date) !== assignmentDate) {
+      setAssignmentError("Informe uma data válida.");
+      return;
+    }
+    onUpdateReserveUnitAssignments(selectedUnits, {
+      teacher,
+      date: assignmentDate,
+      personType: assignmentPersonType,
+    });
+    onRememberResponsiblePerson(teacher, assignmentPersonType);
+    setSelectedUnits([]);
+    setAssignmentTeacher("");
+    setAssignmentPersonType("Professor");
+    setAssignmentDate(getLocalDateKey());
+    setAssignmentError("");
+  };
+  const saveManualAssignmentEdit = (unit: string) => {
+    const teacher = editingAssignment?.teacher.trim().replace(/\s+/g, " ") ?? "";
+    const date = editingAssignment?.date ?? "";
+    const personType =
+      editingAssignment?.personType ??
+      knownPersonTypeForName(teacher) ??
+      "Funcionário/Autorizado";
+    const parsedDate = new Date(`${date}T12:00:00`);
+    if (!teacher || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(parsedDate.getTime()) ||
+      getLocalDateKey(parsedDate) !== date) {
+      setAssignmentError("Informe um responsável e uma data válida.");
+      return;
+    }
+    onUpdateReserveUnitAssignments([unit], { teacher, date, personType });
+    onRememberResponsiblePerson(teacher, personType);
+    setEditingAssignmentUnit(null);
+    setEditingAssignment(null);
+    setAssignmentError("");
+  };
+
+  const startEditing = (reservation: Reservation) => {
+    setEditingId(reservation.id);
+    setForm({
+      teacher: reservation.teacher,
+      className: reservation.className,
+      room: reservation.room,
+      date: reservation.date,
+      start: reservation.start,
+      end: reservation.end,
+      quantity: reservation.quantity,
+    });
+    setError("");
+  };
+  const cancelEditing = () => {
+    setEditingId(null);
+    setForm(null);
+    setError("");
+  };
+  const updateForm = (key: keyof ReserveBookingForm, value: string) => {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            [key]: key === "quantity" ? Number(value) : value,
+          }
+        : current,
+    );
+  };
+  const saveEditing = async (reservation: Reservation) => {
+    if (!form || saving) return;
+    if (form.start >= form.end) {
+      setError("O horário inicial deve ser anterior ao final.");
+      return;
+    }
+    if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+      setError("Informe uma quantidade válida de Chromebooks.");
+      return;
+    }
+    if (reserveUnits.length > 0 && form.quantity > reserveUnits.length) {
+      setError(
+        `A quantidade não pode exceder as ${reserveUnits.length} unidades separadas para reserva.`,
+      );
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const { id: _id, status: _status, ...current } = reservation;
+    try {
+      await onUpdateReservation(
+        {
+          ...current,
+          ...form,
+          teacher: form.teacher.trim().replace(/\s+/g, " "),
+          className: form.className.trim().replace(/\s+/g, " "),
+          room: form.room.trim().replace(/\s+/g, " "),
+          cart: "Reservas",
+          kind: "Reserva",
+          reservedChromebooks: undefined,
+        },
+        reservation.id,
+      );
+      cancelEditing();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Não foi possível salvar a edição da reserva.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section aria-label="Planilha de Chromebooks de reserva" className="space-y-4">
+      <div className="rounded-2xl border border-[#a9b7c8] bg-[#eef3f8] p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Laptop size={17} className="text-[#345779]" />
+            <h2 className="text-sm font-bold text-[#173252]">
+              Chromebooks separados para reserva
+            </h2>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#31465f]">
+            {reserveUnits.length} disponíveis / {reserveStockCount} em reserva
+          </span>
+        </div>
+        <p className="mb-3 text-[11px] text-slate-600">
+          Clique para selecionar uma unidade; segure Ctrl (ou Cmd no Mac) para selecionar várias, ou arraste sobre as unidades. Volte pelo caminho do arraste para desmarcar as unidades percorridas.
+        </p>
+        {reserveUnits.length > 0 ? (
+          <div
+            className="flex flex-wrap gap-2"
+            aria-label="Unidades de Chromebook de reserva"
+            onMouseUp={() => { dragSelectingRef.current = false; }}
+            onMouseLeave={() => { dragSelectingRef.current = false; }}
+          >
+            {reserveUnits.map((unit) => (
+              <button
+                key={unit}
+                type="button"
+                aria-pressed={selectedUnits.includes(unit)}
+                aria-label={`Selecionar Chromebook ${unit}`}
+                data-testid={`reserve-unit-${unit}`}
+                onMouseDown={(event) => {
+                  if (!canEdit) return;
+                  event.preventDefault();
+                  const additive = event.ctrlKey || event.metaKey;
+                  const wasSelected =
+                    selectedUnits.includes(unit) && selectedUnits.length === 1;
+                  dragSelectingRef.current = true;
+                  mouseSelectionStartedRef.current = true;
+                  dragBaseUnitRef.current = unit;
+                  dragPathRef.current = [];
+                  dragMovedRef.current = false;
+                  dragAdditiveRef.current = additive;
+                  const nextSelection = additive
+                    ? selectedUnits.includes(unit)
+                      ? selectedUnits.filter((selected) => selected !== unit)
+                      : [...selectedUnits, unit]
+                    : wasSelected
+                      ? []
+                      : [unit];
+                  dragBaseSelectionRef.current = nextSelection;
+                  setSelectedUnits(nextSelection);
+                }}
+                onMouseEnter={() => {
+                  if (!canEdit || !dragSelectingRef.current) return;
+                  dragMovedRef.current = true;
+                  const currentPath = dragPathRef.current;
+                  const unitPathIndex = currentPath.indexOf(unit);
+                  const nextPath = unit === dragBaseUnitRef.current
+                    ? []
+                    : unitPathIndex >= 0
+                      ? currentPath.slice(0, unitPathIndex + 1)
+                      : [...currentPath, unit];
+                  dragPathRef.current = nextPath;
+                  setSelectedUnits([
+                    ...new Set([...dragBaseSelectionRef.current, ...nextPath]),
+                  ]);
+                }}
+                onClick={(event) => {
+                  if (mouseSelectionStartedRef.current) {
+                    mouseSelectionStartedRef.current = false;
+                    if (dragMovedRef.current) {
+                      dragMovedRef.current = false;
+                      return;
+                    }
+                    dragAdditiveRef.current = false;
+                    return;
+                  }
+                  if (dragMovedRef.current) {
+                    dragMovedRef.current = false;
+                    return;
+                  }
+                  selectReserveUnit(
+                    unit,
+                    event.ctrlKey || event.metaKey || dragAdditiveRef.current,
+                  );
+                  dragAdditiveRef.current = false;
+                }}
+                className={`select-none rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] ${
+                  selectedUnits.includes(unit)
+                    ? "border-[#345779] bg-[#345779] text-white"
+                    : "border-[#c0ccda] bg-white text-[#31465f] hover:bg-[#f5f8fb]"
+                }`}
+              >
+                {unit}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            {reserveStockCount > 0
+              ? "Todas as unidades de reserva disponíveis estão atribuídas. Apague uma atribuição para devolvê-las à fila."
+              : "Nenhum Chromebook está disponível na categoria Reserva. Configure ou libere unidades na tela Carrinhos."}
+          </p>
+        )}
+        {canEdit && selectedUnits.length > 0 && (
+          <div className="mt-4 rounded-xl border border-[#c0ccda] bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-[#173252]">
+                Atribuir {selectedUnits.length} Chromebook{selectedUnits.length === 1 ? "" : "s"} selecionado{selectedUnits.length === 1 ? "" : "s"}:{" "}
+                <span className="ml-1 font-mono">{selectedUnits.join(", ")}</span>
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-label="Cancelar seleção"
+                onClick={() => {
+                  setSelectedUnits([]);
+                  setAssignmentError("");
+                }}
+                data-testid="button-cancel-reserve-selection"
+              >
+                <X size={14} /> Cancelar seleção
+              </Button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1.2fr)_auto_auto]">
+              <select
+                aria-label="Categoria do responsável"
+                value={assignmentPersonType}
+                onChange={(event) =>
+                  setAssignmentPersonType(
+                    event.target.value === "Professor"
+                      ? "Professor"
+                      : "Funcionário/Autorizado",
+                  )
+                }
+                className="rounded border border-[#c0ccda] bg-white px-2 py-1.5 text-sm text-[#173252]"
+              >
+                <option value="Professor">Professor cadastrado</option>
+                <option value="Funcionário/Autorizado">Funcionário / autorizado</option>
+              </select>
+              <ResponsibleNameCombobox
+                label="Nome do responsável pelos Chromebooks"
+                placeholder="Professor, funcionário ou autorizado"
+                value={assignmentTeacher}
+                suggestions={responsibleSuggestions}
+                onChange={updateAssignmentTeacher}
+                onSelect={updateAssignmentTeacher}
+                className="w-full rounded border border-[#c0ccda] bg-white px-2 py-1.5 text-sm text-[#173252]"
+              />
+              <input
+                aria-label="Data de atribuição dos Chromebooks"
+                type="date"
+                required
+                value={assignmentDate}
+                onChange={(event) => setAssignmentDate(event.target.value)}
+                className="rounded border border-[#c0ccda] bg-white px-2 py-1.5 text-sm text-[#173252]"
+              />
+              <Button size="sm" onClick={saveManualAssignment} data-testid="button-assign-reserve-units">
+                Salvar na planilha
+              </Button>
+            </div>
+            {assignmentError && <p className="mt-2 text-xs text-red-700" role="alert">{assignmentError}</p>}
+            {teacherSuggestionError && (
+              <p className="mt-2 text-xs text-amber-800" role="alert">
+                Não foi possível atualizar as sugestões de professores: {teacherSuggestionError}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] text-slate-500">
+              A data inicia no dia de hoje. Você pode escolher uma data anterior. As unidades ficam fora da fila até a atribuição ser apagada.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {sortedAssignments.length > 0 && (
+        <div className="space-y-3">
+          <div className="border-b border-[#c4d0df] bg-[#eef3f8] px-4 py-3">
+            <h3 className="text-sm font-bold text-[#173252]">
+              Chromebooks sob responsabilidade
+            </h3>
+          </div>
+          {assignmentGroups.map((group) => (
+            <section
+              key={`${group.personType}-${normalizePersonName(group.teacher)}`}
+              className="overflow-hidden rounded-2xl border border-[#a9b7c8] bg-white shadow-sm"
+              data-testid={`reserve-assignment-group-${normalizePersonName(group.teacher).replace(/[^a-z0-9]+/g, "-")}`}
+            >
+              <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[#c4d0df] bg-[#eef3f8] px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-[#173252]">{group.teacher}</h4>
+                  <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-[#345779]">
+                    {group.personType}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-600">
+                    {group.assignments.length} Chromebook{group.assignments.length === 1 ? "" : "s"}
+                  </span>
+                  {canEdit && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const units = group.assignments.map((assignment) => assignment.unit);
+                        onUpdateReserveUnitAssignments(units, null);
+                        if (editingAssignmentUnit && units.includes(editingAssignmentUnit)) {
+                          setEditingAssignmentUnit(null);
+                          setEditingAssignment(null);
+                        }
+                      }}
+                      data-testid={`button-return-reserve-group-${normalizePersonName(group.teacher).replace(/[^a-z0-9]+/g, "-")}`}
+                    >
+                      Todos devolvido
+                    </Button>
+                  )}
+                </div>
+              </header>
+              <div className="divide-y divide-[#e0e5eb]">
+                {group.assignments.map(({ unit, teacher, date, personType }) => {
+                  const editing = editingAssignmentUnit === unit && editingAssignment;
+                  return (
+                    <div
+                      key={unit}
+                      className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs text-[#25364a]"
+                      data-testid={`reserve-assignment-${unit}`}
+                    >
+                      <span className="min-w-16 font-mono font-bold">{unit}</span>
+                      {editing ? (
+                        <div className="grid flex-1 gap-2 sm:grid-cols-3">
+                          <ResponsibleNameCombobox
+                            label={`Responsável pelo Chromebook ${unit}`}
+                            value={editingAssignment.teacher}
+                            suggestions={responsibleSuggestions}
+                            onChange={updateEditingAssignmentTeacher}
+                            onSelect={updateEditingAssignmentTeacher}
+                            className="w-full rounded border border-[#c0ccda] px-2 py-1"
+                          />
+                          <select
+                            aria-label={`Categoria do responsável pelo Chromebook ${unit}`}
+                            value={editingAssignment.personType ?? personType}
+                            onChange={(event) =>
+                              setEditingAssignment({
+                                ...editingAssignment,
+                                personType: event.target.value === "Professor"
+                                  ? "Professor"
+                                  : "Funcionário/Autorizado",
+                              })
+                            }
+                            className="rounded border border-[#c0ccda] px-2 py-1"
+                          >
+                            <option value="Professor">Professor cadastrado</option>
+                            <option value="Funcionário/Autorizado">Funcionário / autorizado</option>
+                          </select>
+                          <input
+                            aria-label={`Data do Chromebook ${unit}`}
+                            type="date"
+                            required
+                            value={editingAssignment.date}
+                            onChange={(event) =>
+                              setEditingAssignment({ ...editingAssignment, date: event.target.value })
+                            }
+                            className="rounded border border-[#c0ccda] px-2 py-1"
+                          />
+                        </div>
+                      ) : (
+                        <span className="flex-1 text-slate-600">
+                          Data: {dateFormatter.format(new Date(`${date}T12:00:00`))}
+                        </span>
+                      )}
+                      {canEdit && (
+                        <div className="flex gap-2">
+                          {editing ? (
+                            <>
+                              <Button size="sm" onClick={() => saveManualAssignmentEdit(unit)} data-testid={`button-save-reserve-assignment-${unit}`}>Salvar</Button>
+                              <Button size="sm" variant="secondary" onClick={() => { setEditingAssignmentUnit(null); setEditingAssignment(null); setAssignmentError(""); }}>Cancelar</Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button size="sm" variant="secondary" onClick={() => {
+                                setEditingAssignmentUnit(unit);
+                                setEditingAssignment({ teacher, date, personType });
+                                setAssignmentError("");
+                              }} data-testid={`button-edit-reserve-assignment-${unit}`}>Editar</Button>
+                              <Button size="sm" variant="secondary" onClick={() => {
+                                onUpdateReserveUnitAssignments([unit], null);
+                              }} data-testid={`button-delete-reserve-assignment-${unit}`}>Devolvido</Button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {assignmentError && editingAssignmentUnit &&
+                group.assignments.some((assignment) => assignment.unit === editingAssignmentUnit) && (
+                  <p className="px-4 py-2 text-xs text-red-700" role="alert">{assignmentError}</p>
+                )}
+            </section>
+          ))}
+        </div>
+      )}
+
+      {bookings.length === 0 && unlinkedManualRequests.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] p-10 text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Nenhum professor solicitou Chromebooks de reserva nesta semana.
+        </div>
+      ) : (
+        <div
+          aria-label="Solicitações de Chromebook de reserva com rolagem horizontal"
+          className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-[#a9b7c8] bg-white shadow-sm"
+          role="region"
+          tabIndex={0}
+        >
+          <table className="w-full min-w-[980px] border-collapse text-left text-xs">
+            <thead>
+              <tr className="bg-[#345779] text-white">
+                <th scope="col" className="px-3 py-3">Data e horário</th>
+                <th scope="col" className="px-3 py-3">Professor e turma</th>
+                <th scope="col" className="px-3 py-3">Sala</th>
+                <th scope="col" className="px-3 py-3">Chromebooks de reserva</th>
+                <th scope="col" className="px-3 py-3">Quantidade</th>
+                {canEdit && <th scope="col" className="px-3 py-3">Ações</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {unlinkedManualRequests.map((request) => (
+                <tr
+                  key={`${request.date}-${normalizePersonName(request.teacher)}`}
+                  className="border-b border-[#d5dce5] align-top text-[#25364a] last:border-b-0"
+                  data-testid="reserve-manual-request-row"
+                >
+                  <td className="whitespace-nowrap px-3 py-3">
+                    <span className="block font-semibold">
+                      {dateFormatter.format(new Date(`${request.date}T12:00:00`))}
+                    </span>
+                    <span className="mt-1 block">Atribuição manual</span>
+                  </td>
+                  <td className="min-w-52 px-3 py-3">
+                    <span className="block font-semibold">{request.teacher}</span>
+                    <span className="mt-1 block">Responsável informado pelo administrador</span>
+                  </td>
+                  <td className="px-3 py-3">—</td>
+                  <td className="px-3 py-3 font-mono">{request.units.join(", ")}</td>
+                  <td className="px-3 py-3 font-semibold">{request.units.length}</td>
+                  {canEdit && <td className="px-3 py-3">Gerenciada no bloco acima</td>}
+                </tr>
+              ))}
+              {bookings.map((reservation) => {
+                const rowEditing = editingId === reservation.id && form;
+                const manualRequest = manualRequestForReservation(reservation);
+                const assignedUnits = manualRequest?.units ??
+                  allocations.get(reservation.id) ?? [];
+                return (
+                  <Fragment key={reservation.id}>
+                    <tr className="border-b border-[#d5dce5] align-top text-[#25364a] last:border-b-0">
+                      <td className="whitespace-nowrap px-3 py-3">
+                        {rowEditing ? (
+                          <div className="grid gap-2">
+                            <input
+                              aria-label={`Data da reserva de ${reservation.teacher}`}
+                              type="date"
+                              required
+                              value={form.date}
+                              disabled={saving}
+                              onChange={(event) => updateForm("date", event.target.value)}
+                              className="rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                aria-label={`Início da reserva de ${reservation.teacher}`}
+                                type="time"
+                                required
+                                value={form.start}
+                                disabled={saving}
+                                onChange={(event) => updateForm("start", event.target.value)}
+                                className="w-28 rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                              />
+                              <span>–</span>
+                              <input
+                                aria-label={`Fim da reserva de ${reservation.teacher}`}
+                                type="time"
+                                required
+                                value={form.end}
+                                disabled={saving}
+                                onChange={(event) => updateForm("end", event.target.value)}
+                                className="w-28 rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="block font-semibold">
+                              {dateFormatter.format(new Date(`${reservation.date}T12:00:00`))}
+                            </span>
+                            <span className="mt-1 block font-mono">
+                              {reservation.start}–{reservation.end}
+                            </span>
+                          </>
+                        )}
+                      </td>
+                      <td className="min-w-52 px-3 py-3">
+                        {rowEditing ? (
+                          <div className="grid gap-2">
+                            <input
+                              aria-label={`Professor da reserva ${reservation.id}`}
+                              required
+                              maxLength={120}
+                              value={form.teacher}
+                              disabled={saving}
+                              onChange={(event) => updateForm("teacher", event.target.value)}
+                              className="rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                            />
+                            <input
+                              aria-label={`Turma da reserva ${reservation.id}`}
+                              required
+                              maxLength={80}
+                              value={form.className}
+                              disabled={saving}
+                              onChange={(event) => updateForm("className", event.target.value)}
+                              className="rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <span className="block font-semibold">{reservation.teacher}</span>
+                            <span className="mt-1 block text-[hsl(var(--muted-foreground))]">
+                              {reservation.className}
+                            </span>
+                          </>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {rowEditing ? (
+                          <input
+                            aria-label={`Sala da reserva ${reservation.id}`}
+                            required
+                            maxLength={80}
+                            value={form.room}
+                            disabled={saving}
+                            onChange={(event) => updateForm("room", event.target.value)}
+                            className="w-36 rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                          />
+                        ) : (
+                          reservation.room
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {assignedUnits.length > 0 ? (
+                          <div className="flex max-w-72 flex-wrap gap-1.5">
+                            {assignedUnits.map((unit) => (
+                              <span key={unit} className="rounded bg-[#eef3f8] px-2 py-1 font-mono">
+                                {unit}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[hsl(var(--destructive))]">
+                            Nenhuma unidade disponível
+                          </span>
+                        )}
+                        {assignedUnits.length < reservation.quantity && (
+                          <span className="mt-1 block text-[10px] text-[hsl(var(--destructive))]">
+                            Alocadas {assignedUnits.length} de {reservation.quantity}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {rowEditing ? (
+                          <input
+                            aria-label={`Quantidade da reserva ${reservation.id}`}
+                            type="number"
+                            required
+                            min={1}
+                            max={reserveUnits.length || undefined}
+                            value={form.quantity}
+                            disabled={saving}
+                            onChange={(event) => updateForm("quantity", event.target.value)}
+                            className="w-24 rounded border border-[#c0ccda] bg-white px-2 py-1.5"
+                          />
+                        ) : (
+                          reservation.quantity
+                        )}
+                      </td>
+                      {canEdit && (
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {rowEditing ? (
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => void saveEditing(reservation)}
+                                disabled={saving}
+                                data-testid={`button-save-reserve-${reservation.id}`}
+                              >
+                                <Save size={13} /> Salvar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={cancelEditing}
+                                disabled={saving}
+                              >
+                                <X size={13} /> Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => startEditing(reservation)}
+                              data-testid={`button-edit-reserve-${reservation.id}`}
+                            >
+                              <Pencil size={13} /> Editar
+                            </Button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                    {rowEditing && error && (
+                      <tr className="border-b border-[#d5dce5]">
+                        <td
+                          colSpan={canEdit ? 6 : 5}
+                          className="px-3 pb-3 text-xs font-semibold text-[hsl(var(--destructive))]"
+                          role="alert"
+                        >
+                          {error}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+        As solicitações dos professores entram automaticamente pela agenda compartilhada. A alocação das unidades considera os horários para não atribuir o mesmo Chromebook a duas reservas simultâneas.
+      </p>
+    </section>
+  );
+}
+
 export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     reservations,
@@ -1162,14 +2843,27 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     carts,
     cartSchedules,
     movementSettings,
+    teacherAccounts = [],
+    campusSettings = defaultCampusSettings,
     replaceReservations,
+    updateReserveUnitAssignments,
+    rememberReserveResponsiblePerson,
   } = useCampusData();
+  const session = getAuthenticatedSession();
   const canDirectBook =
-    !readOnly && getAuthenticatedSession()?.role === "admin";
+    !readOnly && session?.role === "admin";
+  const currentTeacherName =
+    readOnly && session?.role === "user" ? session.name : "";
+  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile | null>(null);
+  const [teacherProfileError, setTeacherProfileError] = useState("");
+  const [teacherAccessAccounts, setTeacherAccessAccounts] = useState<TeacherAccessAccount[]>([]);
+  const [teacherAccessAccountsError, setTeacherAccessAccountsError] = useState("");
+  const canTeacherBook = Boolean(currentTeacherName && teacherProfile);
   const { floorForRoom, classEntries = [], roomOptions = [] } = useRoomDirectory();
   const [mode, setMode] = useState<SpreadsheetMode>(() => readSpreadsheetMode(readOnly));
   const [teacherReservations, setTeacherReservations] = useState<Reservation[]>([]);
   const [teacherReservationsLoading, setTeacherReservationsLoading] = useState(readOnly);
+  const [teacherReservationsLoaded, setTeacherReservationsLoaded] = useState(false);
   const [teacherReservationsError, setTeacherReservationsError] = useState("");
   const [selectedCompleteCart, setSelectedCompleteCart] = useState(() => {
     try {
@@ -1197,7 +2891,36 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   const workWeekDates = weekDates;
   const teacherFrom = formatDateKey(workWeekDates[0]);
   const teacherTo = formatDateKey(workWeekDates.at(-1)!);
+  const teacherSegments: Segment[] = teacherProfile
+    ? [...new Set([teacherProfile.segment, ...(teacherProfile.additionalSegments ?? [])])]
+    : [];
+  const teacherProfileClassName = teacherProfile?.className ?? "";
   const visibleReservations = readOnly ? teacherReservations : reservations;
+  useEffect(() => {
+    if (!canDirectBook) {
+      setTeacherAccessAccounts([]);
+      setTeacherAccessAccountsError("");
+      return;
+    }
+    let active = true;
+    void loadTeacherAccounts()
+      .then((accounts) => {
+        if (!active) return;
+        setTeacherAccessAccounts(accounts);
+        setTeacherAccessAccountsError("");
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setTeacherAccessAccountsError(
+          cause instanceof Error
+            ? cause.message
+            : "Não foi possível carregar os professores cadastrados.",
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [canDirectBook]);
   const floorSuggestions = getFloorOptimizationSuggestions(
     visibleReservations,
     floorForRoom,
@@ -1207,16 +2930,17 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     if (!readOnly) return;
     let active = true;
     const refreshTeacherReservations = () => {
-      setTeacherReservationsLoading(true);
       void loadTeacherSpreadsheetReservations(teacherFrom, teacherTo)
         .then((items) => {
           if (!active) return;
-          setTeacherReservations(items);
+          setTeacherReservations((current) =>
+            JSON.stringify(current) === JSON.stringify(items) ? current : items,
+          );
+          setTeacherReservationsLoaded(true);
           setTeacherReservationsError("");
         })
         .catch((error: unknown) => {
           if (!active) return;
-          setTeacherReservations([]);
           setTeacherReservationsError(
             error instanceof Error
               ? error.message
@@ -1234,6 +2958,25 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
       window.clearInterval(interval);
     };
   }, [readOnly, teacherFrom, teacherTo]);
+  useEffect(() => {
+    if (!readOnly || session?.role !== "user") return;
+    let active = true;
+    void loadTeacherProfile()
+      .then((profile) => {
+        if (!active) return;
+        setTeacherProfile(profile);
+        setTeacherProfileError("");
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setTeacherProfileError(
+          error instanceof Error ? error.message : "Não foi possível carregar seu perfil.",
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [readOnly, session?.role]);
   const cartNames = useMemo(
     () =>
       sortCartNames([
@@ -1241,6 +2984,47 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
         ...visibleReservations.map((reservation) => reservation.cart),
       ]),
     [carts, visibleReservations],
+  );
+  const reserveUnits = useMemo(
+    () =>
+      [
+        ...new Set(
+          carts.flatMap((cart: Cart) =>
+            (cart.reservedUnits ?? []).filter(
+              (unit) =>
+                !cart.unavailable &&
+                !(cart.unavailableUnits ?? []).includes(unit) &&
+                !cart.reserveAssignments?.[unit],
+            ),
+          ),
+        ),
+      ].sort((first, second) =>
+        first.localeCompare(second, "pt-BR", { numeric: true }),
+      ),
+    [carts],
+  );
+  const reserveStockCount = useMemo(
+    () =>
+      new Set(
+        carts.flatMap((cart: Cart) =>
+          (cart.reservedUnits ?? []).filter(
+            (unit) =>
+              !cart.unavailable &&
+              !(cart.unavailableUnits ?? []).includes(unit),
+          ),
+        ),
+      ).size,
+    [carts],
+  );
+  const reserveAssignments = useMemo(
+    () =>
+      carts.flatMap((cart: Cart) =>
+      Object.entries(cart.reserveAssignments ?? {}).map(([unit, assignment]) => ({
+        unit,
+        ...assignment,
+      })),
+      ),
+    [carts],
   );
 
   const moveWeek = (amount: number) => {
@@ -1283,6 +3067,33 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   const createReservationFromSheet = async (
     reservation: Omit<Reservation, "id" | "status">,
   ) => {
+    if (readOnly && canTeacherBook) {
+      if (
+        reservation.teacher.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR") !==
+        currentTeacherName.toLocaleLowerCase("pt-BR")
+      ) {
+        throw new Error("Você só pode reservar horários em seu próprio nome.");
+      }
+      await saveSharedReservation(reservation);
+      try {
+        const updatedReservations = await loadTeacherSpreadsheetReservations(
+          teacherFrom,
+          teacherTo,
+        );
+        setTeacherReservations((current) =>
+          JSON.stringify(current) === JSON.stringify(updatedReservations)
+            ? current
+            : updatedReservations,
+        );
+        setTeacherReservationsLoaded(true);
+        setTeacherReservationsError("");
+      } catch (error) {
+        setTeacherReservationsError(
+          `Reserva salva, mas a planilha não pôde ser atualizada agora. ${error instanceof Error ? error.message : ""}`.trim(),
+        );
+      }
+      return;
+    }
     if (readOnly || !canDirectBook) {
       throw new Error("Somente a administração pode criar reservas diretamente na planilha.");
     }
@@ -1336,10 +3147,10 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   return (
     <div className="animate-rise w-full min-w-0 max-w-full space-y-6">
       <PageHeader
-        eyebrow={readOnly ? "Área do professor · Somente visualização" : "Área do TI e Administração"}
+        eyebrow={readOnly ? "Área do professor" : "Área do TI e Administração"}
         title="Planilha"
         description={readOnly
-          ? "Consulte a visão rápida semanal dos agendamentos. Não é possível editar ou mover aulas."
+          ? "Consulte a disponibilidade e reserve um ou mais horários para você."
           : "Consulte, organize e mova os agendamentos em formato de planilha semanal."}
       />
 
@@ -1442,24 +3253,52 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           <List size={16} />
           Acesso Completo
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "reserve"}
+          onClick={() => selectSpreadsheetMode("reserve")}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition ${
+            mode === "reserve"
+              ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
+              : "border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+          }`}
+        >
+          <Laptop size={16} />
+          Reserva
+        </button>
       </div>}
 
-      <div className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+      {!readOnly && <div className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
         <FileSpreadsheet size={15} />
         {mode === "quick"
           ? "Layout inspirado na planilha enviada; mostra carrinho, horário, turma, sala e professor."
-          : "Todos os campos disponíveis do agendamento e do acompanhamento do carrinho."}
-      </div>
+          : mode === "complete"
+            ? "Todos os campos disponíveis do agendamento e do acompanhamento do carrinho."
+            : "Chromebooks separados para reserva e solicitações dos professores."}
+      </div>}
 
-      {readOnly && teacherReservationsLoading ? (
+      {readOnly && teacherReservationsLoading && !teacherReservationsLoaded ? (
         <p role="status" className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted-foreground))]">
           Carregando a visão rápida da planilha...
         </p>
-      ) : readOnly && teacherReservationsError ? (
+      ) : readOnly && teacherReservationsError && !teacherReservationsLoaded ? (
         <p role="alert" className="rounded-xl border border-[hsl(var(--destructive)/.3)] bg-[hsl(var(--destructive)/.08)] p-4 text-sm text-[hsl(var(--destructive))]">
           {teacherReservationsError}
         </p>
-      ) : mode === "quick" ? (
+      ) : (
+      <>
+      {readOnly && teacherReservationsError && (
+        <p role="alert" className="rounded-xl border border-[hsl(var(--destructive)/.3)] bg-[hsl(var(--destructive)/.08)] p-4 text-sm text-[hsl(var(--destructive))]">
+          Não foi possível atualizar a planilha. Os dados já carregados foram mantidos. {teacherReservationsError}
+        </p>
+      )}
+      {readOnly && teacherProfileError && (
+        <p role="alert" className="rounded-xl border border-[hsl(var(--destructive)/.3)] bg-[hsl(var(--destructive)/.08)] p-4 text-sm text-[hsl(var(--destructive))]">
+          Não foi possível carregar seu perfil; por segurança, a reserva de horários está indisponível. {teacherProfileError}
+        </p>
+      )}
+      {mode === "quick" ? (
         <QuickAccess
           dates={workWeekDates}
           cartNames={cartNames}
@@ -1473,13 +3312,19 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           periodFilter={periodFilter}
           readOnly={readOnly}
           canDirectBook={canDirectBook}
+          canTeacherBook={canTeacherBook}
+          currentTeacherName={currentTeacherName}
+          teacherProfiles={teacherAccessAccounts}
+          teacherProfilesError={teacherAccessAccountsError}
+          teacherSegments={teacherSegments}
+          teacherProfileClassName={teacherProfileClassName}
           onCreateReservation={createReservationFromSheet}
           onUpdateReservation={updateReservationFromSheet}
           onDeleteReservation={deleteReservationFromSheet}
           classOptions={classEntries}
           roomOptions={roomOptions}
         />
-      ) : (
+      ) : mode === "complete" ? (
         <CompleteAccess
           dates={weekDates}
           reservations={visibleReservations}
@@ -1490,6 +3335,23 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           onVisibleColumnsChange={saveVisibleColumns}
           periodFilter={periodFilter}
         />
+      ) : (
+        <ReserveAccess
+          dates={weekDates}
+          reservations={visibleReservations}
+          reserveUnits={reserveUnits}
+          reserveStockCount={reserveStockCount}
+          reserveAssignments={reserveAssignments}
+          teacherNames={teacherAccounts.map((account) => account.name)}
+          rememberedPeople={campusSettings.reserveResponsiblePeople ?? []}
+          onUpdateReserveUnitAssignments={updateReserveUnitAssignments}
+          onRememberResponsiblePerson={rememberReserveResponsiblePerson}
+          periodFilter={periodFilter}
+          canEdit={canDirectBook}
+          onUpdateReservation={updateReservationFromSheet}
+        />
+      )}
+      </>
       )}
 
       {!readOnly && floorSuggestions.length > 0 && (

@@ -250,6 +250,27 @@ describe("Teacher first access", () => {
       expect(screen.queryByRole("option", { name: "2º ano A" })).not.toBeInTheDocument();
       expect(classroom).toBeEnabled();
     });
+
+    it("saves additional teaching segments for room filtering in the spreadsheet", async () => {
+      render(<TeacherProfilePage />);
+      expandSection("Dados do professor");
+
+      const additionalSegment = await screen.findByTestId(
+        "checkbox-additional-segment-medio",
+      );
+      fireEvent.change(await screen.findByTestId("select-teacher-class"), {
+        target: { value: "2º ano A" },
+      });
+      fireEvent.click(additionalSegment);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar cadastro" }));
+
+      await waitFor(() => {
+        expect(saveProfile).toHaveBeenCalledWith(expect.objectContaining({
+          segment: "Fundamental 1",
+          additionalSegments: ["Ensino Médio"],
+        }));
+      });
+    });
   });
 
   describe("Staff password changes", () => {
