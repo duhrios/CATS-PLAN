@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Reservation } from "@/lib/campus-data";
 import type { ClassRoomEntry } from "@/lib/room-directory";
 import { getMondayOfWeek, formatDateKey } from "@/lib/spreadsheet-view";
@@ -67,6 +67,10 @@ vi.mock("@/lib/reservations-api", () => ({
 }));
 
 describe("teacher spreadsheet view", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
@@ -142,6 +146,8 @@ describe("teacher spreadsheet view", () => {
   });
 
   it("allows teachers to book multiple free sheet slots only under their own name", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T09:00:00.000Z"));
     const replaceReservations = vi.fn();
     getSession.mockReturnValue({ role: "user", name: "Ana Souza" });
     loadTeacherProfile.mockResolvedValue({
@@ -173,6 +179,11 @@ describe("teacher spreadsheet view", () => {
         },
       },
       movementSettings: { allowCartATransitionScheduling: false },
+      campusSettings: {
+        sameDayBookingEnabled: true,
+        sameDayBookingWindows: [{ start: "06:00", end: "18:00" }],
+        reservationFreezeHours: 24,
+      },
       replaceReservations,
     });
     const monday = getMondayOfWeek(new Date());
@@ -227,6 +238,8 @@ describe("teacher spreadsheet view", () => {
   });
 
   it("limits Fundamental 1 teachers to the class and rooms assigned in their profile", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T09:00:00.000Z"));
     getSession.mockReturnValue({ role: "user", name: "Ana Souza" });
     loadTeacherProfile.mockResolvedValue({
       name: "Ana Souza",
@@ -255,6 +268,11 @@ describe("teacher spreadsheet view", () => {
         },
       },
       movementSettings: { allowCartATransitionScheduling: false },
+      campusSettings: {
+        sameDayBookingEnabled: true,
+        sameDayBookingWindows: [{ start: "06:00", end: "18:00" }],
+        reservationFreezeHours: 24,
+      },
       replaceReservations: vi.fn(),
     });
     const mondayKey = formatDateKey(getMondayOfWeek(new Date()));
@@ -457,8 +475,8 @@ describe("teacher spreadsheet view", () => {
         unavailableUnits: [],
         reservedUnits: ["B49", "B50", "B51"],
         reserveAssignments: {
-          B49: { teacher: "Ana Souza", date: monday, personType: "Professor" },
-          B50: { teacher: "Ana Souza", date: monday, personType: "Professor" },
+          B49: { teacher: "Ana Souza", date: monday, start: "09:45", personType: "Professor" },
+          B50: { teacher: "Ana Souza", date: monday, start: "09:45", personType: "Professor" },
           B51: {
             teacher: "Mauricio",
             date: monday,
@@ -479,6 +497,7 @@ describe("teacher spreadsheet view", () => {
     expect(manualRequest).toHaveTextContent("B49, B50");
     expect(manualRequest).toHaveTextContent("2");
     expect(manualRequest).toHaveTextContent("Atribuição manual");
+    expect(manualRequest).toHaveTextContent("Horário: 09:45");
     expect(manualRequest).not.toHaveTextContent("Mauricio");
     expect(screen.queryByText(
       "Nenhum professor solicitou Chromebooks de reserva nesta semana.",
@@ -561,11 +580,16 @@ describe("teacher spreadsheet view", () => {
     expect(screen.getByText(/B49, B50/)).toBeInTheDocument();
     expect(screen.getByLabelText("Data de atribuição dos Chromebooks"))
       .toHaveValue(formatDateKey(new Date()));
+    expect(screen.getByLabelText("Horário de atribuição dos Chromebooks"))
+      .toHaveAttribute("type", "time");
     fireEvent.change(screen.getByLabelText("Nome do responsável pelos Chromebooks"), {
       target: { value: "  Ana   Souza " },
     });
     fireEvent.change(screen.getByLabelText("Data de atribuição dos Chromebooks"), {
       target: { value: "2020-05-04" },
+    });
+    fireEvent.change(screen.getByLabelText("Horário de atribuição dos Chromebooks"), {
+      target: { value: "09:15" },
     });
     fireEvent.click(screen.getByTestId("button-assign-reserve-units"));
 
@@ -574,6 +598,7 @@ describe("teacher spreadsheet view", () => {
       {
         teacher: "Ana Souza",
         date: "2020-05-04",
+        start: "09:15",
         personType: "Professor",
       },
     );
@@ -631,7 +656,7 @@ describe("teacher spreadsheet view", () => {
         unavailableUnits: [],
         reservedUnits: ["B49", "B50"],
         reserveAssignments: {
-          B49: { teacher: "Ana Souza", date: "2026-10-12" },
+          B49: { teacher: "Ana Souza", date: "2026-10-12", start: "10:30" },
         },
       }],
       cartSchedules: {},
@@ -647,12 +672,16 @@ describe("teacher spreadsheet view", () => {
     expect(screen.queryByTestId("reserve-unit-B49")).not.toBeInTheDocument();
     expect(screen.getByTestId("reserve-unit-B50")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ana Souza" })).toBeInTheDocument();
+    expect(screen.getByTestId("reserve-assignment-B49")).toHaveTextContent("Horário: 10:30");
     fireEvent.click(screen.getByTestId("button-edit-reserve-assignment-B49"));
     fireEvent.change(screen.getByLabelText("Responsável pelo Chromebook B49"), {
       target: { value: "Bruna Lima" },
     });
     fireEvent.change(screen.getByLabelText("Data do Chromebook B49"), {
       target: { value: "2020-05-04" },
+    });
+    fireEvent.change(screen.getByLabelText("Horário do Chromebook B49"), {
+      target: { value: "11:00" },
     });
     fireEvent.click(screen.getByTestId("button-save-reserve-assignment-B49"));
 
@@ -661,6 +690,7 @@ describe("teacher spreadsheet view", () => {
       {
         teacher: "Bruna Lima",
         date: "2020-05-04",
+        start: "11:00",
         personType: "Funcionário/Autorizado",
       },
     );
@@ -914,6 +944,53 @@ describe("teacher spreadsheet view", () => {
     expect(lastSlot.className).toContain("border-b");
     expect(lastSlot.className).toContain("border-[#b9c4d1]");
     expect(lastSlot.className).not.toContain("last:border-b-0");
+  });
+
+  it("fills quick-access class and room in either direction without guessing ambiguous matches", async () => {
+    getRoomDirectory.mockReturnValue({
+      floorForRoom: () => null,
+      roomOptions: ["Sala 12", "Sala 14", "Sala 15", "Sala 18", "Sala 19"],
+      classEntries: [
+        { className: "3º ano B", room: "Sala 12", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+        { className: "4º ano A", room: "Sala 14", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+        { className: "5º ano A", room: "Sala 15", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+        { className: "6º ano A", room: "Sala 15", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+        { className: "7º ano A", room: "Sala 18", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+        { className: "7º ano A", room: "Sala 19", period: "Manhã", segment: "Fundamental 1", floor: "Térreo" },
+      ],
+    });
+    getCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{ name: "Carrinho A", unavailable: false }],
+      cartSchedules: {
+        "Carrinho A": {
+          Manhã: [{ id: "morning-slot", start: "07:00", end: "07:45" }],
+          Tarde: [],
+        },
+      },
+      movementSettings: { allowCartATransitionScheduling: false },
+      replaceReservations: vi.fn(),
+    });
+
+    render(<SpreadsheetViewPage />);
+    fireEvent.click((await screen.findAllByRole("button", {
+      name: "Reservar horário 07:00 para Carrinho A",
+    }))[0]);
+
+    const classInput = screen.getByLabelText("Ano ou série");
+    const roomInput = screen.getByLabelText("Sala");
+    fireEvent.change(classInput, { target: { value: "3º ano B" } });
+    expect(roomInput).toHaveValue("Sala 12");
+
+    fireEvent.change(roomInput, { target: { value: "Sala 14" } });
+    expect(classInput).toHaveValue("4º ano A");
+
+    fireEvent.change(roomInput, { target: { value: "Sala 15" } });
+    expect(classInput).toHaveValue("");
+
+    fireEvent.change(classInput, { target: { value: "7º ano A" } });
+    expect(roomInput).toHaveValue("");
   });
 
   it("lets an administrator type a teacher name directly into a free sheet slot and reserve it", async () => {

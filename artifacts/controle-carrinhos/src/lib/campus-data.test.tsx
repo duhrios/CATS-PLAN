@@ -10,6 +10,7 @@ import {
   getCartScheduleForDate,
   initialAdminAccounts,
   initialCarts,
+  isSameDayReservationAllowed,
   isWeekdayISO,
   normalizeCartSchedules,
   useCampusData,
@@ -450,6 +451,47 @@ describe('Campus data core logic', () => {
     expect(canCancelReservation(reservation, new Date('2026-09-24T07:00:01-03:00'))).toBe(false);
     expect(canCancelReservation(reservation, new Date('2026-09-25T06:00:00-03:00'))).toBe(false);
     expect(canCancelReservation(reservation, new Date('2026-09-25T08:00:00-03:00'))).toBe(false);
+  });
+
+  it("uses configured same-day windows and cutoff hours for teacher changes", () => {
+    const policy = {
+      sameDayBookingEnabled: true,
+      sameDayBookingWindows: [{ start: "12:00", end: "13:00" }],
+      reservationFreezeHours: 2,
+    };
+    const now = new Date("2026-11-23T10:00:00-03:00");
+
+    expect(isSameDayReservationAllowed(
+      "2026-11-23",
+      "12:00",
+      "12:45",
+      policy,
+      now,
+    )).toBe(true);
+    expect(isSameDayReservationAllowed(
+      "2026-11-23",
+      "13:00",
+      "13:45",
+      policy,
+      now,
+    )).toBe(false);
+    expect(isSameDayReservationAllowed(
+      "2026-11-23",
+      "09:00",
+      "09:45",
+      policy,
+      now,
+    )).toBe(false);
+    expect(canCancelReservation({
+      date: "2026-11-23",
+      start: "12:00",
+      end: "12:45",
+    }, policy, now)).toBe(true);
+    expect(canCancelReservation({
+      date: "2026-11-24",
+      start: "07:00",
+      end: "07:45",
+    }, policy, new Date("2026-11-24T05:30:00-03:00"))).toBe(false);
   });
 
   it('automatically assigns available units to a reserve request', () => {

@@ -11,6 +11,8 @@ import {
   type CartScheduleTemplate,
   type CartScheduleWeekday,
   type Reservation,
+  type ReservationTimeWindow,
+  defaultCampusSettings,
 } from "@/lib/campus-data";
 import { loadSharedReservations, replaceSharedReservations } from "@/lib/reservations-api";
 import { getAuthenticatedSession, verifySuperAdminCredentials } from "@/lib/auth-session";
@@ -298,6 +300,21 @@ export function ConfigurationPage() {
     ["factory", "Restaurar padrões de fábrica", "Limpar configurações e dados, preservando o Administrador.", Factory],
   ] as const;
   const { resetData, movementSettings, updateMovementSettings, campusSettings, updateCampusSettings, reservations, replaceReservations, carts } = useCampusData();
+  const sameDayBookingWindows =
+    campusSettings.sameDayBookingWindows ?? defaultCampusSettings.sameDayBookingWindows;
+  const reservationFreezeHours =
+    campusSettings.reservationFreezeHours ?? defaultCampusSettings.reservationFreezeHours;
+  const updateReservationPolicy = (
+    changes: Partial<typeof campusSettings>,
+  ) => updateCampusSettings({ ...defaultCampusSettings, ...campusSettings, ...changes });
+  const updateSameDayBookingWindow = (
+    index: number,
+    changes: Partial<ReservationTimeWindow>,
+  ) => updateReservationPolicy({
+    sameDayBookingWindows: sameDayBookingWindows.map((window, currentIndex) =>
+      currentIndex === index ? { ...window, ...changes } : window,
+    ),
+  });
   const scheduleFileInputRef = useRef<HTMLInputElement>(null);
   const [teacherSpreadsheetEnabled, setTeacherSpreadsheetEnabled] = useState(true);
   const [teacherSpreadsheetLoading, setTeacherSpreadsheetLoading] = useState(true);
@@ -535,6 +552,96 @@ export function ConfigurationPage() {
           <input type="checkbox" checked={movementSettings.allowCartATransitionScheduling} onChange={(event) => updateMovementSettings({ ...movementSettings, allowCartATransitionScheduling: event.target.checked })} className="h-4 w-4 accent-[hsl(var(--primary))]" />
           Permitir agendar o Carrinho A nos horários de transição (11:50 e 12:00)
         </label>
+      </div>
+    </SectionCard>
+    <SectionCard title="Congelamento e agendamento no mesmo dia" eyebrow="Disponibilidade da agenda">
+      <div className="space-y-4 p-4 sm:p-5">
+        <p className="max-w-3xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+          Defina quando os professores podem agendar ou alterar aulas. Por padrão, os agendamentos do mesmo dia ficam bloqueados e alterações futuras fecham 24 horas antes.
+        </p>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[hsl(var(--border))] p-4 text-sm">
+          <input
+            type="checkbox"
+            checked={campusSettings.sameDayBookingEnabled ?? defaultCampusSettings.sameDayBookingEnabled}
+            onChange={(event) => updateReservationPolicy({ sameDayBookingEnabled: event.target.checked })}
+            className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]"
+            data-testid="toggle-same-day-booking"
+          />
+          <span>
+            <span className="block font-semibold">Permitir agendamentos e alterações no mesmo dia</span>
+            <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">
+              Quando ativado, somente horários inteiramente dentro das faixas liberadas abaixo ficam disponíveis. Os demais continuam congelados.
+            </span>
+          </span>
+        </label>
+        <div className="grid max-w-3xl gap-4 md:grid-cols-[minmax(220px,280px)_1fr]">
+          <Field label="Congelar alterações de aulas antes do início (horas)">
+            <input
+              type="number"
+              min="0"
+              max="168"
+              step="1"
+              value={reservationFreezeHours}
+              onChange={(event) => updateReservationPolicy({
+                reservationFreezeHours: Math.min(168, Math.max(0, Number(event.target.value) || 0)),
+              })}
+              className={`${inputClass} h-10`}
+              data-testid="input-reservation-freeze-hours"
+            />
+            <span className="mt-1 block text-[11px] text-[hsl(var(--muted-foreground))]">
+              Aplicado a cancelamentos e alterações de aulas futuras. Use 0 para não congelar com antecedência.
+            </span>
+          </Field>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-[hsl(var(--foreground))]">Faixas liberadas no mesmo dia</p>
+            {sameDayBookingWindows.map((window, index) => (
+              <div key={index} className="flex flex-wrap items-end gap-2 rounded-lg border border-[hsl(var(--border))] p-3" data-testid={`same-day-window-${index}`}>
+                <Field label="Início">
+                  <input
+                    type="time"
+                    value={window.start}
+                    onChange={(event) => updateSameDayBookingWindow(index, { start: event.target.value })}
+                    className={`${inputClass} h-9`}
+                    data-testid={`same-day-window-start-${index}`}
+                  />
+                </Field>
+                <Field label="Fim">
+                  <input
+                    type="time"
+                    value={window.end}
+                    onChange={(event) => updateSameDayBookingWindow(index, { end: event.target.value })}
+                    className={`${inputClass} h-9`}
+                    data-testid={`same-day-window-end-${index}`}
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label={`Remover faixa liberada ${index + 1}`}
+                  onClick={() => updateReservationPolicy({
+                    sameDayBookingWindows: sameDayBookingWindows.filter((_, currentIndex) => currentIndex !== index),
+                  })}
+                  data-testid={`button-remove-same-day-window-${index}`}
+                >
+                  <Trash2 size={14} /> Remover
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => updateReservationPolicy({
+                sameDayBookingWindows: [...sameDayBookingWindows, { start: "12:00", end: "13:00" }],
+              })}
+              data-testid="button-add-same-day-window"
+            >
+              <Plus size={14} /> Adicionar faixa
+            </Button>
+            <p className="text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">
+              Exemplo: liberar 12:00–13:00 permite reservar uma aula das 12:00 às 12:45; os períodos da manhã e da tarde permanecem bloqueados.
+            </p>
+          </div>
+        </div>
       </div>
     </SectionCard>
     <SectionCard title="Identidade do colégio" eyebrow="Configurações operacionais">

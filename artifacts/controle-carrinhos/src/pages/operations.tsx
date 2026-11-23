@@ -52,7 +52,10 @@ import {
   isReservationInProgress,
   isWeekdayISO,
   canCancelReservation,
+  defaultCampusSettings,
   getCartScheduleForDate,
+  isSameDayReservationAllowed,
+  reservationSameDayWindowLabel,
   segments,
   type Reservation,
   type ReservationKind,
@@ -630,14 +633,25 @@ export function ReservationModal({
           : roomForClass(value, next.period, next.segment);
       }
       if (key === "room") {
-        const matchingClasses = classesForRoom(value, next.period);
+        const matchingClasses = classesForRoom(value, next.period, next.segment);
         if (matchingClasses.length === 1) next.className = matchingClasses[0];
       }
       if (key === "period") {
         const period = value as Period;
         const matchingRoom = roomForClass(next.className, period, next.segment);
-        const matchingClasses = classesForRoom(next.room, period);
-        if (matchingRoom) next.room = matchingRoom;
+        if (matchingRoom) {
+          next.room = matchingRoom;
+        } else {
+          const currentClassRooms = classEntries
+            .filter((entry) =>
+              entry.period === period &&
+              entry.segment === next.segment &&
+              normalizeTeacherName(entry.className) === normalizeTeacherName(next.className),
+            )
+            .map((entry) => entry.room);
+          if (!currentClassRooms.includes(next.room)) next.room = "";
+        }
+        const matchingClasses = classesForRoom(next.room, period, next.segment);
         if (matchingClasses.length === 1) next.className = matchingClasses[0];
       }
       if (key === "start" && next.kind === "Aula") {
@@ -663,13 +677,35 @@ export function ReservationModal({
   const matchedRoom = form.segment === "Contraturno"
     ? ""
     : roomForClass(form.className, form.period, form.segment);
-  const roomClasses = classesForRoom(form.room, form.period);
+  const roomClasses = classesForRoom(form.room, form.period, form.segment);
   const selectedRoomWifi = wifiRooms.find(
     (item) => item.room.toLowerCase() === form.room.toLowerCase(),
   );
   const mobileWifiPoints = wifiPoints.filter((point) => point.type === "Antena volante");
-  const sameDayBlocked =
+  const isSameDayClassBooking =
     mode === "user" && form.kind === "Aula" && form.date === todayISO();
+  const sameDayBlocked = isSameDayClassBooking &&
+    !isSameDayReservationAllowed(
+      form.date,
+      form.start,
+      form.end,
+      {
+        sameDayBookingEnabled: campusSettings.sameDayBookingEnabled ?? false,
+        sameDayBookingWindows: campusSettings.sameDayBookingWindows ?? [],
+      },
+    );
+  const sameDayWindowsLabel = reservationSameDayWindowLabel(
+    campusSettings.sameDayBookingWindows ?? defaultCampusSettings.sameDayBookingWindows,
+  );
+  const freezeHours = campusSettings.reservationFreezeHours ??
+    defaultCampusSettings.reservationFreezeHours;
+  const changeWindowBlocked =
+    mode === "user" &&
+    reservation !== undefined &&
+    !canCancelReservation(
+      reservation,
+      reservation.kind === "Aula" ? campusSettings : defaultCampusSettings,
+    );
   const isReserve = form.kind === "Reserva";
   const weekendBlocked = !isWeekdayISO(form.date);
   const availableSchedule = isReserve
@@ -786,7 +822,7 @@ export function ReservationModal({
             setError("Este carrinho já está reservado nesse horário. Escolha outro horário ou carrinho.");
             return;
           }
-          if (!sameDayBlocked) {
+          if (!sameDayBlocked && !changeWindowBlocked) {
             setSaving(true);
             try {
               const result = await onSave(reservationData);
@@ -1087,19 +1123,29 @@ export function ReservationModal({
           <div
             className={cx(
               "rounded-xl border px-3 py-3 text-xs leading-5",
-              sameDayBlocked || weekendBlocked
+              sameDayBlocked || weekendBlocked || changeWindowBlocked
                 ? "border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.08)] text-[hsl(var(--destructive))]"
-                : "border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.1)] text-[hsl(34_60%_32%)]",
+                : isSameDayClassBooking
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                  : "border-[hsl(var(--accent)/.45)] bg-[hsl(var(--accent)/.1)] text-[hsl(34_60%_32%)]",
             )}
             data-testid="text-reservation-date-rule"
           >
             {sameDayBlocked
-              ? "Não é possível criar ou alterar uma reserva de aula para hoje."
+              ? !campusSettings.sameDayBookingEnabled
+                ? "Não é possível criar ou alterar uma reserva de aula para hoje."
+                : sameDayWindowsLabel
+                  ? `Este horário está bloqueado para hoje. Faixas liberadas: ${sameDayWindowsLabel}.`
+                  : "Não há horários liberados para agendamento ou alteração no mesmo dia."
+              : isSameDayClassBooking
+                ? "Este horário está disponível para agendamento ou alteração hoje."
+              : changeWindowBlocked
+                ? `A alteração está bloqueada nas últimas ${freezeHours} hora(s) antes da aula. Procure o TI.`
               : weekendBlocked
                 ? "Agendamentos só podem ser feitos de segunda a sexta-feira."
                 : isReserve
                   ? "Chromebooks de reserva podem ser solicitados em qualquer horário."
-                  : "Reservas de aula do dia ficam bloqueadas para alteração."}
+                  : `Cancelamentos e alterações de horário ficam bloqueados nas últimas ${freezeHours} hora(s) antes da aula.`}
           </div>
         )}
         {!isReserve && (
@@ -1140,7 +1186,7 @@ export function ReservationModal({
           </Button>
           <Button
             type="submit"
-            disabled={sameDayBlocked || weekendBlocked || saving}
+            disabled={sameDayBlocked || changeWindowBlocked || weekendBlocked || saving}
             data-testid="button-save-reservation"
           >
             <Check size={15} />{" "}
@@ -1177,6 +1223,7 @@ export function ReservationsPage({
     deleteReservation,
     carts,
     movementSettings,
+    campusSettings,
   } = useCampusData();
   const recommendCart = (data: Omit<Reservation, "id" | "status">) => {
     if (data.kind !== "Aula" || data.cart === "Reservas") return data.cart;
@@ -1610,7 +1657,18 @@ export function ReservationsPage({
                         </tr>
                         {items
                           .sort((a, b) => a.start.localeCompare(b.start))
-                          .map((item) => (
+                          .map((item) => {
+                            const cancellationAllowed = canCancelReservation(
+                              item,
+                              item.kind === "Aula" ? campusSettings : defaultCampusSettings,
+                            );
+                            const sameDayReservation = item.date === todayISO();
+                            const sameDayRestriction = !campusSettings.sameDayBookingEnabled
+                              ? "Agendamentos e alterações para hoje estão bloqueados pelo administrador."
+                              : reservationSameDayWindowLabel(campusSettings.sameDayBookingWindows ?? [])
+                                ? `No mesmo dia, somente horários entre ${reservationSameDayWindowLabel(campusSettings.sameDayBookingWindows ?? [])} estão liberados.`
+                                : "Não há horários liberados para alteração no mesmo dia.";
+                            return (
                             <Fragment key={item.id}>
                             <tr
                               key={item.id}
@@ -1697,9 +1755,9 @@ export function ReservationsPage({
                                         <Button
                                           size="sm"
                                           variant="danger"
-                                          disabled={!canCancelReservation(item)}
+                                          disabled={!cancellationAllowed}
                                           onClick={() => {
-                                            if (canCancelReservation(item) && window.confirm("Cancelar este agendamento?")) {
+                                            if (cancellationAllowed && window.confirm("Cancelar este agendamento?")) {
                                               void handleDeleteReservation(item.id);
                                               setExpandedReservationId(null);
                                             }
@@ -1708,14 +1766,21 @@ export function ReservationsPage({
                                           Cancelar agendamento
                                         </Button>
                                       </div>
-                                      {!canCancelReservation(item) && <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">Cancelamento disponível até 24 horas antes. Depois desse prazo, inclusive no dia, procure o TI.</span>}
+                                      {!cancellationAllowed && (
+                                        <span className="self-center text-xs text-[hsl(var(--muted-foreground))]">
+                                          {sameDayReservation
+                                            ? sameDayRestriction
+                                            : `Cancelamento/alteração bloqueado nas últimas ${campusSettings.reservationFreezeHours ?? defaultCampusSettings.reservationFreezeHours} hora(s) antes da aula. Procure o TI.`}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 </td>
                               </tr>
                             )}
                             </Fragment>
-                          ))}
+                            );
+                          })}
                       </Fragment>
                     ))}
                 </tbody>
@@ -2951,7 +3016,7 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
 }
 
 export function HistoryPage() {
-  const { movements, reservations } = useCampusData();
+  const { movements, reservations, carts = [] } = useCampusData();
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
   const [period, setPeriod] = useState("Todos");
@@ -2959,8 +3024,8 @@ export function HistoryPage() {
   const [person, setPerson] = useState("Todos");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [exported, setExported] = useState(false);
-  const types = ["Todos", "Reserva", "Equipamento", "Wi-Fi", "Movimentação"];
-  type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "TI" };
+  const types = ["Todos", "Reservas", "Aulas", "Equipamento", "Wi-Fi", "Movimentação"];
+  type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "Funcionário/Autorizado" | "TI" };
   const formatHistoryDate = (value: string) => {
     const date = new Date(`${value}T12:00:00`);
     if (Number.isNaN(date.getTime())) return "Data indisponível";
@@ -2971,17 +3036,63 @@ export function HistoryPage() {
       year: "numeric",
     }).format(date);
   };
-  const reservationHistory: HistoryEvent[] = reservations.flatMap((reservation) => [{
-    id: `reservation-${reservation.id}`,
-    time: reservation.start,
-    date: reservation.date,
-    title: `Reserva ${reservation.status.toLocaleLowerCase("pt-BR")}`,
-    detail: `${reservation.className} · ${reservation.room} · ${reservation.cart} · Professor: ${reservation.teacher}`,
-    type: "Reserva",
-    tone: reservation.status === "Concluída" ? "good" : "neutral",
-    person: reservation.teacher,
-    profile: "Professor",
-  }]);
+  const reservationHistory: HistoryEvent[] = reservations.map((reservation) => {
+    const isReserveChromebooks = reservation.kind === "Reserva";
+    const assignedUnits = reservation.reservedChromebooks?.join(", ");
+    return {
+      id: `reservation-${reservation.id}`,
+      time: reservation.start,
+      date: reservation.date,
+      title: isReserveChromebooks
+        ? `Chromebooks de reserva ${reservation.status.toLocaleLowerCase("pt-BR")}`
+        : `Aula ${reservation.status.toLocaleLowerCase("pt-BR")}`,
+      detail: isReserveChromebooks
+        ? `${reservation.quantity} Chromebook${reservation.quantity === 1 ? "" : "s"}${assignedUnits ? ` · Unidades: ${assignedUnits}` : ""} · Professor: ${reservation.teacher}`
+        : `${reservation.className} · ${reservation.room} · ${reservation.cart} · Professor: ${reservation.teacher}`,
+      type: isReserveChromebooks ? "Reserva" : "Aula",
+      tone: reservation.status === "Concluída" ? "good" : "neutral",
+      person: reservation.teacher,
+      profile: "Professor",
+    };
+  });
+  const reserveAssignmentHistory: HistoryEvent[] = carts.flatMap((cart) => {
+    const groups = new Map<string, {
+      date: string;
+      start: string;
+      teacher: string;
+      personType?: "Professor" | "Funcionário/Autorizado";
+      units: string[];
+    }>();
+    Object.entries(cart.reserveAssignments ?? {}).forEach(([unit, assignment]) => {
+      const start = assignment.start?.slice(0, 5) ?? "";
+      const key = [
+        normalizeTeacherName(assignment.teacher),
+        assignment.date,
+        start,
+        assignment.personType ?? "",
+      ].join("\u0000");
+      const group = groups.get(key) ?? {
+        date: assignment.date,
+        start,
+        teacher: assignment.teacher,
+        personType: assignment.personType,
+        units: [],
+      };
+      group.units.push(unit);
+      groups.set(key, group);
+    });
+    return [...groups.values()].map((assignment) => ({
+      id: `reserve-assignment-${cart.id}-${assignment.date}-${assignment.start || "no-time"}-${assignment.personType ?? "unknown"}-${normalizeTeacherName(assignment.teacher).replace(/[^a-z0-9]+/g, "-")}`,
+      time: assignment.start,
+      date: assignment.date,
+      title: "Chromebooks de reserva atribuídos",
+      detail: `${cart.name} · Chromebooks: ${assignment.units.sort((first, second) => first.localeCompare(second, "pt-BR", { numeric: true })).join(", ")}`,
+      type: "Reserva",
+      tone: "neutral",
+      person: assignment.teacher,
+      profile: assignment.personType,
+    }));
+  });
   const movementHistory: HistoryEvent[] = movements.flatMap((movement) => {
     const reservation = reservations.find((item) => item.id === movement.reservationId);
     if (!reservation) return [];
@@ -3066,7 +3177,7 @@ export function HistoryPage() {
         date: eventDate(movement.confirmedAt),
         title: "Recebimento confirmado pelo professor",
         detail: `${reservation.cart} · ${reservation.room} · Confirmado por: ${movement.confirmedBy ?? reservation.teacher}`,
-        type: "Reserva",
+        type: "Movimentação",
         tone: "good",
         person: eventPerson(movement.confirmedBy),
         profile: "Professor",
@@ -3074,7 +3185,11 @@ export function HistoryPage() {
     }
     return events;
   });
-  const historyEvents: HistoryEvent[] = [...reservationHistory, ...movementHistory].sort(
+  const historyEvents: HistoryEvent[] = [
+    ...reservationHistory,
+    ...reserveAssignmentHistory,
+    ...movementHistory,
+  ].sort(
     (first, second) =>
       second.date.localeCompare(first.date) ||
       second.time.localeCompare(first.time),
@@ -3093,7 +3208,7 @@ export function HistoryPage() {
   })();
   const filtered = historyEvents.filter(
     (event) =>
-      (type === "Todos" || event.type === type) &&
+      (type === "Todos" || (type === "Reservas" ? event.type === "Reserva" : type === "Aulas" ? event.type === "Aula" : event.type === type)) &&
       (profile === "Todos" || event.profile === profile) &&
       (person === "Todos" || event.person === person) &&
       (!periodStart || event.date >= periodStart) &&
@@ -3145,7 +3260,7 @@ export function HistoryPage() {
             </div>
             <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
               <span className="px-2 text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">Perfil</span>
-              {["Todos", "Professor", "TI"].map((item) => (
+              {["Todos", "Professor", "Funcionário/Autorizado", "TI"].map((item) => (
                 <button type="button" key={item} onClick={() => { setProfile(item); setPerson("Todos"); }} className={cx("rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors", profile === item ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm" : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]")} data-testid={`button-filter-profile-${item.toLowerCase()}`}>{item === "Professor" ? "Professores" : item}</button>
               ))}
             </div>
@@ -3198,7 +3313,7 @@ export function HistoryPage() {
                   </span>
                   <span className="inline-flex items-center gap-1 font-data text-xs font-bold text-[hsl(var(--foreground))]">
                     <Clock3 size={12} className="text-[hsl(var(--muted-foreground))]" />
-                    {event.time}
+                    {event.time || "Horário não informado"}
                   </span>
                 </div>
                 <div
@@ -3247,7 +3362,7 @@ export function HistoryPage() {
                     <div className="absolute right-0 top-9 z-10 w-44 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1.5 shadow-lg">
                       <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setQuery(event.title); setActiveMenu(null); }}>Filtrar este evento</button>
                       {event.person && <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setPerson(event.person ?? "Todos"); setActiveMenu(null); }}>Ver por esta pessoa</button>}
-                      <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setType(event.type); setActiveMenu(null); }}>Ver por tipo</button>
+                      <button type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-[hsl(var(--muted))]" onClick={() => { setType(event.type === "Reserva" ? "Reservas" : event.type === "Aula" ? "Aulas" : event.type); setActiveMenu(null); }}>Ver por tipo</button>
                     </div>
                   )}
                 </div>

@@ -82,6 +82,7 @@ export type CartMovement = {
 export type ReserveUnitAssignment = {
   teacher: string;
   date: string;
+  start?: string;
   personType?: ReserveResponsiblePersonType;
 };
 export type ReserveResponsiblePersonType = "Professor" | "Funcionário/Autorizado";
@@ -152,8 +153,11 @@ export type Reservation = {
 
 export const canCancelReservation = (
   reservation: Pick<Reservation, "date" | "start" | "end">,
-  now = new Date(),
+  settingsOrNow: Pick<CampusSettings, "sameDayBookingEnabled" | "sameDayBookingWindows" | "reservationFreezeHours"> | Date = defaultCampusSettings,
+  explicitNow = new Date(),
 ) => {
+  const settings = settingsOrNow instanceof Date ? defaultCampusSettings : settingsOrNow;
+  const now = settingsOrNow instanceof Date ? settingsOrNow : explicitNow;
   const parsedDate = new Date(`${reservation.date}T12:00:00Z`);
   const start = reservation.start.slice(0, 5);
   if (
@@ -164,8 +168,24 @@ export const canCancelReservation = (
   ) {
     return false;
   }
+  const current = brazilDateTimeParts(now);
+  if (reservation.date < current.date) return false;
+  if (reservation.date === current.date) {
+    return settings.sameDayBookingEnabled &&
+      validTime(reservation.end.slice(0, 5)) &&
+      start > current.time &&
+      isTimeInsideWindow(
+        start,
+        reservation.end.slice(0, 5),
+        settings.sameDayBookingWindows,
+        true,
+      );
+  }
   const startsAt = new Date(`${reservation.date}T${start}:00-03:00`);
-  return startsAt.getTime() - now.getTime() >= 24 * 60 * 60 * 1000;
+  const freezeHours = Number.isFinite(settings.reservationFreezeHours)
+    ? Math.max(0, Math.min(168, settings.reservationFreezeHours))
+    : 24;
+  return startsAt.getTime() - now.getTime() >= freezeHours * 60 * 60 * 1000;
 };
 
 export type Cart = {
@@ -754,8 +774,15 @@ export type CampusSettings = {
   agendaLabel: string;
   reservationsEnabled: boolean;
   reservationLimit: number;
+  sameDayBookingEnabled: boolean;
+  sameDayBookingWindows: ReservationTimeWindow[];
+  reservationFreezeHours: number;
   reserveUnits: string[];
   reserveResponsiblePeople?: ReserveResponsiblePerson[];
+};
+export type ReservationTimeWindow = {
+  start: string;
+  end: string;
 };
 export const defaultCampusSettings: CampusSettings = {
   campusName: "",
@@ -763,9 +790,69 @@ export const defaultCampusSettings: CampusSettings = {
   agendaLabel: "Agenda",
   reservationsEnabled: true,
   reservationLimit: 10,
+  sameDayBookingEnabled: false,
+  sameDayBookingWindows: [{ start: "12:00", end: "13:00" }],
+  reservationFreezeHours: 24,
   reserveUnits: [],
   reserveResponsiblePeople: [],
 };
+
+const validTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+const brazilDateTimeParts = (date: Date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    time: `${value("hour")}:${value("minute")}`,
+  };
+};
+const isTimeInsideWindow = (
+  start: string,
+  end: string,
+  windows: ReservationTimeWindow[],
+  requireFullContainment: boolean,
+) => windows.some((window) =>
+  validTime(window.start) &&
+  validTime(window.end) &&
+  window.start < window.end &&
+  (requireFullContainment
+    ? start >= window.start && end <= window.end
+    : start >= window.start && start < window.end),
+);
+export const isSameDayReservationAllowed = (
+  date: string,
+  start: string,
+  end: string,
+  settings: Pick<CampusSettings, "sameDayBookingEnabled" | "sameDayBookingWindows">,
+  now = new Date(),
+) => {
+  if (
+    !settings.sameDayBookingEnabled ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !validTime(start) ||
+    !validTime(end) ||
+    start >= end
+  ) return false;
+  const current = brazilDateTimeParts(now);
+  return date === current.date &&
+    start > current.time &&
+    isTimeInsideWindow(start, end, settings.sameDayBookingWindows, true);
+};
+export const reservationSameDayWindowLabel = (
+  windows: ReservationTimeWindow[] = defaultCampusSettings.sameDayBookingWindows,
+) => windows
+  .filter((window) => validTime(window.start) && validTime(window.end) && window.start < window.end)
+  .map((window) => `${window.start}–${window.end}`)
+  .join(", ");
 export const emptyCartSchedules: Record<string, CartScheduleTemplate> = {};
 export const defaultMovementSettings: MovementSettings = {
   alertIntervalMinutes: 10,

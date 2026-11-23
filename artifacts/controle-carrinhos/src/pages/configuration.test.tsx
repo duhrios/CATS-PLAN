@@ -2,12 +2,14 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigurationPage } from "./configuration";
 
-const { resetData, verifySuperAdminCredentials } = vi.hoisted(() => ({
+const { resetData, updateCampusSettings, verifySuperAdminCredentials } = vi.hoisted(() => ({
   resetData: vi.fn(),
+  updateCampusSettings: vi.fn(),
   verifySuperAdminCredentials: vi.fn(),
 }));
 
-vi.mock("@/lib/campus-data", () => ({
+vi.mock("@/lib/campus-data", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/campus-data")>(),
   buildCartSchedule: vi.fn(),
   segments: [],
   useCampusData: () => ({
@@ -21,8 +23,18 @@ vi.mock("@/lib/campus-data", () => ({
       allowCartATransitionScheduling: false,
     },
     updateMovementSettings: vi.fn(),
-    campusSettings: { campusName: "", coordinatorName: "", agendaLabel: "" },
-    updateCampusSettings: vi.fn(),
+    campusSettings: {
+      campusName: "",
+      coordinatorName: "",
+      agendaLabel: "",
+      reservationsEnabled: true,
+      reservationLimit: 10,
+      sameDayBookingEnabled: false,
+      sameDayBookingWindows: [{ start: "12:00", end: "13:00" }],
+      reservationFreezeHours: 24,
+      reserveUnits: [],
+    },
+    updateCampusSettings,
     reservations: [],
     replaceReservations: vi.fn(),
     carts: [],
@@ -105,5 +117,29 @@ describe("configuration data maintenance", () => {
       "senha-super-admin",
     );
     expect(window.confirm).toHaveBeenCalled();
+  });
+
+  it("lets administrators enable same-day scheduling and configure released intervals", () => {
+    render(<ConfigurationPage />);
+
+    fireEvent.click(screen.getByTestId("toggle-same-day-booking"));
+    expect(updateCampusSettings).toHaveBeenCalledWith(expect.objectContaining({
+      sameDayBookingEnabled: true,
+      sameDayBookingWindows: [{ start: "12:00", end: "13:00" }],
+    }));
+
+    fireEvent.change(screen.getByTestId("same-day-window-start-0"), {
+      target: { value: "11:00" },
+    });
+    expect(updateCampusSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      sameDayBookingWindows: [{ start: "11:00", end: "13:00" }],
+    }));
+
+    fireEvent.change(screen.getByTestId("input-reservation-freeze-hours"), {
+      target: { value: "4" },
+    });
+    expect(updateCampusSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      reservationFreezeHours: 4,
+    }));
   });
 });

@@ -8,7 +8,11 @@ import {
   usersTable,
 } from "@workspace/db/schema";
 import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
-import { isReservationCancellationAllowed } from "../lib/reservation-rules";
+import {
+  isReservationCancellationAllowed,
+  isSameDayReservationAllowed,
+  type ReservationPolicy,
+} from "../lib/reservation-rules";
 import { getRoomDirectory } from "../lib/room-directory";
 import {
   teacherCanReserveRoom,
@@ -35,6 +39,45 @@ const requiredText = (value: unknown, field: string) => {
     throw new Error(`${field} é obrigatório.`);
   }
   return value.trim();
+};
+const reservationSettingsKey = "operational-state-v1";
+const getBrazilDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+};
+const loadReservationPolicy = async (): Promise<ReservationPolicy> => {
+  const [setting] = await db
+    .select({ value: campusSettingsTable.value })
+    .from(campusSettingsTable)
+    .where(eq(campusSettingsTable.key, reservationSettingsKey))
+    .limit(1);
+  if (!setting) return {};
+  let state: unknown;
+  try {
+    state = JSON.parse(setting.value);
+  } catch {
+    throw new Error("As configurações operacionais salvas estão inválidas.");
+  }
+  if (!state || typeof state !== "object" || Array.isArray(state)) return {};
+  const campusSettings = (state as Record<string, unknown>).campusSettings;
+  if (!campusSettings || typeof campusSettings !== "object" || Array.isArray(campusSettings)) return {};
+  const settings = campusSettings as Record<string, unknown>;
+  return {
+    sameDayBookingEnabled: settings.sameDayBookingEnabled === true,
+    sameDayBookingWindows: Array.isArray(settings.sameDayBookingWindows)
+      ? settings.sameDayBookingWindows as ReservationPolicy["sameDayBookingWindows"]
+      : [],
+    reservationFreezeHours: typeof settings.reservationFreezeHours === "number"
+      ? settings.reservationFreezeHours
+      : 24,
+  };
 };
 
 const isScheduledTimeInPast = (date: string, startTime: string, now = new Date()) => {
@@ -144,6 +187,20 @@ const saveReservation = async (
     }
     const kind = body.kind === "Reserva" ? "Reserva" : "Aula";
     const teacherName = linkedTeacher?.name ?? requiredText(body.teacherName, "Professor");
+    if (
+      session?.role === "user" &&
+      kind === "Aula" &&
+      scheduledDate === getBrazilDate()
+    ) {
+      const policy = await loadReservationPolicy();
+      if (!isSameDayReservationAllowed(scheduledDate, startTime, endTime, policy)) {
+        return res.status(409).json({
+          error: policy.sameDayBookingEnabled
+            ? "Este horário está bloqueado para agendamento no mesmo dia. Escolha um horário liberado nas configurações da agenda."
+            : "Agendamentos de aula no mesmo dia estão bloqueados pelo administrador.",
+        });
+      }
+    }
     if (session?.role === "admin" && !linkedTeacher) {
       const matchingTeachers = await db
         .select({ id: usersTable.id, name: usersTable.name })
@@ -342,10 +399,16 @@ router.put("/reservations/:id", requireSameOrigin, requireSession, async (req, r
   const [reservation] = await db
     .select({
       teacherId: reservationsTable.teacherId,
+      kind: reservationsTable.kind,
       scheduledDate: reservationsTable.scheduledDate,
       startTime: reservationsTable.startTime,
       endTime: reservationsTable.endTime,
       cartId: reservationsTable.cartId,
+      className: reservationsTable.className,
+      room: reservationsTable.room,
+      segment: reservationsTable.segment,
+      subject: reservationsTable.subject,
+      period: reservationsTable.period,
     })
     .from(reservationsTable)
     .where(eq(reservationsTable.id, reservationId))
@@ -373,6 +436,37 @@ router.put("/reservations/:id", requireSameOrigin, requireSession, async (req, r
       body.startTime !== reservation.startTime ||
       body.endTime !== reservation.endTime ||
       nextCartId !== reservation.cartId);
+  const reservationDetailsChanged =
+    body.className !== reservation.className ||
+    body.room !== reservation.room ||
+    body.segment !== reservation.segment ||
+    body.subject !== reservation.subject ||
+    body.period !== reservation.period;
+  if (
+    session?.role === "user" &&
+    (scheduleChanged || reservationDetailsChanged) &&
+    reservation.kind === "Aula"
+  ) {
+    const policy = await loadReservationPolicy();
+    const newDate = body.scheduledDate as string;
+    const newStart = body.startTime as string;
+    const newEnd = body.endTime as string;
+    const canKeepCurrent = isReservationCancellationAllowed(
+      reservation.scheduledDate,
+      reservation.startTime,
+      new Date(),
+      policy,
+    );
+    const canMoveToNewDate = newDate !== getBrazilDate() ||
+      isSameDayReservationAllowed(newDate, newStart, newEnd, policy);
+    if (!canKeepCurrent || !canMoveToNewDate) {
+      return res.status(409).json({
+        error: policy.sameDayBookingEnabled
+          ? "Alteração bloqueada pelo congelamento da agenda ou pela faixa de horário configurada."
+          : "Alterações de aula estão bloqueadas pelo congelamento da agenda. Procure o TI.",
+      });
+    }
+  }
   if (
     scheduleChanged &&
     (isScheduledTimeInPast(reservation.scheduledDate, reservation.startTime) ||
@@ -397,6 +491,7 @@ router.delete("/reservations/:id", requireSameOrigin, requireSession, async (req
     const [reservation] = await db
       .select({
         teacherId: reservationsTable.teacherId,
+        kind: reservationsTable.kind,
         scheduledDate: reservationsTable.scheduledDate,
         startTime: reservationsTable.startTime,
       })
@@ -407,14 +502,21 @@ router.delete("/reservations/:id", requireSameOrigin, requireSession, async (req
     if (!session.accountId || reservation.teacherId !== session.accountId) {
       return res.status(403).json({ error: "Você só pode remover seus próprios agendamentos." });
     }
-    if (
-      !isReservationCancellationAllowed(
-        reservation.scheduledDate,
-        reservation.startTime,
-      )
-    ) {
+    const policy = reservation.kind === "Aula"
+      ? await loadReservationPolicy()
+      : {};
+    if (!isReservationCancellationAllowed(
+      reservation.scheduledDate,
+      reservation.startTime,
+      new Date(),
+      policy,
+    )) {
       return res.status(409).json({
-        error: "O cancelamento deve ser feito com pelo menos 24 horas de antecedência. No dia do agendamento, procure o TI.",
+        error: reservation.scheduledDate === getBrazilDate()
+          ? policy.sameDayBookingEnabled
+            ? "O cancelamento está bloqueado para este horário no mesmo dia. Procure o TI."
+            : "O cancelamento de aulas no mesmo dia está bloqueado pelo administrador. Procure o TI."
+          : `O cancelamento deve respeitar o congelamento de ${policy.reservationFreezeHours ?? 24} hora(s) antes da aula. Procure o TI.`,
       });
     }
   }

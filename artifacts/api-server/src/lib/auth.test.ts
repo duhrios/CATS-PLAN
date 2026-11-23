@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  authenticate,
   establishSession,
   hashPassword,
   isAllowedOrigin,
@@ -10,7 +11,11 @@ import {
   verifyPassword,
 } from "./auth";
 
-vi.mock("@workspace/db", () => ({ db: {} }));
+const { dbMock } = vi.hoisted(() => ({
+  dbMock: { select: vi.fn() },
+}));
+
+vi.mock("@workspace/db", () => ({ db: dbMock }));
 
 const makeResponse = () => ({
   status: vi.fn().mockReturnThis(),
@@ -20,10 +25,15 @@ const makeResponse = () => ({
 
 describe("API authentication safeguards", () => {
   beforeEach(() => {
+    dbMock.select.mockReset();
     vi.stubEnv("SESSION_SECRET", "test-session-secret-that-is-at-least-32-bytes-long");
     vi.stubEnv("APP_BASE_URL", "https://school.example");
     vi.stubEnv("CORS_ORIGINS", "");
     vi.stubEnv("NODE_ENV", "production");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("verifies scrypt passwords and rejects malformed or incorrect hashes", () => {
@@ -32,6 +42,40 @@ describe("API authentication safeguards", () => {
     expect(verifyPassword("correct-horse-battery", encoded)).toBe(true);
     expect(verifyPassword("incorrect-password", encoded)).toBe(false);
     expect(verifyPassword("anything", "plain-text-password")).toBe(false);
+  });
+
+  it("uses the saved admin password when it matches the bootstrap hash after setup", async () => {
+    const password = "saved-admin-password";
+    const passwordHash = hashPassword(password);
+    vi.stubEnv("ADMIN_USERNAME", "Administrador");
+    vi.stubEnv("ADMIN_PASSWORD_HASH", passwordHash);
+    dbMock.select
+      .mockReturnValueOnce({
+        from: () => ({
+          where: async () => [{
+            id: 8,
+            name: "Administrador",
+            email: "admin-bootstrap@local.invalid",
+            passwordHash,
+            active: true,
+          }],
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ value: "true" }],
+          }),
+        }),
+      });
+
+    await expect(authenticate("admin", "Administrador", password))
+      .resolves.toMatchObject({
+        role: "admin",
+        accountId: 8,
+        mustChangePassword: false,
+      });
+    expect(dbMock.select).toHaveBeenCalledTimes(1);
   });
 
   it("signs a session cookie and reads back the authenticated identity", () => {

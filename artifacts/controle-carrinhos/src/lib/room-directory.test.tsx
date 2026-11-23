@@ -158,6 +158,52 @@ describe("Room directory factory reset", () => {
     expect(result.current.roomOptionsForSegment("Fundamental 1")).toEqual([]);
   });
 
+  it("only infers a class-room link when the match is unique within its segment", async () => {
+    getRole.mockReturnValue("admin");
+    loadSharedRooms.mockResolvedValue({
+      configured: true,
+      rooms: [
+        {
+          id: "room-12",
+          number: "12",
+          floor: "Térreo",
+          segment: "Fundamental 1",
+          morningClasses: ["3º ano B"],
+          afternoonClasses: [],
+        },
+        {
+          id: "room-14",
+          number: "14",
+          floor: "Térreo",
+          segment: "Fundamental 1",
+          morningClasses: ["3º ano B"],
+          afternoonClasses: [],
+        },
+        {
+          id: "room-15",
+          number: "15",
+          floor: "Térreo",
+          segment: "Fundamental 1",
+          morningClasses: ["5° ano A", "6° ano A"],
+          afternoonClasses: [],
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.rooms).toHaveLength(3));
+
+    expect(result.current.roomForClass("3º ano B", "Manhã", "Fundamental 1")).toBe("");
+    expect(result.current.roomForClass("5° ano A", "Manhã", "Fundamental 1")).toBe("Sala 15");
+    expect(result.current.classesForRoom("Sala 15", "Manhã")).toEqual([
+      "5° ano A",
+      "6° ano A",
+    ]);
+    expect(result.current.classesForRoom("Sala 15", "Manhã", "Fundamental 1")).toEqual([
+      "5° ano A",
+    ]);
+  });
+
   it("replaces only the known five-room demo catalog with the configured campus layout", async () => {
     vi.stubEnv("VITE_ENABLE_CAMPUS_SEED", "true");
     window.localStorage.setItem("controle-carrinhos-rooms", JSON.stringify([

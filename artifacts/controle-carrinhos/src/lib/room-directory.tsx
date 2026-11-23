@@ -37,7 +37,7 @@ type RoomDirectoryValue = {
   deleteRoom: (id: string) => void;
   deleteRooms: (ids: string[]) => void;
   roomForClass: (className: string, period?: Period, segment?: Segment) => string;
-  classesForRoom: (room: string, period: Period) => string[];
+  classesForRoom: (room: string, period: Period, segment?: Segment) => string[];
   floorForRoom: (room: string) => string;
 };
 
@@ -249,19 +249,32 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
 
   const roomForClass = (className: string, period?: Period, segment?: Segment) => {
     const input = normalize(className);
-    const entry = classEntries.find((item) => {
-      if (period && item.period !== period) return false;
-      if (segment && item.segment !== segment) return false;
+    const matchingRooms = new Map<string, string>();
+    classEntries.forEach((item) => {
+      if (period && item.period !== period) return;
+      if (segment && item.segment !== segment) return;
       const fullName = normalize(item.className);
       const classOnly = normalize(item.className.split(" · ")[0]);
-      return input === fullName || input === classOnly;
+      if (input === fullName || input === classOnly) {
+        matchingRooms.set(normalizeRoom(item.room), item.room);
+      }
     });
-    return entry?.room ?? "";
+    return matchingRooms.size === 1 ? [...matchingRooms.values()][0] : "";
   };
 
-  const classesForRoom = (room: string, period: Period) => classEntries
-    .filter((item) => item.period === period && normalizeRoom(item.room) === normalizeRoom(room))
-    .map((item) => item.className);
+  const classesForRoom = (room: string, period: Period, segment?: Segment) => {
+    const matchingClasses = new Map<string, string>();
+    classEntries.forEach((item) => {
+      if (
+        item.period === period &&
+        (!segment || item.segment === segment) &&
+        normalizeRoom(item.room) === normalizeRoom(room)
+      ) {
+        matchingClasses.set(normalize(item.className), item.className);
+      }
+    });
+    return [...matchingClasses.values()];
+  };
   const floorForRoom = (room: string) =>
     rooms.find((item) => normalizeRoom(roomLabel(item.number)) === normalizeRoom(room))?.floor ?? "Piso não informado";
 

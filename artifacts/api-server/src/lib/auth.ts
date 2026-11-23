@@ -236,6 +236,19 @@ export const authenticate = async (
   const isAdminBootstrapPassword = isConfiguredAdmin &&
     Boolean(configuredHash) &&
     verifyPassword(password, configuredHash!);
+  if (account?.passwordHash && verifyPassword(password, account.passwordHash)) {
+    return {
+      role,
+      name: account.name,
+      accountId: account.id,
+      isSuperAdmin:
+        role === "admin" &&
+        process.env.ADMIN_SUPER_ADMIN !== "false" &&
+        Boolean(configuredName) &&
+        configuredName!.trim().toLocaleLowerCase("pt-BR") === normalizedName,
+      mustChangePassword: false,
+    };
+  }
   if (isAdminBootstrapPassword) {
     const [bootstrapState] = await db
       .select({ value: campusSettingsTable.value })
@@ -251,20 +264,7 @@ export const authenticate = async (
       mustChangePassword: true,
     };
   }
-  if (account?.passwordHash) {
-    if (!verifyPassword(password, account.passwordHash)) return null;
-    return {
-      role,
-      name: account.name,
-      accountId: account.id,
-      isSuperAdmin:
-        role === "admin" &&
-        process.env.ADMIN_SUPER_ADMIN !== "false" &&
-        Boolean(configuredName) &&
-        configuredName!.trim().toLocaleLowerCase("pt-BR") === normalizedName,
-      mustChangePassword: false,
-    };
-  }
+  if (account?.passwordHash) return null;
 
   if (
     !configuredName ||

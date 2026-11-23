@@ -25,6 +25,7 @@ import { Button, PageHeader, StatusPill } from "@/components/app-ui";
 import {
   type Cart,
   type CartMovement,
+  type CampusSettings,
   type Reservation,
   type ReserveResponsiblePerson,
   type ReserveResponsiblePersonType,
@@ -33,6 +34,8 @@ import {
   type TeacherProfile,
   defaultCampusSettings,
   getCartScheduleForDate,
+  isSameDayReservationAllowed,
+  reservationSameDayWindowLabel,
   useCampusData,
 } from "@/lib/campus-data";
 import { type ClassRoomEntry, useRoomDirectory } from "@/lib/room-directory";
@@ -408,6 +411,7 @@ function QuickAccess({
   teacherProfilesError,
   teacherSegments,
   teacherProfileClassName,
+  campusSettings,
   onCreateReservation,
   onUpdateReservation,
   onDeleteReservation,
@@ -432,6 +436,7 @@ function QuickAccess({
   teacherProfilesError: string;
   teacherSegments: Segment[];
   teacherProfileClassName: string;
+  campusSettings: CampusSettings;
   onCreateReservation: (reservation: Omit<Reservation, "id" | "status">) => Promise<void>;
   onUpdateReservation: (reservation: Omit<Reservation, "id" | "status">, id: number) => Promise<void>;
   onDeleteReservation: (reservation: Reservation) => Promise<void>;
@@ -493,6 +498,49 @@ function QuickAccess({
         bookingProfileSegments.includes(entry.segment),
       )
       .map((entry) => entry.room))];
+  };
+  const changeBookingClass = (value: string, period: "Manhã" | "Tarde") => {
+    const normalizedClassName = normalizeSuggestionText(value);
+    const matchingEntries = bookingClassOptions(period).filter(
+      (entry) => normalizeSuggestionText(entry.className) === normalizedClassName,
+    );
+    const matchingRooms = [...new Map(
+      matchingEntries.map((entry) => [normalizeSuggestionText(entry.room), entry.room]),
+    ).values()];
+    const currentRoomMatches = matchingRooms.some(
+      (room) => normalizeSuggestionText(room) === normalizeSuggestionText(bookingRoom),
+    );
+    setBookingClass(value);
+    setBookingRoom(
+      matchingRooms.length === 1
+        ? matchingRooms[0]
+        : currentRoomMatches
+          ? bookingRoom
+          : "",
+    );
+    setBookingError("");
+  };
+  const changeBookingRoom = (value: string, period: "Manhã" | "Tarde") => {
+    const normalizedRoom = normalizeSuggestionText(value);
+    const matchingEntries = bookingClassOptions(period).filter(
+      (entry) => normalizeSuggestionText(entry.room) === normalizedRoom,
+    );
+    const matchingClasses = [...new Map(
+      matchingEntries.map((entry) => [
+        normalizeSuggestionText(entry.className),
+        entry.className,
+      ]),
+    ).values()];
+    const currentClassMatches = matchingClasses.some(
+      (className) => normalizeSuggestionText(className) === normalizeSuggestionText(bookingClass),
+    );
+    setBookingRoom(value);
+    if (matchingClasses.length === 1) {
+      setBookingClass(matchingClasses[0]);
+    } else if (matchingClasses.length > 1 && !currentClassMatches) {
+      setBookingClass("");
+    }
+    setBookingError("");
   };
   const selectBookingTeacher = (name: string, period: "Manhã" | "Tarde") => {
     const profile = teacherProfiles.find(
@@ -721,6 +769,22 @@ function QuickAccess({
     }));
     if (bookings.some(({ room, allowedRooms }) => !room || !allowedRooms.includes(room))) {
       setTeacherBookingError("Escolha, para cada horário, uma sala cadastrada pelo TI para sua turma e segmento.");
+      return;
+    }
+    if (bookings.some(({ slot }) =>
+      slot.date === formatDateKey(new Date()) &&
+      !isSameDayReservationAllowed(
+        slot.date,
+        slot.start,
+        slot.end,
+        campusSettings,
+      ),
+    )) {
+      setTeacherBookingError(
+        campusSettings.sameDayBookingEnabled
+          ? `Os horários de hoje estão bloqueados. Faixas liberadas: ${reservationSameDayWindowLabel(campusSettings.sameDayBookingWindows) || "nenhuma"}.`
+          : "Agendamentos para hoje estão bloqueados pelo administrador.",
+      );
       return;
     }
 
@@ -1010,6 +1074,11 @@ function QuickAccess({
             </div>
           </div>
           <div className="space-y-4 p-4 sm:p-5">
+            <p className="rounded-lg border border-[#d5e2f0] bg-[#f7faff] px-3 py-2 text-xs text-[#45617f]">
+              {campusSettings.sameDayBookingEnabled
+                ? `Agendamento no mesmo dia liberado somente entre ${reservationSameDayWindowLabel(campusSettings.sameDayBookingWindows) || "nenhum horário configurado"}.`
+                : "Agendamentos no mesmo dia estão bloqueados pelo administrador."}
+            </p>
             <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,0.85fr)] lg:items-end">
               <label className="space-y-1.5 text-xs font-semibold text-[#34445a]">
                 Turma ou série
@@ -1236,6 +1305,17 @@ function QuickAccess({
                             );
                             const targetKey = `${dateKey}-${cartName}-${period}-${row.start}-${row.end}`;
                             const isDropTarget = dropTarget === targetKey;
+                            const sameDayBlocked = Boolean(
+                              canTeacherBook &&
+                              slot &&
+                              dateKey === formatDateKey(new Date()) &&
+                              !isSameDayReservationAllowed(
+                                dateKey,
+                                slot.start,
+                                slot.end,
+                                campusSettings,
+                              ),
+                            );
                             return (
                               <div
                                 key={`${cartName}-${dateKey}-${row.start}-${rowIndex}`}
@@ -1290,20 +1370,8 @@ function QuickAccess({
                                         teacherSuggestionsError={teacherProfilesError}
                                         onTeacherChange={changeBookingTeacher}
                                         onTeacherSelect={(value) => selectBookingTeacher(value, period)}
-                                        onClassChange={(value) => {
-                                          setBookingClass(value);
-                                          setBookingError("");
-                                          if (selectedBookingTeacherProfile) {
-                                            const rooms = roomsForTeacherProfileClass(
-                                              selectedBookingTeacherProfile,
-                                              value,
-                                              period,
-                                              classOptions,
-                                            );
-                                            setBookingRoom(rooms.length === 1 ? rooms[0] : "");
-                                          }
-                                        }}
-                                        onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
+                                        onClassChange={(value) => changeBookingClass(value, period)}
+                                        onRoomChange={(value) => changeBookingRoom(value, period)}
                                         onSubmit={() => void createReservation({
                                             date: dateKey,
                                             cart: cartName,
@@ -1342,9 +1410,12 @@ function QuickAccess({
                                   ) : (
                                     canTeacherBook && slot ? (
                                       <button
+                                        disabled={sameDayBlocked}
                                         type="button"
                                         aria-pressed={teacherBookingSlots.some((item) => item.key === targetKey)}
-                                        aria-label={`${teacherBookingSlots.some((item) => item.key === targetKey) ? "Remover seleção de" : "Selecionar"} ${slot.start} ${slot.period}, ${dateFormatter.format(date)}, ${cartName}`}
+                                        aria-label={sameDayBlocked
+                                          ? `Bloqueado para agendamento no mesmo dia: ${slot.start} ${slot.period}, ${cartName}`
+                                          : `${teacherBookingSlots.some((item) => item.key === targetKey) ? "Remover seleção de" : "Selecionar"} ${slot.start} ${slot.period}, ${dateFormatter.format(date)}, ${cartName}`}
                                         data-testid={`teacher-book-slot-${targetKey}`}
                                         onClick={() => {
                                           setTeacherBookingSlots((current) =>
@@ -1375,15 +1446,17 @@ function QuickAccess({
                                           setTeacherBookingError("");
                                           setTeacherBookingMessage("");
                                         }}
-                                        className={`w-full rounded px-1 py-0.5 text-left ${
+                                        className={`w-full rounded px-1 py-0.5 text-left disabled:cursor-not-allowed disabled:text-red-500 ${
                                           teacherBookingSlots.some((item) => item.key === targetKey)
                                             ? "bg-[#d9ead3] font-semibold text-[#244421] outline outline-1 outline-[#54804c]"
                                             : "text-slate-400 hover:bg-[#e8eff7] hover:text-[#345779]"
                                         }`}
                                       >
-                                        {teacherBookingSlots.some((item) => item.key === targetKey)
-                                          ? "Selecionado"
-                                          : "Livre · selecionar"}
+                                        {sameDayBlocked
+                                          ? "Bloqueado hoje"
+                                          : teacherBookingSlots.some((item) => item.key === targetKey)
+                                            ? "Selecionado"
+                                            : "Livre · selecionar"}
                                       </button>
                                     ) : (
                                       <span className="text-slate-300">—</span>
@@ -1410,20 +1483,8 @@ function QuickAccess({
                                         teacherSuggestionsError={teacherProfilesError}
                                         onTeacherChange={changeBookingTeacher}
                                         onTeacherSelect={(value) => selectBookingTeacher(value, period)}
-                                        onClassChange={(value) => {
-                                          setBookingClass(value);
-                                          setBookingError("");
-                                          if (selectedBookingTeacherProfile) {
-                                            const rooms = roomsForTeacherProfileClass(
-                                              selectedBookingTeacherProfile,
-                                              value,
-                                              period,
-                                              classOptions,
-                                            );
-                                            setBookingRoom(rooms.length === 1 ? rooms[0] : "");
-                                          }
-                                        }}
-                                        onRoomChange={(value) => { setBookingRoom(value); setBookingError(""); }}
+                                        onClassChange={(value) => changeBookingClass(value, period)}
+                                        onRoomChange={(value) => changeBookingRoom(value, period)}
                                         onSubmit={() => void createReservation({
                                           date: dateKey,
                                           cart: cartName,
@@ -1874,6 +1935,12 @@ const getLocalDateKey = (date = new Date()) => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+const getLocalTime = (date = new Date()) => {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+const isValidLocalTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
 function ReserveAccess({
   dates,
@@ -1970,6 +2037,7 @@ function ReserveAccess({
   const [assignmentPersonType, setAssignmentPersonType] =
     useState<ReserveResponsiblePersonType>("Professor");
   const [assignmentDate, setAssignmentDate] = useState(getLocalDateKey);
+  const [assignmentStart, setAssignmentStart] = useState(getLocalTime);
   const [assignmentError, setAssignmentError] = useState("");
   const [editingAssignmentUnit, setEditingAssignmentUnit] = useState<string | null>(null);
   const [editingAssignment, setEditingAssignment] =
@@ -2043,16 +2111,18 @@ function ReserveAccess({
         return groups;
       }
 
-      const key = `${normalizePersonName(assignment.teacher)}\u0000${assignment.date}`;
+      const start = assignment.start?.slice(0, 5) ?? "";
+      const key = `${normalizePersonName(assignment.teacher)}\u0000${assignment.date}\u0000${start}`;
       const group = groups.get(key) ?? {
         teacher: assignment.teacher,
         date: assignment.date,
+        start,
         units: [] as string[],
       };
       group.units.push(assignment.unit);
       groups.set(key, group);
       return groups;
-    }, new Map<string, { teacher: string; date: string; units: string[] }>())
+    }, new Map<string, { teacher: string; date: string; start: string; units: string[] }>())
       .values(),
   )
     .map((request) => ({
@@ -2064,14 +2134,17 @@ function ReserveAccess({
     .sort(
       (first, second) =>
         first.date.localeCompare(second.date) ||
+        (first.start ?? "").localeCompare(second.start ?? "") ||
         first.teacher.localeCompare(second.teacher, "pt-BR"),
     );
   const manualRequestMatchesReservation = (request: {
     teacher: string;
     date: string;
+    start?: string;
   }, reservation: Reservation) =>
     request.date === reservation.date &&
-    normalizePersonName(request.teacher) === normalizePersonName(reservation.teacher);
+    normalizePersonName(request.teacher) === normalizePersonName(reservation.teacher) &&
+    (!request.start || request.start === reservation.start.slice(0, 5));
   const manualRequestForReservation = (reservation: Reservation) => {
     const request = manualRequests.find((item) =>
       manualRequestMatchesReservation(item, reservation),
@@ -2185,9 +2258,14 @@ function ReserveAccess({
       setAssignmentError("Informe uma data válida.");
       return;
     }
+    if (!isValidLocalTime(assignmentStart)) {
+      setAssignmentError("Informe um horário válido.");
+      return;
+    }
     onUpdateReserveUnitAssignments(selectedUnits, {
       teacher,
       date: assignmentDate,
+      start: assignmentStart,
       personType: assignmentPersonType,
     });
     onRememberResponsiblePerson(teacher, assignmentPersonType);
@@ -2195,11 +2273,13 @@ function ReserveAccess({
     setAssignmentTeacher("");
     setAssignmentPersonType("Professor");
     setAssignmentDate(getLocalDateKey());
+    setAssignmentStart(getLocalTime());
     setAssignmentError("");
   };
   const saveManualAssignmentEdit = (unit: string) => {
     const teacher = editingAssignment?.teacher.trim().replace(/\s+/g, " ") ?? "";
     const date = editingAssignment?.date ?? "";
+    const start = editingAssignment?.start ?? "";
     const personType =
       editingAssignment?.personType ??
       knownPersonTypeForName(teacher) ??
@@ -2207,11 +2287,12 @@ function ReserveAccess({
     const parsedDate = new Date(`${date}T12:00:00`);
     if (!teacher || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       Number.isNaN(parsedDate.getTime()) ||
-      getLocalDateKey(parsedDate) !== date) {
-      setAssignmentError("Informe um responsável e uma data válida.");
+      getLocalDateKey(parsedDate) !== date ||
+      !isValidLocalTime(start)) {
+      setAssignmentError("Informe um responsável, uma data e um horário válidos.");
       return;
     }
-    onUpdateReserveUnitAssignments([unit], { teacher, date, personType });
+    onUpdateReserveUnitAssignments([unit], { teacher, date, start, personType });
     onRememberResponsiblePerson(teacher, personType);
     setEditingAssignmentUnit(null);
     setEditingAssignment(null);
@@ -2417,7 +2498,7 @@ function ReserveAccess({
                 <X size={14} /> Cancelar seleção
               </Button>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1.2fr)_auto_auto]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1.2fr)_auto_auto_auto]">
               <select
                 aria-label="Categoria do responsável"
                 value={assignmentPersonType}
@@ -2450,6 +2531,14 @@ function ReserveAccess({
                 onChange={(event) => setAssignmentDate(event.target.value)}
                 className="rounded border border-[#c0ccda] bg-white px-2 py-1.5 text-sm text-[#173252]"
               />
+              <input
+                aria-label="Horário de atribuição dos Chromebooks"
+                type="time"
+                required
+                value={assignmentStart}
+                onChange={(event) => setAssignmentStart(event.target.value)}
+                className="rounded border border-[#c0ccda] bg-white px-2 py-1.5 text-sm text-[#173252]"
+              />
               <Button size="sm" onClick={saveManualAssignment} data-testid="button-assign-reserve-units">
                 Salvar na planilha
               </Button>
@@ -2461,7 +2550,7 @@ function ReserveAccess({
               </p>
             )}
             <p className="mt-2 text-[11px] text-slate-500">
-              A data inicia no dia de hoje. Você pode escolher uma data anterior. As unidades ficam fora da fila até a atribuição ser apagada.
+              A data e o horário começam preenchidos com o momento atual. Você pode ajustar ambos. As unidades ficam fora da fila até a atribuição ser apagada.
             </p>
           </div>
         )}
@@ -2511,7 +2600,7 @@ function ReserveAccess({
                 </div>
               </header>
               <div className="divide-y divide-[#e0e5eb]">
-                {group.assignments.map(({ unit, teacher, date, personType }) => {
+                {group.assignments.map(({ unit, teacher, date, start, personType }) => {
                   const editing = editingAssignmentUnit === unit && editingAssignment;
                   return (
                     <div
@@ -2521,7 +2610,7 @@ function ReserveAccess({
                     >
                       <span className="min-w-16 font-mono font-bold">{unit}</span>
                       {editing ? (
-                        <div className="grid flex-1 gap-2 sm:grid-cols-3">
+                        <div className="grid flex-1 gap-2 sm:grid-cols-4">
                           <ResponsibleNameCombobox
                             label={`Responsável pelo Chromebook ${unit}`}
                             value={editingAssignment.teacher}
@@ -2556,10 +2645,20 @@ function ReserveAccess({
                             }
                             className="rounded border border-[#c0ccda] px-2 py-1"
                           />
+                          <input
+                            aria-label={`Horário do Chromebook ${unit}`}
+                            type="time"
+                            required
+                            value={editingAssignment.start ?? ""}
+                            onChange={(event) =>
+                              setEditingAssignment({ ...editingAssignment, start: event.target.value })
+                            }
+                            className="rounded border border-[#c0ccda] px-2 py-1"
+                          />
                         </div>
                       ) : (
                         <span className="flex-1 text-slate-600">
-                          Data: {dateFormatter.format(new Date(`${date}T12:00:00`))}
+                          Data: {dateFormatter.format(new Date(`${date}T12:00:00`))} · Horário: {start?.slice(0, 5) || "não informado"}
                         </span>
                       )}
                       {canEdit && (
@@ -2573,7 +2672,7 @@ function ReserveAccess({
                             <>
                               <Button size="sm" variant="secondary" onClick={() => {
                                 setEditingAssignmentUnit(unit);
-                                setEditingAssignment({ teacher, date, personType });
+                                setEditingAssignment({ teacher, date, start, personType });
                                 setAssignmentError("");
                               }} data-testid={`button-edit-reserve-assignment-${unit}`}>Editar</Button>
                               <Button size="sm" variant="secondary" onClick={() => {
@@ -2629,7 +2728,7 @@ function ReserveAccess({
                     <span className="block font-semibold">
                       {dateFormatter.format(new Date(`${request.date}T12:00:00`))}
                     </span>
-                    <span className="mt-1 block">Atribuição manual</span>
+                    <span className="mt-1 block">Atribuição manual · Horário: {request.start || "não informado"}</span>
                   </td>
                   <td className="min-w-52 px-3 py-3">
                     <span className="block font-semibold">{request.teacher}</span>
@@ -3314,6 +3413,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           canDirectBook={canDirectBook}
           canTeacherBook={canTeacherBook}
           currentTeacherName={currentTeacherName}
+          campusSettings={campusSettings}
           teacherProfiles={teacherAccessAccounts}
           teacherProfilesError={teacherAccessAccountsError}
           teacherSegments={teacherSegments}

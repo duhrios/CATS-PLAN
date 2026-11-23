@@ -172,6 +172,58 @@ describe("reservation activity history", () => {
       "20 de outubro de 2026",
     );
     expect(screen.getByTestId("history-results-count")).toHaveTextContent("2 atividades encontradas");
+
+    fireEvent.click(screen.getByTestId("button-filter-history-reservas"));
+    expect(screen.queryByTestId(/^row-history-reservation-/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("history-results-count")).toHaveTextContent(
+      "0 atividades encontradas",
+    );
+
+    fireEvent.click(screen.getByTestId("button-filter-history-aulas"));
+    expect(screen.getAllByTestId(/^row-history-reservation-/)).toHaveLength(2);
+    expect(screen.getByTestId("history-results-count")).toHaveTextContent("2 atividades encontradas");
+  });
+
+  it("includes manually assigned reserve Chromebooks in the Reservas history filter with their time", () => {
+    useCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{
+        id: "cart-b",
+        name: "Carrinho B",
+        reserveAssignments: {
+          C48: {
+            teacher: "Kaique Moura",
+            date: "2026-11-18",
+            start: "10:25",
+            personType: "Professor",
+          },
+          C49: {
+            teacher: "Kaique Moura",
+            date: "2026-11-18",
+            start: "10:25",
+            personType: "Professor",
+          },
+          C50: {
+            teacher: "Kaique Moura",
+            date: "2026-11-18",
+            personType: "Professor",
+          },
+        },
+      }],
+    });
+
+    render(<HistoryPage />);
+    fireEvent.click(screen.getByTestId("button-filter-history-reservas"));
+
+    const rows = screen.getAllByTestId(/^row-history-reserve-assignment-/);
+    const timedRow = rows.find((row) => row.textContent?.includes("10:25"));
+    const legacyRow = rows.find((row) => row.textContent?.includes("C50"));
+    expect(timedRow).toHaveTextContent("Chromebooks de reserva atribuídos");
+    expect(timedRow).toHaveTextContent("Kaique Moura");
+    expect(timedRow).toHaveTextContent("C48, C49");
+    expect(legacyRow).toHaveTextContent("Horário não informado");
+    expect(screen.getByTestId("history-results-count")).toHaveTextContent("2 atividades encontradas");
   });
 });
 
