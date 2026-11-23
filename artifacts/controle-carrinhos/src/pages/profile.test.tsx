@@ -15,6 +15,7 @@ const {
   login,
   saveProfile,
   getSession,
+  updateTeacherAccount,
   updateStaffAccount,
   setLocation,
   updateTeacher,
@@ -30,6 +31,7 @@ const {
   login: vi.fn(),
   saveProfile: vi.fn(),
   getSession: vi.fn((): { role: string; isSuperAdmin: boolean; name: string } | null => null),
+  updateTeacherAccount: vi.fn(),
   updateStaffAccount: vi.fn(),
   setLocation: vi.fn(),
   updateTeacher: vi.fn(),
@@ -68,6 +70,8 @@ vi.mock("@/lib/teacher-accounts", () => ({
   createTeacherAccounts: createAccounts,
   deleteTeacherAccount: vi.fn(),
   loadTeacherAccounts: loadAccounts,
+  sortTeacherAccounts: (accounts: { name: string }[]) => accounts,
+  updateTeacherAccount,
 }));
 
 vi.mock("@/lib/teacher-profile", () => ({
@@ -269,6 +273,101 @@ describe("Teacher first access", () => {
           segment: "Fundamental 1",
           additionalSegments: ["Ensino Médio"],
         }));
+      });
+    });
+  });
+
+  describe("Admin teacher account editing", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      getSession.mockReturnValue({
+        role: "admin",
+        isSuperAdmin: true,
+        name: "Administrador",
+      });
+      loadStaffAccounts.mockResolvedValue([]);
+    });
+
+    it("lets an administrator edit a teacher's identity and registered class", async () => {
+      const teacherAccount = {
+        id: "21",
+        name: "Ana Souza",
+        email: "ana@escola.com.br",
+        segment: "Fundamental 1" as const,
+        subject: "",
+        className: "2º ano A",
+        mustSetPassword: false,
+      };
+      loadAccounts.mockResolvedValue([teacherAccount]);
+      updateTeacherAccount.mockImplementation(async (id, account) => ({
+        ...account,
+        id,
+        mustSetPassword: false,
+      }));
+
+      render(<TeacherProfilePage admin />);
+      await screen.findByTestId("row-teacher-21");
+      fireEvent.click(screen.getByTestId("button-edit-teacher-21"));
+
+      expect(screen.getByRole("dialog")).toHaveTextContent("A senha de acesso não será alterada.");
+      fireEvent.change(screen.getByTestId("input-edit-teacher-name"), {
+        target: { value: "  Ana   Medeiros " },
+      });
+      fireEvent.change(screen.getByTestId("input-edit-teacher-email"), {
+        target: { value: "ana.medeiros@escola.com.br" },
+      });
+      fireEvent.change(screen.getByTestId("select-edit-teacher-class"), {
+        target: { value: "2º ano A" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
+
+      await waitFor(() => {
+        expect(updateTeacherAccount).toHaveBeenCalledWith("21", {
+          name: "Ana Medeiros",
+          email: "ana.medeiros@escola.com.br",
+          segment: "Fundamental 1",
+          subject: "",
+          className: "2º ano A",
+          additionalSegments: [],
+        });
+      });
+      expect(await screen.findByTestId("row-teacher-21")).toBeInTheDocument();
+    });
+
+    it("lets an administrator edit subject and additional teaching segments", async () => {
+      loadAccounts.mockResolvedValue([{
+        id: "22",
+        name: "Bruno Lima",
+        email: "bruno@escola.com.br",
+        segment: "Fundamental 2",
+        subject: "Ciências",
+        className: "",
+        mustSetPassword: false,
+      }]);
+      updateTeacherAccount.mockImplementation(async (id, account) => ({
+        ...account,
+        id,
+        mustSetPassword: false,
+      }));
+
+      render(<TeacherProfilePage admin />);
+      await screen.findByTestId("row-teacher-22");
+      fireEvent.click(screen.getByTestId("button-edit-teacher-22"));
+      fireEvent.change(screen.getByTestId("input-edit-teacher-subject"), {
+        target: { value: "Matemática" },
+      });
+      fireEvent.click(screen.getByTestId("checkbox-edit-teacher-segment-medio"));
+      fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
+
+      await waitFor(() => {
+        expect(updateTeacherAccount).toHaveBeenCalledWith("22", {
+          name: "Bruno Lima",
+          email: "bruno@escola.com.br",
+          segment: "Fundamental 2",
+          subject: "Matemática",
+          className: "",
+          additionalSegments: ["Ensino Médio"],
+        });
       });
     });
   });

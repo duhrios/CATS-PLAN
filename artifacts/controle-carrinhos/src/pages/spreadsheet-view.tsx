@@ -38,7 +38,7 @@ import {
   reservationSameDayWindowLabel,
   useCampusData,
 } from "@/lib/campus-data";
-import { type ClassRoomEntry, useRoomDirectory } from "@/lib/room-directory";
+import { segmentAbbreviation, type ClassRoomEntry, useRoomDirectory } from "@/lib/room-directory";
 import { type TeacherAccessAccount, loadTeacherAccounts } from "@/lib/teacher-accounts";
 import { getAuthenticatedSession } from "@/lib/auth-session";
 import {
@@ -345,6 +345,12 @@ function QuickBookingForm({
   onCancel: () => void;
 }) {
   const suffix = `${cartName}-${start}`;
+  const selectedSegments = [...new Set(classOptions
+    .filter((entry) =>
+      entry.period === period &&
+      normalizeSuggestionText(entry.className) === normalizeSuggestionText(className),
+    )
+    .map((entry) => entry.segment))];
   return (
     <form
       className="space-y-1"
@@ -373,6 +379,7 @@ function QuickBookingForm({
         </p>
       )}
       <input required maxLength={80} aria-label="Ano ou série" placeholder="Ano / série" list={`quick-class-options-${suffix}`} value={className} disabled={saving} onChange={(event) => onClassChange(event.target.value)} className="w-full min-w-0 rounded border border-[#9baec4] bg-white px-1.5 py-1 text-[10px] text-[#172d49] outline-none focus:border-[#345779]" />
+      {selectedSegments.length > 0 && <div className="flex items-center gap-1" data-testid="quick-book-segment"><span className="text-[9px] text-slate-500">Etapa:</span>{selectedSegments.map((segment) => <span key={segment} title={segment} aria-label={`Etapa ${segment}`} className="rounded bg-[#eaf1f8] px-1.5 py-0.5 text-[9px] font-bold text-[#345779]">{segmentAbbreviation(segment)}</span>)}</div>}
       <datalist id={`quick-class-options-${suffix}`}>
         {[...new Set(classOptions.filter((entry) => entry.period === period).map((entry) => entry.className))].map((option) => <option key={option} value={option} />)}
       </datalist>
@@ -1149,7 +1156,7 @@ function QuickAccess({
                   </option>
                   {teacherClassOptions.map((entry) => (
                     <option key={teacherClassKey(entry)} value={teacherClassKey(entry)}>
-                      {entry.className} · {entry.segment}
+                      {entry.className} · {segmentAbbreviation(entry.segment)} ({entry.segment})
                     </option>
                   ))}
                 </select>

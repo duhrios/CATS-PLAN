@@ -21,6 +21,11 @@ export type NewTeacherAccount = {
   subject: string;
 };
 
+export type TeacherAccountUpdate = Pick<
+  TeacherAccessAccount,
+  "name" | "email" | "segment" | "subject" | "className" | "additionalSegments"
+>;
+
 export const sortTeacherAccounts = (accounts: TeacherAccessAccount[]) =>
   [...accounts].sort((a, b) =>
     a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }) ||
@@ -106,6 +111,18 @@ export async function createTeacherAccounts(
     throw new Error("O servidor não confirmou os acessos criados.");
   }
   return createdAccounts.map(parseTeacherAccount);
+}
+
+export async function updateTeacherAccount(
+  id: string,
+  account: TeacherAccountUpdate,
+): Promise<TeacherAccessAccount> {
+  const response = await request(`/api/auth/teacher-accounts/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(account),
+  });
+  const updatedAccount: unknown = await response.json();
+  return parseTeacherAccount(updatedAccount);
 }
 
 export async function completeTeacherRegistration(

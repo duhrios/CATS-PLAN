@@ -6,6 +6,7 @@ import {
   deleteTeacherAccount,
   loadTeacherAccounts,
   sortTeacherAccounts,
+  updateTeacherAccount,
 } from "./teacher-accounts";
 
 describe("teacher account API client", () => {
@@ -96,6 +97,45 @@ describe("teacher account API client", () => {
           segment: "Fundamental 1",
           subject: "",
         }],
+      }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  it("updates a teacher profile using the authenticated admin session", async () => {
+    const updatedAccount = {
+      id: "22",
+      name: "Bruno Lima",
+      email: "bruno@escola.com.br",
+      segment: "Fundamental 2",
+      subject: "Ciências",
+      className: "",
+      additionalSegments: ["Ensino Médio"],
+      mustSetPassword: false,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(updatedAccount), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateTeacherAccount("22", {
+      name: "Bruno Lima",
+      email: "bruno@escola.com.br",
+      segment: "Fundamental 2",
+      subject: "Ciências",
+      className: "",
+      additionalSegments: ["Ensino Médio"],
+    })).resolves.toEqual(updatedAccount);
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/teacher-accounts/22", {
+      method: "PUT",
+      body: JSON.stringify({
+        name: "Bruno Lima",
+        email: "bruno@escola.com.br",
+        segment: "Fundamental 2",
+        subject: "Ciências",
+        className: "",
+        additionalSegments: ["Ensino Médio"],
       }),
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },

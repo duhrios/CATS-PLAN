@@ -24,6 +24,17 @@ export type ClassRoomEntry = {
   floor: string;
 };
 
+export const segmentAbbreviation = (segment: Segment) => {
+  const abbreviations: Record<Segment, string> = {
+    "Educação Infantil": "EI",
+    "Fundamental 1": "F1",
+    "Fundamental 2": "F2",
+    "Ensino Médio": "EM",
+    Contraturno: "CT",
+  };
+  return abbreviations[segment];
+};
+
 type RoomDirectoryValue = {
   rooms: Room[];
   roomCatalogLoading: boolean;

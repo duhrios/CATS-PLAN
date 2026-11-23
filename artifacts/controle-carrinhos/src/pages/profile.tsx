@@ -24,7 +24,9 @@ import {
   loadTeacherAccounts,
   sortTeacherAccounts,
   type NewTeacherAccount,
+  type TeacherAccountUpdate,
   type TeacherAccessAccount,
+  updateTeacherAccount,
 } from "@/lib/teacher-accounts";
 import { loadTeacherProfile, saveTeacherProfile } from "@/lib/teacher-profile";
 import { useRoomDirectory } from "@/lib/room-directory";
@@ -55,6 +57,16 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const [teacherAccountsError, setTeacherAccountsError] = useState("");
   const [teacherActionError, setTeacherActionError] = useState("");
   const [teacherActionBusy, setTeacherActionBusy] = useState<string | null>(null);
+  const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null);
+  const [editingTeacherForm, setEditingTeacherForm] = useState<TeacherAccountUpdate>({
+    name: "",
+    email: "",
+    segment: "Fundamental 2",
+    subject: "",
+    className: "",
+  });
+  const [editingTeacherError, setEditingTeacherError] = useState("");
+  const [editingTeacherSaving, setEditingTeacherSaving] = useState(false);
   const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
   const [staffAccountsLoading, setStaffAccountsLoading] = useState(canManageStaff);
   const [staffAccountsError, setStaffAccountsError] = useState("");
@@ -88,8 +100,18 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
   const [editingAdminForm, setEditingAdminForm] = useState({ name: "", password: "" });
   const showSubject = form.segment === "Fundamental 2" || form.segment === "Ensino Médio";
   const showClass = form.segment === "Educação Infantil" || form.segment === "Fundamental 1";
+  const editingTeacherShowSubject =
+    editingTeacherForm.segment === "Fundamental 2" || editingTeacherForm.segment === "Ensino Médio";
+  const editingTeacherShowClass =
+    editingTeacherForm.segment === "Educação Infantil" || editingTeacherForm.segment === "Fundamental 1";
   const classOptions = [...new Set(classEntries
     .filter((entry) => entry.segment === form.segment && entry.className.trim().toLocaleLowerCase("pt-BR") !== "contraturno")
+    .map((entry) => entry.className))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const editingTeacherClassOptions = [...new Set(classEntries
+    .filter((entry) =>
+      entry.segment === editingTeacherForm.segment &&
+      entry.className.trim().toLocaleLowerCase("pt-BR") !== "contraturno",
+    )
     .map((entry) => entry.className))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   const refreshStaffAccounts = useCallback(async () => {
     const accounts = await loadStaffAccounts();
@@ -163,6 +185,66 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
         ? current.filter((item) => item !== id)
         : [...current, id],
     );
+  };
+
+  const openTeacherEditor = (account: TeacherAccessAccount) => {
+    setTeacherActionError("");
+    setEditingTeacherError("");
+    setEditingTeacherId(account.id);
+    setEditingTeacherForm({
+      name: account.name,
+      email: account.email,
+      segment: account.segment,
+      subject: account.subject,
+      className: account.className,
+      ...(account.additionalSegments ? { additionalSegments: account.additionalSegments } : {}),
+    });
+  };
+
+  const closeTeacherEditor = () => {
+    if (editingTeacherSaving) return;
+    setEditingTeacherId(null);
+    setEditingTeacherError("");
+  };
+
+  const saveTeacherEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingTeacherId) return;
+    setEditingTeacherError("");
+    setTeacherActionBusy(editingTeacherId);
+    setEditingTeacherSaving(true);
+    const account: TeacherAccountUpdate = {
+      ...editingTeacherForm,
+      name: editingTeacherForm.name.trim().replace(/\s+/g, " "),
+      email: editingTeacherForm.email.trim(),
+      subject: editingTeacherShowSubject ? editingTeacherForm.subject.trim() : "",
+      className: editingTeacherShowClass ? editingTeacherForm.className.trim() : "",
+      additionalSegments: (editingTeacherForm.additionalSegments ?? [])
+        .filter((segment) => segment !== editingTeacherForm.segment),
+    };
+    try {
+      await updateTeacherAccount(editingTeacherId, account);
+    } catch (cause) {
+      setEditingTeacherError(cause instanceof Error
+        ? cause.message
+        : "Não foi possível atualizar o cadastro do professor.");
+      setEditingTeacherSaving(false);
+      setTeacherActionBusy(null);
+      return;
+    }
+
+    setEditingTeacherId(null);
+    try {
+      await refreshTeacherAccounts();
+      setTeacherAccountsError("");
+    } catch (cause) {
+      setTeacherAccountsError(cause instanceof Error
+        ? `Cadastro atualizado, mas não foi possível atualizar a lista: ${cause.message}`
+        : "Cadastro atualizado, mas não foi possível atualizar a lista.");
+    } finally {
+      setEditingTeacherSaving(false);
+      setTeacherActionBusy(null);
+    }
   };
 
   const toggleOperatorSelection = (id: string) => {
@@ -524,10 +606,192 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
               </Button>
             </div>
           )}
-          <div className="overflow-x-auto"><table className="data-table w-full min-w-[720px] text-left"><thead><tr className="border-b border-[hsl(var(--border))]"><th className="px-3 py-3"><input type="checkbox" checked={teacherAccounts.length > 0 && teacherAccounts.every((account) => selectedTeacherIds.includes(account.id))} onChange={(event) => setSelectedTeacherIds(event.target.checked ? teacherAccounts.map((account) => account.id) : [])} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label="Selecionar todos os professores" /></th><th className="px-6 py-3">Nome</th><th className="px-3 py-3">E-mail de acesso</th><th className="px-3 py-3">Segmento</th><th className="px-3 py-3">Situação</th><th className="px-6 py-3 text-right">Ação</th></tr></thead><tbody>{teacherAccounts.map((account) => <tr key={account.id} data-testid={`row-teacher-${account.id}`}><td className="px-3 py-4"><input type="checkbox" checked={selectedTeacherIds.includes(account.id)} onChange={() => toggleTeacherSelection(account.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" aria-label={`Selecionar professor ${account.name}`} /></td><td className="px-6 py-4 text-sm font-semibold">{account.name}</td><td className="px-3 py-4 text-sm">{account.email}</td><td className="px-3 py-4 text-xs text-[hsl(var(--muted-foreground))]">{account.segment}</td><td className="px-3 py-4"><StatusPill status={account.mustSetPassword ? "Definir senha" : "Acesso ativo"} /></td><td className="px-6 py-4 text-right"><Button size="sm" variant="ghost" disabled={teacherActionBusy !== null} onClick={() => void removeTeacherAccount(account.id)} className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]">Excluir</Button></td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto">
+            <table className="data-table w-full min-w-[780px] text-left">
+              <thead>
+                <tr className="border-b border-[hsl(var(--border))]">
+                  <th className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={teacherAccounts.length > 0 && teacherAccounts.every((account) => selectedTeacherIds.includes(account.id))}
+                      onChange={(event) => setSelectedTeacherIds(event.target.checked ? teacherAccounts.map((account) => account.id) : [])}
+                      className="h-4 w-4 accent-[hsl(var(--primary))]"
+                      aria-label="Selecionar todos os professores"
+                    />
+                  </th>
+                  <th className="px-6 py-3">Nome</th>
+                  <th className="px-3 py-3">E-mail de acesso</th>
+                  <th className="px-3 py-3">Segmento</th>
+                  <th className="px-3 py-3">Situação</th>
+                  <th className="px-6 py-3 text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teacherAccounts.map((account) => (
+                  <tr key={account.id} data-testid={`row-teacher-${account.id}`}>
+                    <td className="px-3 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedTeacherIds.includes(account.id)}
+                        onChange={() => toggleTeacherSelection(account.id)}
+                        className="h-4 w-4 accent-[hsl(var(--primary))]"
+                        aria-label={`Selecionar professor ${account.name}`}
+                      />
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold">{account.name}</td>
+                    <td className="px-3 py-4 text-sm">{account.email}</td>
+                    <td className="px-3 py-4 text-xs text-[hsl(var(--muted-foreground))]">{account.segment}</td>
+                    <td className="px-3 py-4"><StatusPill status={account.mustSetPassword ? "Definir senha" : "Acesso ativo"} /></td>
+                    <td className="px-6 py-4">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={teacherActionBusy !== null}
+                          onClick={() => openTeacherEditor(account)}
+                          aria-label={`Editar professor ${account.name}`}
+                          data-testid={`button-edit-teacher-${account.id}`}
+                        >
+                          <Pencil size={14} /> Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={teacherActionBusy !== null}
+                          onClick={() => void removeTeacherAccount(account.id)}
+                          className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                        >
+                          Excluir
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {!teacherAccountsLoading && !teacherAccountsError && teacherAccounts.length === 0 && <p className="py-5 text-center text-sm text-[hsl(var(--muted-foreground))]">Nenhum professor cadastrado.</p>}
         </div>
       </SectionCard>
+      {editingTeacherId && <Modal title="Editar professor" onClose={closeTeacherEditor}>
+        <form className="space-y-5 p-5 sm:p-6" onSubmit={saveTeacherEdit} data-testid="form-edit-teacher">
+          <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+            Edite os mesmos dados disponíveis no perfil do professor. A senha de acesso não será alterada.
+          </p>
+          <Field label="Nome do professor">
+            <input
+              required
+              minLength={3}
+              maxLength={120}
+              value={editingTeacherForm.name}
+              onChange={(event) => setEditingTeacherForm({ ...editingTeacherForm, name: event.target.value })}
+              className={inputClass}
+              data-testid="input-edit-teacher-name"
+            />
+          </Field>
+          <Field label="E-mail de acesso">
+            <input
+              required
+              type="email"
+              maxLength={254}
+              value={editingTeacherForm.email}
+              onChange={(event) => setEditingTeacherForm({ ...editingTeacherForm, email: event.target.value })}
+              className={inputClass}
+              data-testid="input-edit-teacher-email"
+            />
+          </Field>
+          <Field label="Segmento principal">
+            <select
+              value={editingTeacherForm.segment}
+              onChange={(event) => {
+                const segment = event.target.value as Segment;
+                setEditingTeacherForm((current) => ({
+                  ...current,
+                  segment,
+                  subject: "",
+                  className: "",
+                  additionalSegments: (current.additionalSegments ?? []).filter((item) => item !== segment),
+                }));
+              }}
+              className={inputClass}
+              data-testid="select-edit-teacher-segment"
+            >
+              {segments.map((segment) => <option key={segment} value={segment}>{segment}</option>)}
+            </select>
+          </Field>
+          <fieldset className="space-y-2 rounded-xl border border-[hsl(var(--border))] p-3">
+            <legend className="px-1 text-xs font-semibold text-[hsl(var(--foreground))]">Também leciona em</legend>
+            {(["Fundamental 2", "Ensino Médio"] as Segment[])
+              .filter((segment) => segment !== editingTeacherForm.segment)
+              .map((segment) => (
+                <label key={segment} className="flex items-center gap-2 text-sm text-[hsl(var(--foreground))]">
+                  <input
+                    type="checkbox"
+                    checked={(editingTeacherForm.additionalSegments ?? []).includes(segment)}
+                    onChange={(event) => setEditingTeacherForm((current) => ({
+                      ...current,
+                      additionalSegments: event.target.checked
+                        ? [...new Set([...(current.additionalSegments ?? []), segment])]
+                        : (current.additionalSegments ?? []).filter((item) => item !== segment),
+                    }))}
+                    className="h-4 w-4 accent-[hsl(var(--primary))]"
+                    data-testid={`checkbox-edit-teacher-segment-${segment === "Ensino Médio" ? "medio" : "fundamental-2"}`}
+                  />
+                  {segment}
+                </label>
+              ))}
+            <p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+              As reservas exibem turmas e salas cadastradas pelo TI nos segmentos selecionados.
+            </p>
+          </fieldset>
+          {editingTeacherShowSubject
+            ? <Field label="Matéria" hint="Obrigatória para Fundamental 2 e Ensino Médio.">
+                <input
+                  required
+                  maxLength={120}
+                  value={editingTeacherForm.subject}
+                  onChange={(event) => setEditingTeacherForm({ ...editingTeacherForm, subject: event.target.value })}
+                  className={inputClass}
+                  placeholder="Ex.: Ciências"
+                  data-testid="input-edit-teacher-subject"
+                />
+              </Field>
+            : <p className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.3)] p-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+                Selecione a turma cadastrada pelo TI na sala correspondente.
+              </p>}
+          {editingTeacherShowClass && <Field
+            label="Turma"
+            hint={editingTeacherClassOptions.length
+              ? "Selecione uma turma já vinculada a uma sala pelo TI."
+              : "O TI precisa cadastrar uma sala e vincular as turmas antes de salvar."}
+          >
+            <select
+              required
+              value={editingTeacherForm.className}
+              onChange={(event) => setEditingTeacherForm({ ...editingTeacherForm, className: event.target.value })}
+              className={inputClass}
+              disabled={roomCatalogLoading || editingTeacherClassOptions.length === 0}
+              data-testid="select-edit-teacher-class"
+            >
+              <option value="">
+                {roomCatalogLoading
+                  ? "Carregando turmas..."
+                  : editingTeacherClassOptions.length
+                    ? "Selecione a turma"
+                    : "Nenhuma turma cadastrada"}
+              </option>
+              {editingTeacherClassOptions.map((className) => <option key={className} value={className}>{className}</option>)}
+            </select>
+          </Field>}
+          {editingTeacherError && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" role="alert">{editingTeacherError}</p>}
+          <div className="flex justify-end gap-2 border-t border-[hsl(var(--border))] pt-4">
+            <Button type="button" variant="ghost" onClick={closeTeacherEditor} disabled={editingTeacherSaving}>Cancelar</Button>
+            <Button type="submit" disabled={editingTeacherSaving}>
+              <Check size={15} /> {editingTeacherSaving ? "Salvando..." : "Salvar alterações"}
+            </Button>
+          </div>
+        </form>
+      </Modal>}
       {canManageStaff && <SectionCard title="Usuários TI" eyebrow="Criar acessos para movimentação" action={<Button size="sm" onClick={() => { setOperatorError(""); setOperatorForm({ name: "", password: "", role: "operator" }); setOperatorModalOpen(true); }}><Plus size={15} /> Criar usuário TI</Button>}>
         <div className="p-5 sm:p-6">
           {staffAccountsLoading && <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]" role="status">Carregando contas da equipe...</p>}

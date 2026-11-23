@@ -128,6 +128,22 @@ const validateProfile = (value: unknown) => {
   } as const;
 };
 
+const validateTeacherClass = async (profile: TeacherProfileMetadata) => {
+  const requiresClass =
+    profile.segment === "Educação Infantil" || profile.segment === "Fundamental 1";
+  if (!requiresClass) return null;
+  if (!profile.className) return "Selecione uma turma cadastrada pelo TI na sala.";
+
+  const { rooms } = await getRoomDirectory();
+  const classRegisteredByTi = rooms.some((room) =>
+    room.segment === profile.segment &&
+    [...room.morningClasses, ...room.afternoonClasses].includes(profile.className),
+  );
+  return classRegisteredByTi
+    ? null
+    : "Selecione uma turma cadastrada pelo TI em uma sala do seu segmento.";
+};
+
 const getAuthenticatedTeacher = async (req: Parameters<typeof requireSession>[0]) => {
   const session = getAuthSession(req);
   if (session?.role !== "user" || !session.accountId) return null;
@@ -180,22 +196,8 @@ router.put("/auth/teacher-profile", requireSameOrigin, requireSession, async (re
   const profileResult = validateProfile(req.body);
   if ("error" in profileResult) return res.status(400).json({ error: profileResult.error });
   const submittedProfile = profileResult.profile;
-  if (
-    (submittedProfile.segment === "Educação Infantil" || submittedProfile.segment === "Fundamental 1") &&
-    !submittedProfile.className
-  ) {
-    return res.status(400).json({ error: "Selecione uma turma cadastrada pelo TI na sala." });
-  }
-  if (submittedProfile.segment === "Educação Infantil" || submittedProfile.segment === "Fundamental 1") {
-    const { rooms } = await getRoomDirectory();
-    const classRegisteredByTi = rooms.some((room) =>
-      room.segment === submittedProfile.segment &&
-      [...room.morningClasses, ...room.afternoonClasses].includes(submittedProfile.className),
-    );
-    if (!classRegisteredByTi) {
-      return res.status(400).json({ error: "Selecione uma turma cadastrada pelo TI em uma sala do seu segmento." });
-    }
-  }
+  const classError = await validateTeacherClass(submittedProfile);
+  if (classError) return res.status(400).json({ error: classError });
   const profile: TeacherProfileMetadata = {
     ...submittedProfile,
     className:
@@ -474,6 +476,100 @@ router.post("/auth/teacher-accounts", requireSameOrigin, requireAdmin, async (re
   } catch (error) {
     console.error("Falha ao cadastrar professores.", error);
     return res.status(500).json({ error: "Não foi possível salvar os professores no servidor." });
+  }
+});
+
+router.put("/auth/teacher-accounts/:id", requireSameOrigin, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Identificador do professor inválido." });
+  }
+  const [account] = await db.select({
+    id: usersTable.id,
+    passwordHash: usersTable.passwordHash,
+  })
+    .from(usersTable)
+    .where(and(
+      eq(usersTable.id, id),
+      eq(usersTable.role, "user"),
+      eq(usersTable.active, true),
+    ))
+    .limit(1);
+  if (!account) return res.status(404).json({ error: "Professor não encontrado." });
+
+  const name = typeof req.body?.name === "string" ? normalizeName(req.body.name) : "";
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (name.length < 3 || name.length > 120) {
+    return res.status(400).json({ error: "O nome deve ter entre 3 e 120 caracteres." });
+  }
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Informe um e-mail válido." });
+  }
+  const profileResult = validateProfile(req.body);
+  if ("error" in profileResult) return res.status(400).json({ error: profileResult.error });
+  const submittedProfile = profileResult.profile;
+  const classError = await validateTeacherClass(submittedProfile);
+  if (classError) return res.status(400).json({ error: classError });
+  const profile: TeacherProfileMetadata = {
+    ...submittedProfile,
+    className:
+      submittedProfile.segment === "Educação Infantil" || submittedProfile.segment === "Fundamental 1"
+        ? submittedProfile.className
+        : "",
+  };
+
+  try {
+    const otherTeachers = await db.select({
+      id: usersTable.id,
+      email: usersTable.email,
+    })
+      .from(usersTable)
+      .where(and(eq(usersTable.role, "user"), eq(usersTable.active, true)));
+    if (otherTeachers.some((teacher) =>
+      teacher.id !== account.id && teacher.email.trim().toLowerCase() === email,
+    )) {
+      return res.status(409).json({ error: "Este e-mail já está associado a outra conta." });
+    }
+
+    const profiles = await getTeacherProfiles();
+    profiles[String(account.id)] = profile;
+    await db.transaction(async (tx) => {
+      const [updatedAccount] = await tx.update(usersTable)
+        .set({ name, email })
+        .where(and(
+          eq(usersTable.id, account.id),
+          eq(usersTable.role, "user"),
+          eq(usersTable.active, true),
+        ))
+        .returning({ id: usersTable.id });
+      if (!updatedAccount) throw new Error("Professor não encontrado.");
+
+      await tx.insert(campusSettingsTable)
+        .values({ key: profileSettingKey, value: JSON.stringify(profiles) })
+        .onConflictDoUpdate({
+          target: campusSettingsTable.key,
+          set: { value: JSON.stringify(profiles), updatedAt: new Date() },
+        });
+    });
+
+    return res.json({
+      id: String(account.id),
+      name,
+      email,
+      ...profile,
+      mustSetPassword: !account.passwordHash,
+    });
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "23505"
+    ) {
+      return res.status(409).json({ error: "Este e-mail já está associado a outra conta." });
+    }
+    console.error("Falha ao atualizar cadastro de professor.", error);
+    return res.status(500).json({ error: "Não foi possível atualizar o cadastro do professor." });
   }
 });
 

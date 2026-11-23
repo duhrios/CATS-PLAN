@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import React, { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CampusDataProvider, useCampusData } from "./campus-data";
-import { RoomDirectoryProvider, useRoomDirectory } from "./room-directory";
+import { RoomDirectoryProvider, segmentAbbreviation, useRoomDirectory } from "./room-directory";
 import { initialCampusRooms } from "./room-directory-seed";
 
 const { getRole, loadSharedRooms } = vi.hoisted(() => ({
@@ -35,6 +35,14 @@ describe("Room directory factory reset", () => {
       <RoomDirectoryProvider>{children}</RoomDirectoryProvider>
     </CampusDataProvider>
   );
+
+  it.each([
+    ["Fundamental 1", "F1"],
+    ["Fundamental 2", "F2"],
+    ["Ensino Médio", "EM"],
+  ] as const)("maps %s to the abbreviation %s", (segment, abbreviation) => {
+    expect(segmentAbbreviation(segment)).toBe(abbreviation);
+  });
 
   it("does not request protected room data before a user signs in", async () => {
     const { result } = renderHook(() => useRoomDirectory(), { wrapper });

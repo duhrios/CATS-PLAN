@@ -38,7 +38,8 @@ vi.mock("@/lib/campus-data", async (importOriginal) => ({
   useCampusData: getCampusData,
 }));
 
-vi.mock("@/lib/room-directory", () => ({
+vi.mock("@/lib/room-directory", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/room-directory")>(),
   useRoomDirectory: getRoomDirectory,
 }));
 
@@ -203,7 +204,7 @@ describe("teacher spreadsheet view", () => {
 
     const classSelect = screen.getByTestId("teacher-booking-class");
     expect(classSelect).toHaveDisplayValue("Selecione sua turma");
-    expect(within(classSelect).getByRole("option", { name: "6º ano B · Fundamental 2" })).toBeInTheDocument();
+    expect(within(classSelect).getByRole("option", { name: "6º ano B · F2 (Fundamental 2)" })).toBeInTheDocument();
     expect(within(classSelect).queryByRole("option", { name: "2º EM B · Ensino Médio" })).not.toBeInTheDocument();
     expect(within(classSelect).queryByRole("option", { name: "2º ano C · Fundamental 1" })).not.toBeInTheDocument();
 
@@ -287,7 +288,7 @@ describe("teacher spreadsheet view", () => {
       name: "1º EM TB · Ensino Médio",
     })).not.toBeInTheDocument();
     expect(within(classSelect).getByRole("option", {
-      name: "1° EM MA · Ensino Médio",
+      name: "1° EM MA · EM (Ensino Médio)",
     })).toBeInTheDocument();
 
     fireEvent.change(classSelect, { target: { value: "Ensino Médio::1° EM MA" } });
@@ -1039,6 +1040,7 @@ describe("teacher spreadsheet view", () => {
     const roomInput = screen.getByLabelText("Sala");
     fireEvent.change(classInput, { target: { value: "3º ano B" } });
     expect(roomInput).toHaveValue("Sala 12");
+    expect(screen.getByTestId("quick-book-segment")).toHaveTextContent("F1");
 
     fireEvent.change(roomInput, { target: { value: "Sala 14" } });
     expect(classInput).toHaveValue("4º ano A");
