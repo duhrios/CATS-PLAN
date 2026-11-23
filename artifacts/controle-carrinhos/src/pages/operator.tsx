@@ -1063,6 +1063,16 @@ export function OperatorPage() {
                             {item.room} · {floorForRoom(item.room)} · Professor:{" "}
                             {item.teacher}
                           </p>
+                          {previousCartReservation && (
+                            <p
+                              className="mt-1 text-[11px] leading-4 text-slate-500"
+                              data-testid={`text-last-cart-use-${item.id}`}
+                            >
+                              Último uso do carrinho:{" "}
+                              {previousCartReservation.room} →{" "}
+                              {floorForRoom(previousCartReservation.room)}
+                            </p>
+                          )}
                           {movement?.notReceived && (
                             <p className="mt-2 rounded-lg bg-[hsl(var(--destructive)/.08)] p-2 text-xs font-semibold text-[hsl(var(--destructive))]">
                               Carrinho não movimentado — o professor não
