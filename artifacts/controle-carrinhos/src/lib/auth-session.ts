@@ -9,6 +9,7 @@ export type AuthSession = {
 };
 
 const rememberedOperatorNameKey = "controle-carrinhos-remembered-operator-name";
+const rememberedAdminNameKey = "controle-carrinhos-remembered-admin-name";
 const sessionChangedEvent = "controle-carrinhos-session-changed";
 let verifiedSession: AuthSession | null = null;
 
@@ -163,6 +164,14 @@ export const rememberOperatorName = (name: string, remember: boolean) => {
 
 export const getRememberedOperatorName = () =>
   window.localStorage.getItem(rememberedOperatorNameKey) ?? "";
+
+export const rememberAdminName = (name: string, remember: boolean) => {
+  if (remember) window.localStorage.setItem(rememberedAdminNameKey, name);
+  else window.localStorage.removeItem(rememberedAdminNameKey);
+};
+
+export const getRememberedAdminName = () =>
+  window.localStorage.getItem(rememberedAdminNameKey) ?? "";
 
 export const onAuthenticatedSessionChange = (listener: () => void) => {
   window.addEventListener(sessionChangedEvent, listener);

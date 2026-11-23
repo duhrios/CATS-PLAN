@@ -6,7 +6,9 @@ import {
   changeInitialAdminPassword,
   endAuthSession,
   getAuthenticatedSession,
+  getRememberedAdminName,
   loginWithCredentials,
+  rememberAdminName,
 } from "@/lib/auth-session";
 
 const accessCards = [
@@ -67,7 +69,8 @@ export function AccessPage() {
 export function AdminLoginPage() {
   const [, setLocation] = useLocation();
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("Administrador");
+  const [name, setName] = useState(() => getRememberedAdminName() || "Administrador");
+  const [remember, setRemember] = useState(() => Boolean(getRememberedAdminName()));
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   return (
@@ -78,6 +81,7 @@ export function AdminLoginPage() {
         setError("");
         void loginWithCredentials("admin", name, password)
           .then((session) => {
+            rememberAdminName(name, remember);
             window.localStorage.setItem("controle-carrinhos-admin-name", session.name);
             setLocation(session.mustChangePassword ? "/admin/alterar-senha" : "/admin");
           })
@@ -92,7 +96,16 @@ export function AdminLoginPage() {
         </div>
         <label className="block text-sm font-semibold">Nome<input required name="username" autoComplete="username" value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm" /></label>
         <label className="block text-sm font-semibold">Senha administrativa<input required name="password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary)/.2)]" placeholder="Digite a senha" autoFocus /></label>
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">Para salvar a senha, aceite a opção oferecida pelo navegador após entrar.</p>
+        <label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(event) => setRemember(event.target.checked)}
+            className="h-4 w-4 accent-[hsl(var(--primary))]"
+          />
+          Lembrar meu login neste dispositivo
+        </label>
+        <p className="text-xs text-[hsl(var(--muted-foreground))]">Para memorizar a senha, aceite a opção oferecida pelo gerenciador de senhas do navegador após entrar.</p>
         {error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{error}</p>}
         <button type="submit" disabled={submitting} className="h-10 w-full rounded-lg bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{submitting ? "Verificando..." : "Entrar"}</button>
         <Link href="/" className="block text-center text-xs font-semibold text-[hsl(var(--muted-foreground))]">Voltar</Link>

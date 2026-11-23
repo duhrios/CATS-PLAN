@@ -3,10 +3,12 @@ import {
   changeInitialAdminPassword,
   endAuthSession,
   getAuthenticatedRole,
+  getRememberedAdminName,
   getRememberedOperatorName,
   loginWithCredentials,
   refreshAuthenticatedSession,
   rememberOperatorName,
+  rememberAdminName,
   verifySuperAdminCredentials,
   getAuthenticatedSession,
 } from "@/lib/auth-session";
@@ -163,5 +165,22 @@ describe("server-validated sessions", () => {
     rememberOperatorName("TI manhã", false);
 
     expect(getRememberedOperatorName()).toBe("");
+  });
+
+  it("remembers the administrator login without storing the password", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    rememberAdminName("Administradora", true);
+    await endAuthSession();
+
+    expect(getRememberedAdminName()).toBe("Administradora");
+    expect(window.localStorage.getItem("controle-carrinhos-remembered-admin-name")).toBe("Administradora");
+    expect(window.localStorage.getItem("controle-carrinhos-password")).toBeNull();
+  });
+
+  it("removes the remembered administrator login when requested", () => {
+    rememberAdminName("Administradora", true);
+    rememberAdminName("Administradora", false);
+
+    expect(getRememberedAdminName()).toBe("");
   });
 });
