@@ -15,12 +15,12 @@ const groups: {
   {
     id: "ti",
     title: "TI",
-    description: "Avisos operacionais exibidos aos perfis de TI e administração.",
+    description: "Controle os pop-ups de reserva, pedidos de movimentação, alertas sonoros e push para TI e administração.",
   },
   {
     id: "teachers",
     title: "Professores",
-    description: "Avisos e notificações destinados aos professores.",
+    description: "Controle o recebimento de notificações push pelos professores. Confirmações e erros das próprias ações continuam sendo exibidos.",
   },
 ];
 
@@ -140,7 +140,7 @@ export function AdminNotifications() {
       <div>
         <h2 className="font-display text-lg font-semibold">Central de Notificações</h2>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          Ative ou inative cada notificação individualmente para TI e professores.
+          As opções são globais e sincronizadas. Pop-ups de reserva podem ser desligados individualmente; professores atualmente recebem notificações push.
         </p>
       </div>
       {error && (

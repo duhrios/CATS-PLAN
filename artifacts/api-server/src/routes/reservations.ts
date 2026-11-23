@@ -2,12 +2,17 @@ import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import {
+  activityTable,
   campusSettingsTable,
   cartsTable,
   reservationsTable,
   usersTable,
 } from "@workspace/db/schema";
 import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
+import {
+  activityRecord,
+  buildDeletedReservationMovementEvents,
+} from "../lib/activity-history";
 import {
   isReservationCancellationAllowed,
   isSameDayReservationAllowed,
@@ -366,6 +371,14 @@ const saveReservation = async (
         kind,
         quantity,
       };
+      const [previous] = reservationId
+        ? await tx.select()
+            .from(reservationsTable)
+            .where(eq(reservationsTable.id, reservationId))
+            .for("update")
+            .limit(1)
+        : [];
+      if (reservationId && !previous) throw new Error("Agendamento não encontrado.");
       const [reservation] = reservationId
         ? await tx.update(reservationsTable)
             .set(values)
@@ -373,6 +386,42 @@ const saveReservation = async (
             .returning()
         : await tx.insert(reservationsTable).values(values).returning();
       if (!reservation) throw new Error("Agendamento não encontrado.");
+
+      const changed = !previous || [
+        previous.teacherName !== reservation.teacherName,
+        previous.segment !== reservation.segment,
+        previous.subject !== reservation.subject,
+        previous.className !== reservation.className,
+        previous.room !== reservation.room,
+        previous.period !== reservation.period,
+        previous.scheduledDate !== reservation.scheduledDate,
+        previous.startTime !== reservation.startTime,
+        previous.endTime !== reservation.endTime,
+        previous.cartId !== reservation.cartId,
+        previous.kind !== reservation.kind,
+        previous.quantity !== reservation.quantity,
+      ].some(Boolean);
+      if (changed) {
+        const describe = (item: typeof reservation) =>
+          `${item.teacherName} · ${item.className} · ${item.room} · ${item.scheduledDate} · ${item.startTime.slice(0, 5)}–${item.endTime.slice(0, 5)} · ${cart.name} · ${item.quantity} Chromebook(s)`;
+        await tx.insert(activityTable).values(activityRecord({
+          type: reservation.kind === "Reserva" ? "Reserva" : "Aula",
+          title: reservation.kind === "Reserva"
+        ? previous
+          ? "Reserva de Chromebooks alterada"
+          : "Reserva de Chromebooks criada"
+        : previous
+          ? "Aula agendada alterada"
+          : "Aula agendada",
+          detail: previous
+        ? `Antes: ${describe(previous)} · Agora: ${describe(reservation)}`
+        : describe(reservation),
+          actor: session?.name ?? reservation.teacherName,
+          person: reservation.teacherName,
+          profile: "Professor",
+          entityKeys: [`reservation:${reservation.id}`],
+        }));
+      }
       return reservation;
     });
     return res.status(reservationId ? 200 : 201).json(saved);
@@ -487,44 +536,124 @@ router.delete("/reservations/:id", requireSameOrigin, requireSession, async (req
     return res.status(400).json({ error: "Agendamento inválido." });
   }
   const session = getAuthSession(req);
-  if (session?.role === "user") {
-    const [reservation] = await db
-      .select({
-        teacherId: reservationsTable.teacherId,
-        kind: reservationsTable.kind,
-        scheduledDate: reservationsTable.scheduledDate,
-        startTime: reservationsTable.startTime,
-      })
+  if (session?.role === "user" && !session.accountId) {
+    return res.status(403).json({ error: "A conta não possui um identificador seguro." });
+  }
+  const result = await db.transaction(async (tx) => {
+    const [reservation] = await tx
+      .select()
       .from(reservationsTable)
       .where(eq(reservationsTable.id, reservationId))
+      .for("update")
       .limit(1);
-    if (!reservation) return res.status(404).json({ error: "Agendamento não encontrado." });
-    if (!session.accountId || reservation.teacherId !== session.accountId) {
-      return res.status(403).json({ error: "Você só pode remover seus próprios agendamentos." });
+    if (!reservation) return { status: "missing" as const };
+    if (
+      session?.role === "user" &&
+      reservation.teacherId !== session.accountId
+    ) {
+      return { status: "forbidden" as const };
     }
-    const policy = reservation.kind === "Aula"
-      ? await loadReservationPolicy()
-      : {};
-    if (!isReservationCancellationAllowed(
+    if (session?.role === "user") {
+      const policy = reservation.kind === "Aula"
+        ? await loadReservationPolicy()
+        : {};
+      if (!isReservationCancellationAllowed(
+        reservation.scheduledDate,
+        reservation.startTime,
+        new Date(),
+        policy,
+      )) {
+        return {
+          status: "blocked" as const,
+          sameDay: reservation.scheduledDate === getBrazilDate(),
+          policy,
+        };
+      }
+    }
+    const [cart] = await tx
+      .select({ name: cartsTable.name })
+      .from(cartsTable)
+      .where(eq(cartsTable.id, reservation.cartId))
+      .limit(1);
+    const [operationalState] = await tx
+      .select({ value: campusSettingsTable.value })
+      .from(campusSettingsTable)
+      .where(eq(campusSettingsTable.key, reservationSettingsKey))
+      .limit(1);
+    let movements: unknown[] = [];
+    if (operationalState) {
+      let parsedState: unknown;
+      try {
+        parsedState = JSON.parse(operationalState.value);
+      } catch {
+        throw new Error("O estado operacional salvo está inválido; a reserva não foi removida.");
+      }
+      if (!parsedState || typeof parsedState !== "object" || Array.isArray(parsedState)) {
+        throw new Error("O estado operacional salvo está inválido; a reserva não foi removida.");
+      }
+      const movementList = (parsedState as Record<string, unknown>)[
+        "controle-carrinhos-movements"
+      ];
+      if (movementList !== undefined && !Array.isArray(movementList)) {
+        throw new Error("O histórico de movimentações salvo está inválido; a reserva não foi removida.");
+      }
+      movements = Array.isArray(movementList) ? movementList : [];
+    }
+
+    const [deleted] = await tx
+      .delete(reservationsTable)
+      .where(eq(reservationsTable.id, reservationId))
+      .returning({ id: reservationsTable.id });
+    if (!deleted) return { status: "missing" as const };
+
+    const reservationType = reservation.kind === "Reserva" ? "Reserva" : "Aula";
+    const detail = [
+      reservation.teacherName,
+      reservation.className,
+      reservation.room,
       reservation.scheduledDate,
-      reservation.startTime,
-      new Date(),
-      policy,
-    )) {
-      return res.status(409).json({
-        error: reservation.scheduledDate === getBrazilDate()
-          ? policy.sameDayBookingEnabled
-            ? "O cancelamento está bloqueado para este horário no mesmo dia. Procure o TI."
-            : "O cancelamento de aulas no mesmo dia está bloqueado pelo administrador. Procure o TI."
-          : `O cancelamento deve respeitar o congelamento de ${policy.reservationFreezeHours ?? 24} hora(s) antes da aula. Procure o TI.`,
-      });
-    }
+      `${reservation.startTime.slice(0, 5)}–${reservation.endTime.slice(0, 5)}`,
+      cart?.name,
+      `${reservation.quantity} Chromebook(s)`,
+    ].filter(Boolean).join(" · ");
+    const events = [
+      activityRecord({
+        type: reservationType,
+        title: reservation.kind === "Reserva"
+          ? "Reserva de Chromebooks encerrada"
+          : "Aula agendada removida",
+        detail,
+        actor: session?.name ?? reservation.teacherName,
+        person: reservation.teacherName,
+        profile: "Professor",
+        entityKeys: [`reservation:${reservation.id}`],
+      }),
+      ...buildDeletedReservationMovementEvents({
+        id: reservation.id,
+        teacherName: reservation.teacherName,
+        cartName: cart?.name ?? "Carrinho removido",
+        room: reservation.room,
+      }, movements, session?.name ?? reservation.teacherName).map(activityRecord),
+    ];
+    await tx.insert(activityTable).values(events);
+    return { status: "deleted" as const };
+  });
+
+  if (result.status === "missing") {
+    return res.status(404).json({ error: "Agendamento não encontrado." });
   }
-  const [deleted] = await db
-    .delete(reservationsTable)
-    .where(eq(reservationsTable.id, reservationId))
-    .returning({ id: reservationsTable.id });
-  if (!deleted) return res.status(404).json({ error: "Agendamento não encontrado." });
+  if (result.status === "forbidden") {
+    return res.status(403).json({ error: "Você só pode remover seus próprios agendamentos." });
+  }
+  if (result.status === "blocked") {
+    return res.status(409).json({
+      error: result.sameDay
+        ? result.policy.sameDayBookingEnabled
+          ? "O cancelamento está bloqueado para este horário no mesmo dia. Procure o TI."
+          : "O cancelamento de aulas no mesmo dia está bloqueado pelo administrador. Procure o TI."
+        : `O cancelamento deve respeitar o congelamento de ${result.policy.reservationFreezeHours ?? 24} hora(s) antes da aula. Procure o TI.`,
+    });
+  }
   return res.status(204).end();
 });
 

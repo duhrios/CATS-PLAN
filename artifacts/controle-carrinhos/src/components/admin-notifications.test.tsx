@@ -57,10 +57,10 @@ describe("Admin notification settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Maximizar Professores" }));
 
     const createdSwitch = await screen.findByRole("switch", {
-      name: "Notificação Nova reserva criada para TI",
+      name: "Notificação Pop-up: Nova reserva criada para TI",
     });
     const scheduledSwitch = screen.getByRole("switch", {
-      name: "Notificação Reserva no horário agendado para TI",
+      name: "Notificação Pop-up: Reserva no horário agendado para TI",
     });
     const teacherSwitch = screen.getByRole("switch", {
       name: "Notificação Inscrição para receber notificações push para Professores",
@@ -107,7 +107,7 @@ describe("Admin notification settings", () => {
     renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "Maximizar TI" }));
     const tiSwitch = await screen.findByRole("switch", {
-      name: "Notificação Nova reserva criada para TI",
+      name: "Notificação Pop-up: Nova reserva criada para TI",
     });
     fireEvent.click(tiSwitch);
 

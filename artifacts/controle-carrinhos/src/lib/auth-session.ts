@@ -10,6 +10,7 @@ export type AuthSession = {
 
 const rememberedOperatorNameKey = "controle-carrinhos-remembered-operator-name";
 const rememberedAdminNameKey = "controle-carrinhos-remembered-admin-name";
+const rememberedAdminPasswordKey = "controle-carrinhos-remembered-admin-password";
 const sessionChangedEvent = "controle-carrinhos-session-changed";
 let verifiedSession: AuthSession | null = null;
 
@@ -165,13 +166,28 @@ export const rememberOperatorName = (name: string, remember: boolean) => {
 export const getRememberedOperatorName = () =>
   window.localStorage.getItem(rememberedOperatorNameKey) ?? "";
 
-export const rememberAdminName = (name: string, remember: boolean) => {
-  if (remember) window.localStorage.setItem(rememberedAdminNameKey, name);
-  else window.localStorage.removeItem(rememberedAdminNameKey);
+export const rememberAdminCredentials = (
+  name: string,
+  password: string,
+  remember: boolean,
+) => {
+  if (remember) {
+    window.localStorage.setItem(rememberedAdminNameKey, name);
+    window.localStorage.setItem(rememberedAdminPasswordKey, password);
+  } else {
+    forgetAdminCredentials();
+  }
 };
 
-export const getRememberedAdminName = () =>
-  window.localStorage.getItem(rememberedAdminNameKey) ?? "";
+export const getRememberedAdminCredentials = () => ({
+  name: window.localStorage.getItem(rememberedAdminNameKey) ?? "",
+  password: window.localStorage.getItem(rememberedAdminPasswordKey) ?? "",
+});
+
+export const forgetAdminCredentials = () => {
+  window.localStorage.removeItem(rememberedAdminNameKey);
+  window.localStorage.removeItem(rememberedAdminPasswordKey);
+};
 
 export const onAuthenticatedSessionChange = (listener: () => void) => {
   window.addEventListener(sessionChangedEvent, listener);

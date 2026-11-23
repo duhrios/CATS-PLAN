@@ -6,9 +6,10 @@ import {
   changeInitialAdminPassword,
   endAuthSession,
   getAuthenticatedSession,
-  getRememberedAdminName,
+  getRememberedAdminCredentials,
   loginWithCredentials,
-  rememberAdminName,
+  rememberAdminCredentials,
+  forgetAdminCredentials,
 } from "@/lib/auth-session";
 
 const accessCards = [
@@ -68,9 +69,10 @@ export function AccessPage() {
 
 export function AdminLoginPage() {
   const [, setLocation] = useLocation();
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState(() => getRememberedAdminName() || "Administrador");
-  const [remember, setRemember] = useState(() => Boolean(getRememberedAdminName()));
+  const [rememberedCredentials] = useState(() => getRememberedAdminCredentials());
+  const [password, setPassword] = useState(rememberedCredentials.password);
+  const [name, setName] = useState(() => rememberedCredentials.name || "Administrador");
+  const [remember, setRemember] = useState(() => Boolean(rememberedCredentials.name));
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   return (
@@ -81,7 +83,7 @@ export function AdminLoginPage() {
         setError("");
         void loginWithCredentials("admin", name, password)
           .then((session) => {
-            rememberAdminName(name, remember);
+            rememberAdminCredentials(name, password, remember);
             window.localStorage.setItem("controle-carrinhos-admin-name", session.name);
             setLocation(session.mustChangePassword ? "/admin/alterar-senha" : "/admin");
           })
@@ -100,12 +102,16 @@ export function AdminLoginPage() {
           <input
             type="checkbox"
             checked={remember}
-            onChange={(event) => setRemember(event.target.checked)}
+            onChange={(event) => {
+              const nextRemember = event.target.checked;
+              setRemember(nextRemember);
+              if (!nextRemember) forgetAdminCredentials();
+            }}
             className="h-4 w-4 accent-[hsl(var(--primary))]"
           />
-          Lembrar meu login neste dispositivo
+          Lembrar meu login e senha neste dispositivo
         </label>
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">Para memorizar a senha, aceite a opção oferecida pelo gerenciador de senhas do navegador após entrar.</p>
+        <p className="text-xs text-[hsl(var(--muted-foreground))]">Login e senha serão gravados neste navegador. Não marque em computadores compartilhados.</p>
         {error && <p className="rounded-lg bg-[hsl(var(--destructive)/.1)] p-3 text-xs font-semibold text-[hsl(var(--destructive))]">{error}</p>}
         <button type="submit" disabled={submitting} className="h-10 w-full rounded-lg bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{submitting ? "Verificando..." : "Entrar"}</button>
         <Link href="/" className="block text-center text-xs font-semibold text-[hsl(var(--muted-foreground))]">Voltar</Link>

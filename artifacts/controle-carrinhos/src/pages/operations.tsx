@@ -70,6 +70,7 @@ import {
   loadSharedReservations,
   saveSharedReservation,
 } from "@/lib/reservations-api";
+import { loadSharedHistory, type SavedHistoryEvent } from "@/lib/history-api";
 import {
   loadTeacherAccounts,
   sortTeacherAccounts,
@@ -3017,6 +3018,8 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
 
 export function HistoryPage() {
   const { movements, reservations, carts = [] } = useCampusData();
+  const [storedEvents, setStoredEvents] = useState<SavedHistoryEvent[]>([]);
+  const [historyLoadError, setHistoryLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
   const [period, setPeriod] = useState("Todos");
@@ -3025,7 +3028,34 @@ export function HistoryPage() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [exported, setExported] = useState(false);
   const types = ["Todos", "Reservas", "Aulas", "Equipamento", "Wi-Fi", "Movimentação"];
-  type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "Funcionário/Autorizado" | "TI" };
+  type HistoryEvent = { id: string | number; time: string; date: string; title: string; detail: string; type: string; tone: string; person?: string; profile?: "Professor" | "Funcionário/Autorizado" | "TI"; entityKeys?: string[] };
+  useEffect(() => {
+    let active = true;
+    const refreshHistory = () => {
+      void loadSharedHistory()
+        .then((events) => {
+          if (!active) return;
+          setStoredEvents(events);
+          setHistoryLoadError(null);
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setHistoryLoadError(
+            error instanceof Error
+              ? `Não foi possível carregar o histórico salvo: ${error.message}`
+              : "Não foi possível carregar o histórico salvo.",
+          );
+        });
+    };
+    refreshHistory();
+    const interval = window.setInterval(refreshHistory, 30_000);
+    window.addEventListener("focus", refreshHistory);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshHistory);
+    };
+  }, []);
   const formatHistoryDate = (value: string) => {
     const date = new Date(`${value}T12:00:00`);
     if (Number.isNaN(date.getTime())) return "Data indisponível";
@@ -3053,6 +3083,7 @@ export function HistoryPage() {
       tone: reservation.status === "Concluída" ? "good" : "neutral",
       person: reservation.teacher,
       profile: "Professor",
+      entityKeys: [`reservation:${reservation.id}`],
     };
   });
   const reserveAssignmentHistory: HistoryEvent[] = carts.flatMap((cart) => {
@@ -3091,6 +3122,7 @@ export function HistoryPage() {
       tone: "neutral",
       person: assignment.teacher,
       profile: assignment.personType,
+      entityKeys: assignment.units.map((unit) => `reserve-assignment:${cart.id}:${unit}`),
     }));
   });
   const movementHistory: HistoryEvent[] = movements.flatMap((movement) => {
@@ -3116,6 +3148,7 @@ export function HistoryPage() {
         tone: "warm",
         person: eventPerson(movement.movedBy),
         profile: "TI",
+        entityKeys: [`movement:${movement.reservationId}:moved`],
       });
     }
     if (movement.completedAt) {
@@ -3129,6 +3162,7 @@ export function HistoryPage() {
         tone: "good",
         person: eventPerson(movement.completedBy),
         profile: "TI",
+        entityKeys: [`movement:${movement.reservationId}:completed`],
       });
     }
     if (movement.notReceivedAt) {
@@ -3142,6 +3176,7 @@ export function HistoryPage() {
         tone: "bad",
         person: reservation.teacher,
         profile: "Professor",
+        entityKeys: [`movement:${movement.reservationId}:not-received`],
       });
     }
     if (movement.notAttendedAt) {
@@ -3155,6 +3190,7 @@ export function HistoryPage() {
         tone: "bad",
         person: reservation.teacher,
         profile: "TI",
+        entityKeys: [`movement:${movement.reservationId}:not-attended`],
       });
     }
     if (movement.requestAgainAt) {
@@ -3168,6 +3204,7 @@ export function HistoryPage() {
         tone: "warm",
         person: reservation.teacher,
         profile: "Professor",
+        entityKeys: [`movement:${movement.reservationId}:request-again`],
       });
     }
     if (movement.confirmedAt) {
@@ -3181,14 +3218,22 @@ export function HistoryPage() {
         tone: "good",
         person: eventPerson(movement.confirmedBy),
         profile: "Professor",
+        entityKeys: [`movement:${movement.reservationId}:confirmed`],
       });
     }
     return events;
   });
-  const historyEvents: HistoryEvent[] = [
+  const persistedEntityKeys = new Set(storedEvents.flatMap((event) => event.entityKeys ?? []));
+  const legacyEvents: HistoryEvent[] = [
     ...reservationHistory,
     ...reserveAssignmentHistory,
     ...movementHistory,
+  ].filter((event) =>
+    !(event.entityKeys ?? []).some((key) => persistedEntityKeys.has(key)),
+  );
+  const historyEvents: HistoryEvent[] = [
+    ...storedEvents,
+    ...legacyEvents,
   ].sort(
     (first, second) =>
       second.date.localeCompare(first.date) ||
@@ -3251,6 +3296,11 @@ export function HistoryPage() {
               data-testid="input-search-history"
             />
           </div>
+          {historyLoadError && (
+            <p className="mt-2 text-xs font-medium text-[hsl(var(--destructive))]" role="alert">
+              {historyLoadError}
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
               <span className="px-2 text-[10px] font-bold uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">Período</span>

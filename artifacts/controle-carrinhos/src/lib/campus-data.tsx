@@ -25,6 +25,7 @@ import {
   saveSharedOperationalState,
   type OperationalState,
 } from "@/lib/operational-state-api";
+import { clearSharedHistory } from "@/lib/history-api";
 
 export const segments = [
   "Educação Infantil",
@@ -1283,6 +1284,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const operationalStateSaveQueueRef = useRef(Promise.resolve());
   const operationalStateSyncedSignatureRef = useRef<string | null>(null);
   const [operationalStateReady, setOperationalStateReady] = useState(false);
+  const applyOperationalStateRef = useRef<(state: OperationalState) => void>(() => {});
+  const restoreDeletedUnitsRef = useRef(false);
   const operationalStateCurrent: OperationalState = {
     [cartStorageKey]: carts,
     [cartSchedulesStorageKey]: cartSchedules,
@@ -1336,6 +1339,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       }
       operationalStateSyncedSignatureRef.current = JSON.stringify(mergedState);
     };
+    applyOperationalStateRef.current = applyOperationalState;
     const refreshOperationalState = async () => {
       if (!getAuthenticatedRole()) return;
       try {
@@ -1463,6 +1467,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         .then(() => saveSharedOperationalState(
           state,
           operationalStateUpdatedAtRef.current,
+          restoreDeletedUnitsRef.current,
         ));
       operationalStateSaveQueueRef.current = save.then(
         () => undefined,
@@ -1471,7 +1476,18 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       void save
         .then((result) => {
           operationalStateUpdatedAtRef.current = result.updatedAt;
-          operationalStateSyncedSignatureRef.current = JSON.stringify(state);
+          restoreDeletedUnitsRef.current = false;
+          const currentSignature = JSON.stringify(operationalStateCurrentRef.current);
+          if (
+            result.state &&
+            currentSignature === JSON.stringify(state) &&
+            JSON.stringify(result.state) !== JSON.stringify(state)
+          ) {
+            applyOperationalStateRef.current(result.state);
+          }
+          operationalStateSyncedSignatureRef.current = JSON.stringify(
+            result.state ?? state,
+          );
           setOperationalStateSyncError(null);
         })
         .catch((error: unknown) => {
@@ -1635,13 +1651,19 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       persistReservations([]);
       persistMovements([]);
       if (import.meta.env.MODE !== "test") {
-        clearSharedReservations().catch((error: unknown) => {
-          setReservationsSyncError(
-            error instanceof Error
-              ? `Não foi possível limpar a agenda compartilhada: ${error.message}`
-              : "Não foi possível limpar a agenda compartilhada.",
-          );
-        });
+        void clearSharedReservations()
+          .then(() =>
+            kind === "history" || kind === "factory"
+              ? clearSharedHistory()
+              : undefined,
+          )
+          .catch((error: unknown) => {
+            setReservationsSyncError(
+              error instanceof Error
+                ? `Não foi possível concluir a limpeza solicitada: ${error.message}`
+                : "Não foi possível concluir a limpeza solicitada.",
+            );
+          });
       }
     }
     if (kind === "history") {
@@ -1661,6 +1683,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     }
     if (kind === "factory") {
       window.localStorage.removeItem("controle-carrinhos-auth-session");
+      restoreDeletedUnitsRef.current = true;
       persistCarts(cloneDefaultCarts());
       persistCartSchedules(cloneDefaultSchedules());
       persistWifiPoints([]);

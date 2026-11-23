@@ -51,7 +51,7 @@ const legacySampleRoomIds = new Set([
   "room-21",
 ]);
 
-const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+const normalize = (value: string) => value.trim().toLowerCase().replace(/[º°]/g, "o").replace(/\s+/g, " ");
 const normalizeRoom = (value: string) => value.trim().toLowerCase().replace(/^sala\s*/i, "").replace(/\s+/g, " ");
 const roomLabel = (number: string) => `Sala ${number}`;
 const isContraturno = (className: string) => normalize(className) === "contraturno";
@@ -73,8 +73,8 @@ const segmentForClass = (className: string, fallback: Segment): Segment => {
   const normalized = className.trim().toLocaleUpperCase("pt-BR");
   if (normalized === "CONTRATURNO") return "Contraturno";
   if (/^(PR[EÉ]|MAT\.?)(\s|$)/.test(normalized)) return "Educação Infantil";
-  if (/^(INT[-\s]|[1-3]\s*°?\s*EM\b)/.test(normalized)) return "Ensino Médio";
-  const grade = normalized.match(/^([1-9])\s*°/);
+  if (/^(INT[-\s]|[1-3]\s*[º°]?\s*EM\b)/.test(normalized)) return "Ensino Médio";
+  const grade = normalized.match(/^([1-9])\s*[º°]/);
   if (grade) return Number(grade[1]) <= 5 ? "Fundamental 1" : "Fundamental 2";
   return fallback;
 };

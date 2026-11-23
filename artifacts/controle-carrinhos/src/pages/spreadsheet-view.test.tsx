@@ -204,7 +204,7 @@ describe("teacher spreadsheet view", () => {
     const classSelect = screen.getByTestId("teacher-booking-class");
     expect(classSelect).toHaveDisplayValue("Selecione sua turma");
     expect(within(classSelect).getByRole("option", { name: "6º ano B · Fundamental 2" })).toBeInTheDocument();
-    expect(within(classSelect).getByRole("option", { name: "2º EM B · Ensino Médio" })).toBeInTheDocument();
+    expect(within(classSelect).queryByRole("option", { name: "2º EM B · Ensino Médio" })).not.toBeInTheDocument();
     expect(within(classSelect).queryByRole("option", { name: "2º ano C · Fundamental 1" })).not.toBeInTheDocument();
 
     fireEvent.change(classSelect, { target: { value: "Fundamental 2::6º ano B" } });
@@ -235,6 +235,63 @@ describe("teacher spreadsheet view", () => {
       start: "13:00",
     }));
     expect(screen.getByText("2 horários reservados para Ana Souza.")).toBeInTheDocument();
+  });
+
+  it("only offers classes with a registered room in the selected slot period", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T09:00:00.000Z"));
+    getSession.mockReturnValue({ role: "user", name: "Ana Souza" });
+    loadTeacherProfile.mockResolvedValue({
+      name: "Ana Souza",
+      email: "ana@escola.com.br",
+      segment: "Ensino Médio",
+      subject: "Ciências",
+      className: "",
+    });
+    getRoomDirectory.mockReturnValue({
+      floorForRoom: () => null,
+      roomOptions: ["Sala 38", "Sala 44"],
+      classEntries: [
+        { className: "1º EM TB", room: "Sala 38", period: "Tarde", segment: "Ensino Médio", floor: "3º piso" },
+        { className: "1° EM MA", room: "Sala 44", period: "Manhã", segment: "Ensino Médio", floor: "3º piso" },
+      ],
+    });
+    getCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{ name: "Carrinho A", unavailable: false }],
+      cartSchedules: {
+        "Carrinho A": {
+          Manhã: [{ id: "morning-slot", start: "07:00", end: "07:45" }],
+          Tarde: [],
+        },
+      },
+      movementSettings: { allowCartATransitionScheduling: false },
+      campusSettings: {
+        sameDayBookingEnabled: true,
+        sameDayBookingWindows: [{ start: "06:00", end: "18:00" }],
+        reservationFreezeHours: 24,
+      },
+      replaceReservations: vi.fn(),
+    });
+    const mondayKey = formatDateKey(getMondayOfWeek(new Date()));
+
+    render(<SpreadsheetViewPage readOnly />);
+
+    fireEvent.click(await screen.findByTestId(
+      `teacher-book-slot-${mondayKey}-Carrinho A-Manhã-07:00-07:45`,
+    ));
+
+    const classSelect = screen.getByTestId("teacher-booking-class");
+    expect(within(classSelect).queryByRole("option", {
+      name: "1º EM TB · Ensino Médio",
+    })).not.toBeInTheDocument();
+    expect(within(classSelect).getByRole("option", {
+      name: "1° EM MA · Ensino Médio",
+    })).toBeInTheDocument();
+
+    fireEvent.change(classSelect, { target: { value: "Ensino Médio::1° EM MA" } });
+    expect(screen.getByTestId("teacher-booking-room-0")).toHaveValue("Sala 44");
   });
 
   it("limits Fundamental 1 teachers to the class and rooms assigned in their profile", async () => {

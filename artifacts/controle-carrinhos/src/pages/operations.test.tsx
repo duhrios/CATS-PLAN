@@ -2,9 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CartsPage, HistoryPage, ReservationModal } from "./operations";
 
-const { useCampusData, loadTeacherAccounts } = vi.hoisted(() => ({
+const { useCampusData, loadTeacherAccounts, loadSharedHistory } = vi.hoisted(() => ({
   useCampusData: vi.fn(),
   loadTeacherAccounts: vi.fn(),
+  loadSharedHistory: vi.fn(),
 }));
 
 vi.mock("@/lib/campus-data", async (importOriginal) => {
@@ -26,12 +27,15 @@ vi.mock("@/lib/teacher-accounts", () => ({
   sortTeacherAccounts: (accounts: unknown[]) => accounts,
 }));
 
+vi.mock("@/lib/history-api", () => ({ loadSharedHistory }));
+
 describe("reservation modal teacher selection", () => {
   const onSave = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
     onSave.mockResolvedValue(true);
+    loadSharedHistory.mockReturnValue(new Promise(() => {}));
     loadTeacherAccounts.mockResolvedValue([{
       id: "21",
       name: "Ana Souza",
@@ -224,6 +228,44 @@ describe("reservation activity history", () => {
     expect(timedRow).toHaveTextContent("C48, C49");
     expect(legacyRow).toHaveTextContent("Horário não informado");
     expect(screen.getByTestId("history-results-count")).toHaveTextContent("2 atividades encontradas");
+  });
+
+  it("shows returned reserve Chromebooks from persistent history after the assignment is removed", async () => {
+    useCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{
+        id: "cart-c",
+        name: "Carrinho C",
+        reserveAssignments: {},
+      }],
+    });
+    loadSharedHistory.mockResolvedValue([{
+      id: "activity-41",
+      type: "Reserva",
+      title: "Chromebook de reserva devolvido",
+      detail: "Carrinho C · Unidades: C48, C49 · Responsável: Ana Souza · Agendamento: 2026-11-23 às 09:00",
+      date: "2026-11-23",
+      time: "09:15",
+      tone: "bad",
+      person: "Ana Souza",
+      profile: "Professor",
+      entityKeys: [
+        "reserve-assignment:cart-c:C48",
+        "reserve-assignment:cart-c:C49",
+      ],
+    }]);
+
+    render(<HistoryPage />);
+    fireEvent.click(screen.getByTestId("button-filter-history-reservas"));
+
+    const row = await screen.findByTestId("row-history-activity-41");
+    expect(row).toHaveTextContent("Chromebook de reserva devolvido");
+    expect(row).toHaveTextContent("C48, C49");
+    expect(row).toHaveTextContent("Ana Souza");
+    expect(screen.getByTestId("history-results-count")).toHaveTextContent(
+      "1 atividade encontrada",
+    );
   });
 });
 

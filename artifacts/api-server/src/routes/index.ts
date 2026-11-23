@@ -9,6 +9,7 @@ import roomsRouter from "./rooms";
 import teacherSpreadsheetRouter from "./teacher-spreadsheet";
 import notificationsSettingsRouter from "./notifications-settings";
 import operationalStateRouter from "./operational-state";
+import historyRouter from "./history";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,7 @@ router.use(roomsRouter);
 router.use(teacherSpreadsheetRouter);
 router.use(notificationsSettingsRouter);
 router.use(operationalStateRouter);
+router.use(historyRouter);
 router.use(reservationsRouter);
 router.use(pushRouter);
 

@@ -137,6 +137,7 @@ const normalizeSuggestionText = (value: string) =>
   value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[º°]/g, "o")
     .trim()
     .replace(/\s+/g, " ")
     .toLocaleLowerCase("pt-BR");
@@ -417,6 +418,8 @@ function QuickAccess({
   onDeleteReservation,
   classOptions,
   roomOptions,
+  roomCatalogLoading,
+  roomsSyncError,
 }: {
   dates: Date[];
   cartNames: string[];
@@ -442,6 +445,8 @@ function QuickAccess({
   onDeleteReservation: (reservation: Reservation) => Promise<void>;
   classOptions: ClassRoomEntry[];
   roomOptions: string[];
+  roomCatalogLoading: boolean;
+  roomsSyncError: string;
 }) {
   const [selectedReservationIds, setSelectedReservationIds] = useState<number[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -569,24 +574,48 @@ function QuickAccess({
     setBookingError("");
   };
   const teacherClassOptions = useMemo(() => {
+    const selectedPeriods = [...new Set(teacherBookingSlots.map((slot) => slot.period))];
     const options = classOptions.filter((entry) => {
       if (!teacherSegments.includes(entry.segment) || entry.segment === "Contraturno") return false;
       if (
         (entry.segment === "Educação Infantil" || entry.segment === "Fundamental 1") &&
         entry.segment === teacherSegments[0]
       ) {
-        return Boolean(teacherProfileClassName) &&
-          entry.className.trim().toLocaleLowerCase("pt-BR") ===
-            teacherProfileClassName.trim().toLocaleLowerCase("pt-BR");
+        if (
+          !teacherProfileClassName ||
+          normalizeSuggestionText(entry.className) !==
+            normalizeSuggestionText(teacherProfileClassName)
+        ) return false;
       }
-      return true;
+      return selectedPeriods.every((period) =>
+        classOptions.some((candidate) =>
+          candidate.segment === entry.segment &&
+          normalizeSuggestionText(candidate.className) ===
+            normalizeSuggestionText(entry.className) &&
+          candidate.period === period,
+        ),
+      );
     });
-    return [...new Map(options.map((entry) => [teacherClassKey(entry), entry])).values()]
+    return [...new Map(options.map((entry) => [
+      `${entry.segment}::${normalizeSuggestionText(entry.className)}`,
+      entry,
+    ])).values()]
       .sort((first, second) =>
         first.segment.localeCompare(second.segment, "pt-BR") ||
         first.className.localeCompare(second.className, "pt-BR", { numeric: true }),
       );
-  }, [classOptions, teacherProfileClassName, teacherSegments]);
+  }, [classOptions, teacherBookingSlots, teacherProfileClassName, teacherSegments]);
+  useEffect(() => {
+    if (
+      !teacherBookingClass ||
+      teacherClassOptions.some((entry) => teacherClassKey(entry) === teacherBookingClass)
+    ) return;
+    setTeacherBookingClass("");
+    setTeacherBookingSlots((slots) => slots.map((slot) =>
+      slot.room ? { ...slot, room: "" } : slot,
+    ));
+    setTeacherBookingError("");
+  }, [teacherBookingClass, teacherClassOptions]);
   const selectedTeacherClass = teacherClassOptions.find(
     (entry) => teacherClassKey(entry) === teacherBookingClass,
   );
@@ -597,7 +626,8 @@ function QuickAccess({
     ? [...new Set(classOptions
         .filter((entry) =>
           entry.segment === teacherClass.segment &&
-          entry.className === teacherClass.className &&
+          normalizeSuggestionText(entry.className) ===
+            normalizeSuggestionText(teacherClass.className) &&
           entry.period === slot.period &&
           teacherSegments.includes(entry.segment),
         )
@@ -1035,6 +1065,17 @@ function QuickAccess({
         </p>
       )}
       {canTeacherBook && teacherBookingSlots.length > 0 && (
+        roomsSyncError ? (
+          <p
+            className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            role="alert"
+            data-testid="teacher-booking-rooms-error"
+          >
+            Não foi possível confirmar o cadastro de salas com o servidor. Atualize a planilha ou contate o TI. {roomsSyncError}
+          </p>
+        ) : null
+      )}
+      {canTeacherBook && teacherBookingSlots.length > 0 && (
         <section
           aria-label="Reservar horários selecionados"
           className="mb-4 overflow-hidden rounded-2xl border border-[#cbd8e6] bg-white shadow-sm"
@@ -1085,23 +1126,40 @@ function QuickAccess({
                 <select
                   value={teacherBookingClass}
                   onChange={(event) => setTeacherBookingClassSelection(event.target.value)}
-                  disabled={
-                    teacherClassOptions.length === 1 &&
-                    (teacherSegments[0] === "Educação Infantil" ||
-                      teacherSegments[0] === "Fundamental 1") &&
-                    Boolean(teacherProfileClassName)
-                  }
                   className="h-11 w-full rounded-xl border border-[#cbd8e6] bg-white px-3 text-sm font-normal text-[#263950] shadow-sm outline-none transition focus:border-[#4b78a8] focus:ring-2 focus:ring-[#245b8f]/15 disabled:bg-[#f5f7fa]"
                   data-testid="teacher-booking-class"
                   required
+                  disabled={
+                    roomCatalogLoading ||
+                    Boolean(roomsSyncError) ||
+                    (
+                      teacherClassOptions.length === 1 &&
+                      (teacherSegments[0] === "Educação Infantil" ||
+                        teacherSegments[0] === "Fundamental 1") &&
+                      Boolean(teacherProfileClassName)
+                    )
+                  }
                 >
-                  <option value="">Selecione sua turma</option>
+                  <option value="">
+                    {roomCatalogLoading
+                      ? "Carregando salas cadastradas..."
+                      : teacherBookingSlots.length > 0 && teacherClassOptions.length === 0
+                        ? "Nenhuma turma com sala nos períodos selecionados"
+                        : "Selecione sua turma"}
+                  </option>
                   {teacherClassOptions.map((entry) => (
                     <option key={teacherClassKey(entry)} value={teacherClassKey(entry)}>
                       {entry.className} · {entry.segment}
                     </option>
                   ))}
                 </select>
+                {teacherBookingSlots.length > 0 && !roomCatalogLoading && !roomsSyncError && (
+                  <span className="block font-normal text-[#5f6f82]">
+                    {teacherClassOptions.length > 0
+                      ? "As opções têm sala vinculada em todos os períodos selecionados."
+                      : "Nenhuma turma do seu perfil tem sala vinculada em todos os períodos escolhidos. Confira o cadastro de salas e os períodos."}
+                  </span>
+                )}
               </label>
               <div className="flex min-h-11 items-center gap-2 rounded-xl bg-[#f5f8fb] px-3 py-2 text-xs leading-5 text-[#5f6f82]">
                 <Info size={16} className="shrink-0 text-[#4c739c]" aria-hidden="true" />
@@ -1151,10 +1209,19 @@ function QuickAccess({
                         className="h-10 w-full rounded-lg border border-[#cbd8e6] bg-white px-3 text-sm font-normal text-[#263950] outline-none transition focus:border-[#4b78a8] focus:ring-2 focus:ring-[#245b8f]/15 disabled:bg-[#f5f7fa]"
                         required
                         data-testid={`teacher-booking-room-${index}`}
-                        disabled={!selectedTeacherClass || allowedRooms.length === 0}
+                        disabled={
+                          roomCatalogLoading ||
+                          Boolean(roomsSyncError) ||
+                          !selectedTeacherClass ||
+                          allowedRooms.length === 0
+                        }
                       >
                         <option value="">
-                          {allowedRooms.length ? "Selecione a sala" : "Sem sala cadastrada neste período"}
+                          {roomCatalogLoading
+                            ? "Carregando salas cadastradas..."
+                            : allowedRooms.length
+                              ? "Selecione a sala"
+                              : "Sem sala para esta turma e período"}
                         </option>
                         {allowedRooms.map((room) => <option key={room} value={room}>{room}</option>)}
                       </select>
@@ -1172,7 +1239,11 @@ function QuickAccess({
               </p>
               <button
                 type="button"
-                disabled={teacherBookingSaving}
+                disabled={
+                  teacherBookingSaving ||
+                  roomCatalogLoading ||
+                  Boolean(roomsSyncError)
+                }
                 onClick={() => void createTeacherReservations()}
                 className="inline-flex h-11 w-full shrink-0 items-center justify-center rounded-xl bg-[#245b8f] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#194775] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#245b8f] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 data-testid="teacher-booking-submit"
@@ -2958,7 +3029,13 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   const [teacherAccessAccounts, setTeacherAccessAccounts] = useState<TeacherAccessAccount[]>([]);
   const [teacherAccessAccountsError, setTeacherAccessAccountsError] = useState("");
   const canTeacherBook = Boolean(currentTeacherName && teacherProfile);
-  const { floorForRoom, classEntries = [], roomOptions = [] } = useRoomDirectory();
+  const {
+    floorForRoom,
+    classEntries = [],
+    roomOptions = [],
+    roomCatalogLoading = false,
+    roomsSyncError = "",
+  } = useRoomDirectory();
   const [mode, setMode] = useState<SpreadsheetMode>(() => readSpreadsheetMode(readOnly));
   const [teacherReservations, setTeacherReservations] = useState<Reservation[]>([]);
   const [teacherReservationsLoading, setTeacherReservationsLoading] = useState(readOnly);
@@ -3423,6 +3500,8 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
           onDeleteReservation={deleteReservationFromSheet}
           classOptions={classEntries}
           roomOptions={roomOptions}
+          roomCatalogLoading={roomCatalogLoading}
+          roomsSyncError={roomsSyncError}
         />
       ) : mode === "complete" ? (
         <CompleteAccess

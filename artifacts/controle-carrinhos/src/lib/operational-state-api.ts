@@ -110,12 +110,17 @@ export const loadSharedOperationalState = async (): Promise<SharedOperationalSta
 export const saveSharedOperationalState = async (
   state: OperationalState,
   updatedAt: string | null,
+  restoreDeletedUnits = false,
 ): Promise<SharedOperationalState> => {
   const response = await requireResponse(await fetch("/api/operational-state", {
     method: "PUT",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state, updatedAt }),
+    body: JSON.stringify({
+      state,
+      updatedAt,
+      ...(restoreDeletedUnits ? { restoreDeletedUnits: true } : {}),
+    }),
   }));
   return response.json() as Promise<SharedOperationalState>;
 };

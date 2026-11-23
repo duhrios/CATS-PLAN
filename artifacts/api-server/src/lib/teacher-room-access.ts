@@ -20,14 +20,15 @@ export type TeacherRoomSelection = {
   period: "Manhã" | "Tarde";
 };
 
-const normalize = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
+const normalize = (value: string) =>
+  value.trim().replace(/[º°]/g, "o").toLocaleLowerCase("pt-BR");
 
 const segmentForClass = (className: string, fallback: TeacherSegment): TeacherSegment => {
   const normalized = className.trim().toLocaleUpperCase("pt-BR");
   if (normalized === "CONTRATURNO") return "Contraturno";
   if (/^(PR[EÉ]|MAT\.?)(\s|$)/.test(normalized)) return "Educação Infantil";
-  if (/^(INT[-\s]|[1-3]\s*°?\s*EM\b)/.test(normalized)) return "Ensino Médio";
-  const grade = normalized.match(/^([1-9])\s*°/);
+  if (/^(INT[-\s]|[1-3]\s*[º°]?\s*EM\b)/.test(normalized)) return "Ensino Médio";
+  const grade = normalized.match(/^([1-9])\s*[º°]/);
   if (grade) return Number(grade[1]) <= 5 ? "Fundamental 1" : "Fundamental 2";
   return fallback;
 };

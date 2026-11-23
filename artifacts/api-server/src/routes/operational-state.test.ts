@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   operationalStateForRole,
+  preserveDeletedCartUnits,
   validateOperationalState,
 } from "./operational-state";
+import {
+  activityMetadata,
+  buildDeletedReservationMovementEvents,
+  buildOperationalActivityEvents,
+} from "../lib/activity-history";
 
 vi.mock("@workspace/db", () => ({ db: {} }));
 
@@ -16,6 +22,117 @@ describe("operational state validation", () => {
       "controle-carrinhos-carts": [{ id: "cart-a" }],
       "controle-carrinhos-movements": [],
       "controle-carrinhos-campus-settings": { campusName: "Campus" },
+    });
+  });
+
+  describe("operational activity history", () => {
+    it("keeps reserve returns, equipment changes, and Wi-Fi changes as separate events", () => {
+      const previousState = {
+        "controle-carrinhos-carts": [{
+          id: "cart-b",
+          name: "Carrinho B",
+          unavailable: false,
+          unavailableUnits: [],
+          reservedUnits: [],
+          reserveAssignments: {
+            B48: {
+              teacher: "Kaique Moura",
+              date: "2026-11-18",
+              start: "10:25",
+              personType: "Professor",
+            },
+          },
+        }],
+        "controle-carrinhos-wifi-points": [{
+          id: "wifi-1",
+          name: "Bloco 1",
+          point: "AP-01",
+          status: "Em uso",
+          assignedRoom: "Sala 12",
+        }],
+        "controle-carrinhos-wifi-rooms": [{ room: "Sala 12", hasWifi: true }],
+      };
+      const nextState = {
+        "controle-carrinhos-carts": [{
+          id: "cart-b",
+          name: "Carrinho B",
+          unavailable: true,
+          unavailableUnits: ["B49"],
+          reservedUnits: [],
+          reserveAssignments: {},
+        }],
+        "controle-carrinhos-wifi-points": [{
+          id: "wifi-1",
+          name: "Bloco 1",
+          point: "AP-01",
+          status: "Em manutenção",
+          assignedRoom: "Sala 12",
+        }],
+        "controle-carrinhos-wifi-rooms": [{ room: "Sala 12", hasWifi: false }],
+      };
+
+      const events = buildOperationalActivityEvents(
+        previousState,
+        nextState,
+        "Equipe TI",
+        "admin",
+      );
+
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "Reserva",
+          title: "Chromebook de reserva devolvido",
+          person: "Kaique Moura",
+          entityKeys: ["reserve-assignment:cart-b:B48"],
+        }),
+        expect.objectContaining({
+          type: "Equipamento",
+          detail: expect.stringContaining("B49"),
+        }),
+        expect.objectContaining({
+          type: "Wi-Fi",
+          detail: expect.stringContaining("Em manutenção"),
+        }),
+        expect.objectContaining({
+          type: "Wi-Fi",
+          title: "Conectividade da sala alterada",
+          detail: "Sala 12 · Wi-Fi indisponível",
+        }),
+      ]));
+    });
+
+    it("preserves movement details when its reservation is deleted", () => {
+      const events = buildDeletedReservationMovementEvents({
+        id: 17,
+        teacherName: "Ana Souza",
+        cartName: "Carrinho A",
+        room: "Sala 12",
+      }, [{
+        reservationId: 17,
+        movedAt: "2026-11-18T13:30:00.000Z",
+        movedBy: "Equipe TI",
+        completedAt: "2026-11-18T13:45:00.000Z",
+        completedBy: "Equipe TI",
+      }], "Administradora");
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({
+        type: "Movimentação",
+        title: "Carrinho em movimentação",
+        detail: "Carrinho A · Sala 12 · Movido por: Equipe TI",
+        entityKeys: ["movement:17:moved"],
+        occurredAt: "2026-11-18T13:30:00.000Z",
+      });
+      expect(events[1]).toMatchObject({
+        title: "Movimentação concluída",
+        entityKeys: ["movement:17:completed"],
+      });
+    });
+
+    it("reads legacy plain-text activity descriptions", () => {
+      expect(activityMetadata("Descrição antiga")).toEqual({
+        detail: "Descrição antiga",
+      });
     });
   });
 
@@ -47,5 +164,58 @@ describe("operational state validation", () => {
       "controle-carrinhos-campus-settings": {},
     });
     expect(operationalStateForRole(state, "admin")).toEqual(state);
+  });
+
+  it("does not let a stale state restore deleted Chromebook units", () => {
+    const previousState = {
+      "controle-carrinhos-carts": [{
+        id: "cart-c",
+        name: "Carrinho C",
+        code: "C",
+        prefix: "C",
+        total: 56,
+        available: 55,
+        deletedUnits: ["C56"],
+        unavailableUnits: [],
+        reservedUnits: ["C56"],
+        reserveAssignments: {
+          C56: { teacher: "Ana Souza", date: "2026-11-23" },
+        },
+        unavailableUnitReasons: { C56: "Tela quebrada" },
+      }],
+    };
+    const staleState = {
+      "controle-carrinhos-carts": [{
+        id: "cart-c",
+        name: "Carrinho C",
+        code: "C",
+        prefix: "C",
+        total: 56,
+        available: 56,
+        deletedUnits: [],
+        unavailableUnits: [],
+        reservedUnits: ["C56"],
+        reserveAssignments: {
+          C56: { teacher: "Ana Souza", date: "2026-11-23" },
+        },
+        unavailableUnitReasons: { C56: "Tela quebrada" },
+      }],
+    };
+
+    expect(preserveDeletedCartUnits(previousState, staleState)).toEqual({
+      "controle-carrinhos-carts": [{
+        id: "cart-c",
+        name: "Carrinho C",
+        code: "C",
+        prefix: "C",
+        total: 56,
+        available: 55,
+        deletedUnits: ["C56"],
+        unavailableUnits: [],
+        reservedUnits: [],
+        reserveAssignments: {},
+        unavailableUnitReasons: {},
+      }],
+    });
   });
 });

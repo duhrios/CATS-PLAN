@@ -44,7 +44,7 @@ describe("teacher room access", () => {
     })).toBe(true);
     expect(teacherCanReserveRoom(profile, rooms, {
       segment: "Ensino Médio",
-      className: "1° EM TA",
+      className: "1º EM TA",
       room: "07",
       period: "Tarde",
     })).toBe(true);

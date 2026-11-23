@@ -417,6 +417,32 @@ describe('Campus data core logic', () => {
     expect(result.current.wifiPoints).toHaveLength(0);
   });
 
+  it("persists deleted Chromebook units as tombstones and removes their assignments", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    act(() => {
+      result.current.updateReserveUnitAssignments(
+        ["C55"],
+        {
+          teacher: "Ana Souza",
+          date: "2026-11-23",
+          start: "09:00",
+          personType: "Professor",
+        },
+      );
+    });
+
+    act(() => {
+      expect(result.current.deleteCartUnit("c", "C55")).toBe(true);
+    });
+
+    const cart = result.current.carts.find(({ id }) => id === "c");
+    expect(cart?.deletedUnits).toContain("C55");
+    expect(cart?.reserveAssignments).not.toHaveProperty("C55");
+    expect(cart?.reservedUnits).not.toContain("C55");
+    expect(JSON.parse(window.localStorage.getItem("controle-carrinhos-carts") ?? "[]")
+      .find((item: { id: string }) => item.id === "c").deletedUnits).toContain("C55");
+  });
+
   it("persists a deleted Wi-Fi point without restoring it from local storage", () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
     let pointId = "";

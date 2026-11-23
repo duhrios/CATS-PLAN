@@ -16,9 +16,9 @@ import {
 export type NotificationGroup = "ti" | "teachers";
 export const notificationDefinitions = {
   ti: [
-    { id: "reservation-created", label: "Nova reserva criada" },
-    { id: "reservation-scheduled", label: "Reserva no horário agendado" },
-    { id: "movement-request", label: "Novo pedido de movimentação do professor" },
+    { id: "reservation-created", label: "Pop-up: Nova reserva criada" },
+    { id: "reservation-scheduled", label: "Pop-up: Reserva no horário agendado" },
+    { id: "movement-request", label: "Notificação: Novo pedido de movimentação do professor" },
     { id: "movement-audio", label: "Alertas sonoros de movimentação" },
     { id: "push", label: "Inscrição para receber notificações push" },
   ],

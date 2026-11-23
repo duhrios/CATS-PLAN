@@ -158,6 +158,31 @@ describe("Room directory factory reset", () => {
     expect(result.current.roomOptionsForSegment("Fundamental 1")).toEqual([]);
   });
 
+  it("recognizes ordinal suffixes when classifying Ensino Médio room entries", async () => {
+    getRole.mockReturnValue("admin");
+    loadSharedRooms.mockResolvedValue({
+      configured: true,
+      rooms: [{
+        id: "room-38",
+        number: "38",
+        floor: "3º piso",
+        segment: "Fundamental 2",
+        morningClasses: [],
+        afternoonClasses: ["1º EM TB"],
+      }],
+    });
+
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.classEntries).toHaveLength(1));
+
+    expect(result.current.classEntries[0]).toMatchObject({
+      className: "1º EM TB",
+      segment: "Ensino Médio",
+      period: "Tarde",
+      room: "Sala 38",
+    });
+  });
+
   it("only infers a class-room link when the match is unique within its segment", async () => {
     getRole.mockReturnValue("admin");
     loadSharedRooms.mockResolvedValue({

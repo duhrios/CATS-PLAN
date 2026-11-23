@@ -75,13 +75,17 @@ describe("shared operational state API", () => {
       }), { status: 409 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await saveSharedOperationalState({}, "2026-10-26T09:00:00.000Z");
+    await saveSharedOperationalState({}, "2026-10-26T09:00:00.000Z", true);
     await expect(saveSharedOperationalState({}, "2026-10-26T09:00:00.000Z"))
       .rejects.toThrow("Os dados operacionais foram alterados em outro dispositivo.");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "PUT",
       credentials: "same-origin",
-      body: JSON.stringify({ state: {}, updatedAt: "2026-10-26T09:00:00.000Z" }),
+      body: JSON.stringify({
+        state: {},
+        updatedAt: "2026-10-26T09:00:00.000Z",
+        restoreDeletedUnits: true,
+      }),
     });
   });
 });

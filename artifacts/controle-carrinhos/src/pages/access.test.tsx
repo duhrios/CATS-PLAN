@@ -2,20 +2,22 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminLoginPage } from "./access";
 
-const { getRememberedAdminName, loginWithCredentials, rememberAdminName, setLocation } = vi.hoisted(() => ({
-  getRememberedAdminName: vi.fn(() => ""),
+const { forgetAdminCredentials, getRememberedAdminCredentials, loginWithCredentials, rememberAdminCredentials, setLocation } = vi.hoisted(() => ({
+  forgetAdminCredentials: vi.fn(),
+  getRememberedAdminCredentials: vi.fn(() => ({ name: "", password: "" })),
   loginWithCredentials: vi.fn(),
-  rememberAdminName: vi.fn(),
+  rememberAdminCredentials: vi.fn(),
   setLocation: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-session", () => ({
   changeInitialAdminPassword: vi.fn(),
   endAuthSession: vi.fn(),
+  forgetAdminCredentials,
   getAuthenticatedSession: vi.fn(),
-  getRememberedAdminName,
+  getRememberedAdminCredentials,
   loginWithCredentials,
-  rememberAdminName,
+  rememberAdminCredentials,
 }));
 
 vi.mock("wouter", () => ({
@@ -28,14 +30,14 @@ vi.mock("wouter", () => ({
 describe("administrator login", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getRememberedAdminName.mockReturnValue("");
+    getRememberedAdminCredentials.mockReturnValue({ name: "", password: "" });
     loginWithCredentials.mockResolvedValue({
       name: "Administradora",
       mustChangePassword: false,
     });
   });
 
-  it("remembers the login when requested and lets the browser manage the password", async () => {
+  it("remembers the login and password when requested", async () => {
     render(<AdminLoginPage />);
 
     fireEvent.change(screen.getByLabelText("Nome"), {
@@ -45,12 +47,16 @@ describe("administrator login", () => {
       target: { value: "senha-segura" },
     });
     fireEvent.click(screen.getByRole("checkbox", {
-      name: "Lembrar meu login neste dispositivo",
+      name: "Lembrar meu login e senha neste dispositivo",
     }));
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
 
     await waitFor(() => {
-      expect(rememberAdminName).toHaveBeenCalledWith("Administradora", true);
+      expect(rememberAdminCredentials).toHaveBeenCalledWith(
+        "Administradora",
+        "senha-segura",
+        true,
+      );
       expect(setLocation).toHaveBeenCalledWith("/admin");
     });
     expect(loginWithCredentials).toHaveBeenCalledWith(
@@ -58,20 +64,33 @@ describe("administrator login", () => {
       "Administradora",
       "senha-segura",
     );
-    expect(screen.getByLabelText("Senha administrativa")).toHaveAttribute(
-      "autocomplete",
-      "current-password",
-    );
   });
 
-  it("prefills a previously remembered login", () => {
-    getRememberedAdminName.mockReturnValue("Diretora");
+  it("prefills previously remembered credentials", () => {
+    getRememberedAdminCredentials.mockReturnValue({
+      name: "Diretora",
+      password: "senha-salva",
+    });
 
     render(<AdminLoginPage />);
 
     expect(screen.getByLabelText("Nome")).toHaveValue("Diretora");
+    expect(screen.getByLabelText("Senha administrativa")).toHaveValue("senha-salva");
     expect(screen.getByRole("checkbox", {
-      name: "Lembrar meu login neste dispositivo",
+      name: "Lembrar meu login e senha neste dispositivo",
     })).toBeChecked();
+  });
+
+  it("clears remembered credentials when the option is unchecked", () => {
+    render(<AdminLoginPage />);
+
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: "Lembrar meu login e senha neste dispositivo",
+    }));
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: "Lembrar meu login e senha neste dispositivo",
+    }));
+
+    expect(forgetAdminCredentials).toHaveBeenCalledOnce();
   });
 });

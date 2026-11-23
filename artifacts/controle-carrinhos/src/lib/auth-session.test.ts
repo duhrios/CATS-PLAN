@@ -3,12 +3,13 @@ import {
   changeInitialAdminPassword,
   endAuthSession,
   getAuthenticatedRole,
-  getRememberedAdminName,
+  getRememberedAdminCredentials,
   getRememberedOperatorName,
   loginWithCredentials,
   refreshAuthenticatedSession,
   rememberOperatorName,
-  rememberAdminName,
+  rememberAdminCredentials,
+  forgetAdminCredentials,
   verifySuperAdminCredentials,
   getAuthenticatedSession,
 } from "@/lib/auth-session";
@@ -167,20 +168,23 @@ describe("server-validated sessions", () => {
     expect(getRememberedOperatorName()).toBe("");
   });
 
-  it("remembers the administrator login without storing the password", async () => {
+  it("remembers administrator credentials on this device and keeps them after sign out", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
-    rememberAdminName("Administradora", true);
+    rememberAdminCredentials("Administradora", "senha-segura", true);
     await endAuthSession();
 
-    expect(getRememberedAdminName()).toBe("Administradora");
+    expect(getRememberedAdminCredentials()).toEqual({
+      name: "Administradora",
+      password: "senha-segura",
+    });
     expect(window.localStorage.getItem("controle-carrinhos-remembered-admin-name")).toBe("Administradora");
-    expect(window.localStorage.getItem("controle-carrinhos-password")).toBeNull();
+    expect(window.localStorage.getItem("controle-carrinhos-remembered-admin-password")).toBe("senha-segura");
   });
 
-  it("removes the remembered administrator login when requested", () => {
-    rememberAdminName("Administradora", true);
-    rememberAdminName("Administradora", false);
+  it("removes all remembered administrator credentials when requested", () => {
+    rememberAdminCredentials("Administradora", "senha-segura", true);
+    forgetAdminCredentials();
 
-    expect(getRememberedAdminName()).toBe("");
+    expect(getRememberedAdminCredentials()).toEqual({ name: "", password: "" });
   });
 });
