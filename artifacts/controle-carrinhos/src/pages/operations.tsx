@@ -108,7 +108,7 @@ function Metric({
 }: {
   label: string;
   value: string;
-  detail: string;
+  detail?: string;
   icon: typeof Activity;
   tone?: "teal" | "gold" | "green" | "red";
   href?: string;
@@ -145,9 +145,11 @@ function Metric({
       <p className="mt-4 font-display text-3xl font-semibold tracking-[-.04em]">
         {value}
       </p>
-      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-        {detail}
-      </p>
+      {detail && (
+        <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+          {detail}
+        </p>
+      )}
     </div>
   );
   return href ? (
@@ -2569,7 +2571,6 @@ export function WifiPage({
         <Metric
           label="Pontos fixos"
           value={String(fixedPoints.length)}
-          detail={`${mobilePoints.length} ${mobilePoints.length === 1 ? "antena volante cadastrada" : "antenas volantes cadastradas"}`}
           icon={Network}
           href="#wifi-rooms"
           onClick={() => setRoomTab("fixed")}

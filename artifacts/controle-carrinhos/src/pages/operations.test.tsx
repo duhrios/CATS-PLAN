@@ -117,7 +117,9 @@ describe("Wi-Fi inventory counts", () => {
     render(<WifiPage />);
 
     expect(screen.getByText("Pontos fixos")).toBeInTheDocument();
-    expect(screen.getByText("1 antena volante cadastrada")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/antenas? volantes? cadastradas?/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Antenas disponíveis")).toBeInTheDocument();
   });
 
