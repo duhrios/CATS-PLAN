@@ -118,6 +118,9 @@ describe("Wi-Fi inventory counts", () => {
 
     expect(screen.getByText("Pontos fixos")).toBeInTheDocument();
     expect(
+      screen.getByText("Pontos de acesso Wi-Fi cadastrados"),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByText(/antenas? volantes? cadastradas?/i),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Antenas disponíveis")).toBeInTheDocument();
@@ -459,5 +462,126 @@ describe("cart unit availability observations", () => {
       "A1",
       "  Tela quebrada  ",
     );
+  });
+});
+
+describe("reserved Chromebook selection in cart inventory", () => {
+  const restoreReservedUnits = vi.fn();
+  const unitNames = ["B53", "B54", "B55"];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCampusData.mockReturnValue({
+      carts: [{
+        id: "cart-b",
+        name: "Carrinho B",
+        code: "B",
+        prefix: "B",
+        total: 55,
+        available: 55,
+        location: "Bloco 1",
+        status: "Pronto",
+        lastCheck: "Hoje, 06:52",
+        accent: "bg-blue-500",
+        unavailable: false,
+        unavailableUnits: [],
+        reservedUnits: unitNames,
+        deletedUnits: [],
+        reserveCapacity: 20,
+      }],
+      addCart: vi.fn(),
+      addCartUnit: vi.fn(),
+      deleteCart: vi.fn(),
+      toggleCartUnavailable: vi.fn(),
+      toggleCartUnitUnavailable: vi.fn(),
+      setCartUnitUnavailableReason: vi.fn(),
+      deleteCartUnit: vi.fn(),
+      toggleCartUnitReserved: vi.fn(),
+      restoreReservedUnits,
+      reservations: [],
+      reserveAvailable: unitNames.length,
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+      updateCampusSettings: vi.fn(),
+    });
+  });
+
+  it("supports selecting with Ctrl/Cmd, canceling, and clearing with Escape", () => {
+    render(<CartsPage />);
+    const firstUnit = screen.getByTestId("reserve-inventory-unit-B53");
+    const secondUnit = screen.getByTestId("reserve-inventory-unit-B54");
+
+    fireEvent.click(firstUnit);
+    fireEvent.click(secondUnit, { ctrlKey: true });
+
+    expect(firstUnit).toHaveAttribute("aria-pressed", "true");
+    expect(secondUnit).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/2 unidade\(s\) selecionada\(s\)/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("button-cancel-reserve-inventory-selection"));
+    expect(firstUnit).toHaveAttribute("aria-pressed", "false");
+    expect(secondUnit).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.queryByTestId("button-move-selected-reserve-units"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(firstUnit);
+    fireEvent.click(secondUnit, { metaKey: true });
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(firstUnit).toHaveAttribute("aria-pressed", "false");
+    expect(secondUnit).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.queryByTestId("button-move-selected-reserve-units"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selects units by dragging, reverses selection along the path, and moves the selection", () => {
+    render(<CartsPage />);
+    const firstUnit = screen.getByTestId("reserve-inventory-unit-B53");
+    const secondUnit = screen.getByTestId("reserve-inventory-unit-B54");
+    const thirdUnit = screen.getByTestId("reserve-inventory-unit-B55");
+    const unitList = screen.getByLabelText("Unidades reservadas");
+
+    fireEvent.mouseDown(firstUnit);
+    fireEvent.mouseEnter(secondUnit);
+    fireEvent.mouseEnter(thirdUnit);
+    expect(firstUnit).toHaveAttribute("aria-pressed", "true");
+    expect(secondUnit).toHaveAttribute("aria-pressed", "true");
+    expect(thirdUnit).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.mouseEnter(secondUnit);
+    expect(secondUnit).toHaveAttribute("aria-pressed", "true");
+    expect(thirdUnit).toHaveAttribute("aria-pressed", "false");
+    fireEvent.mouseUp(unitList);
+    fireEvent.click(firstUnit);
+
+    fireEvent.click(screen.getByTestId("button-move-selected-reserve-units"));
+    expect(restoreReservedUnits).toHaveBeenCalledWith(["B53", "B54"]);
+    expect(firstUnit).toHaveAttribute("aria-pressed", "false");
+    expect(secondUnit).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("selects every reserved unit and toggles select-all off", () => {
+    render(<CartsPage />);
+    const selectAll = screen.getByRole("button", { name: "Selecionar todos" });
+
+    fireEvent.click(selectAll);
+    unitNames.forEach((unit) => {
+      expect(screen.getByTestId(`reserve-inventory-unit-${unit}`)).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: "Desmarcar todos" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Desmarcar todos" }));
+    unitNames.forEach((unit) => {
+      expect(screen.getByTestId(`reserve-inventory-unit-${unit}`)).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
   });
 });

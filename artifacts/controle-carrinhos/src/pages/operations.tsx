@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -1832,6 +1832,13 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
   const [selectedReserveUnits, setSelectedReserveUnits] = useState<string[]>([]);
+  const reserveSelectionDraggingRef = useRef(false);
+  const reserveSelectionBaseUnitRef = useRef<string | null>(null);
+  const reserveSelectionBaseRef = useRef<string[]>([]);
+  const reserveSelectionPathRef = useRef<string[]>([]);
+  const reserveSelectionMovedRef = useRef(false);
+  const reserveSelectionAdditiveRef = useRef(false);
+  const reserveSelectionMouseStartedRef = useRef(false);
   const [unitSelectionMode, setUnitSelectionMode] = useState<
     "unavailable" | "reserved" | "deleted"
   >("unavailable");
@@ -1853,6 +1860,27 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const reserveUnits = carts.flatMap((cart) =>
     cart.reservedUnits.map((unit) => ({ unit, cartName: cart.name })),
   );
+  useEffect(() => {
+    if (selectedReserveUnits.length === 0) return;
+    const clearSelectionOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      reserveSelectionDraggingRef.current = false;
+      reserveSelectionPathRef.current = [];
+      setSelectedReserveUnits([]);
+    };
+    window.addEventListener("keydown", clearSelectionOnEscape);
+    return () => window.removeEventListener("keydown", clearSelectionOnEscape);
+  }, [selectedReserveUnits.length]);
+  const selectReserveInventoryUnit = (unit: string, additive: boolean) => {
+    setSelectedReserveUnits((current) => {
+      if (!additive) {
+        return current.length === 1 && current.includes(unit) ? [] : [unit];
+      }
+      return current.includes(unit)
+        ? current.filter((selected) => selected !== unit)
+        : [...current, unit];
+    });
+  };
   return (
     <div className="animate-rise space-y-7">
       <PageHeader
@@ -2311,14 +2339,34 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         type="button"
                         className="text-[10px] font-semibold text-[hsl(var(--primary))]"
                         onClick={() => setSelectedReserveUnits((current) =>
-                          current.length === reserveUnits.length ? [] : reserveUnits.map((item) => item.unit),
+                          reserveUnits.length > 0 &&
+                            reserveUnits.every((item) => current.includes(item.unit))
+                            ? []
+                            : reserveUnits.map((item) => item.unit),
                         )}
                       >
-                        {selectedReserveUnits.length === reserveUnits.length ? "Desmarcar todos" : "Selecionar todos"}
+                        {reserveUnits.length > 0 &&
+                        reserveUnits.every((item) => selectedReserveUnits.includes(item.unit))
+                          ? "Desmarcar todos"
+                          : "Selecionar todos"}
                       </button>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  {!readOnly && reserveUnits.length > 0 && (
+                    <p className="mb-2 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">
+                      Clique para selecionar; use Ctrl/Cmd para adicionar ou remover unidades, ou arraste sobre elas. Pressione Esc para cancelar.
+                    </p>
+                  )}
+                  <div
+                    className="flex flex-wrap gap-1.5"
+                    aria-label="Unidades reservadas"
+                    onMouseUp={() => {
+                      reserveSelectionDraggingRef.current = false;
+                    }}
+                    onMouseLeave={() => {
+                      reserveSelectionDraggingRef.current = false;
+                    }}
+                  >
                     {reserveUnits.map(({ unit, cartName }) => {
                       const selected = selectedReserveUnits.includes(unit);
                       return (
@@ -2326,15 +2374,77 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           key={unit}
                           type="button"
                           disabled={readOnly}
+                          aria-pressed={selected}
+                          aria-label={`Selecionar unidade reservada ${unit}`}
+                          data-testid={`reserve-inventory-unit-${unit}`}
                           title={`Origem: ${cartName}`}
-                          onClick={() => setSelectedReserveUnits((current) =>
-                            selected ? current.filter((item) => item !== unit) : [...current, unit],
-                          )}
+                          onMouseDown={(event) => {
+                            if (readOnly) return;
+                            event.preventDefault();
+                            const additive = event.ctrlKey || event.metaKey;
+                            const wasSelected =
+                              selected && selectedReserveUnits.length === 1;
+                            reserveSelectionDraggingRef.current = true;
+                            reserveSelectionMouseStartedRef.current = true;
+                            reserveSelectionBaseUnitRef.current = unit;
+                            reserveSelectionPathRef.current = [];
+                            reserveSelectionMovedRef.current = false;
+                            reserveSelectionAdditiveRef.current = additive;
+                            const nextSelection = additive
+                              ? selected
+                                ? selectedReserveUnits.filter((item) => item !== unit)
+                                : [...selectedReserveUnits, unit]
+                              : wasSelected
+                                ? []
+                                : [unit];
+                            reserveSelectionBaseRef.current = nextSelection;
+                            setSelectedReserveUnits(nextSelection);
+                          }}
+                          onMouseEnter={() => {
+                            if (readOnly || !reserveSelectionDraggingRef.current) return;
+                            reserveSelectionMovedRef.current = true;
+                            const currentPath = reserveSelectionPathRef.current;
+                            const pathIndex = currentPath.indexOf(unit);
+                            const nextPath = unit === reserveSelectionBaseUnitRef.current
+                              ? []
+                              : pathIndex >= 0
+                                ? currentPath.slice(0, pathIndex + 1)
+                                : [...currentPath, unit];
+                            reserveSelectionPathRef.current = nextPath;
+                            setSelectedReserveUnits([
+                              ...new Set([
+                                ...reserveSelectionBaseRef.current,
+                                ...nextPath,
+                              ]),
+                            ]);
+                          }}
+                          onClick={(event) => {
+                            if (reserveSelectionMouseStartedRef.current) {
+                              reserveSelectionMouseStartedRef.current = false;
+                              if (reserveSelectionMovedRef.current) {
+                                reserveSelectionMovedRef.current = false;
+                                return;
+                              }
+                              reserveSelectionAdditiveRef.current = false;
+                              return;
+                            }
+                            if (reserveSelectionMovedRef.current) {
+                              reserveSelectionMovedRef.current = false;
+                              return;
+                            }
+                            selectReserveInventoryUnit(
+                              unit,
+                              event.ctrlKey ||
+                                event.metaKey ||
+                                reserveSelectionAdditiveRef.current,
+                            );
+                            reserveSelectionAdditiveRef.current = false;
+                          }}
                           className={cx(
-                            "rounded-md border px-2 py-1 font-data text-[11px]",
+                            "select-none rounded-md border px-2 py-1 font-data text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]",
                             selected
                               ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.15)] text-[hsl(var(--primary))]"
-                              : "border-[hsl(var(--accent)/.55)] bg-[hsl(var(--card))]",
+                              : "border-[hsl(var(--accent)/.55)] bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent)/.12)]",
                           )}
                         >
                           {unit}
@@ -2343,16 +2453,38 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                     })}
                   </div>
                   {!readOnly && selectedReserveUnits.length > 0 && (
-                    <Button
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => {
-                        restoreReservedUnits(selectedReserveUnits);
-                        setSelectedReserveUnits([]);
-                      }}
-                    >
-                      Mover selecionados
-                    </Button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2">
+                      <p className="min-w-0 flex-1 text-[11px] font-semibold text-[hsl(var(--foreground))]">
+                        {selectedReserveUnits.length} unidade(s) selecionada(s):{" "}
+                        <span className="font-data font-normal">
+                          {selectedReserveUnits.join(", ")}
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label="Cancelar seleção"
+                          data-testid="button-cancel-reserve-inventory-selection"
+                          onClick={() => {
+                            setSelectedReserveUnits([]);
+                            reserveSelectionPathRef.current = [];
+                          }}
+                        >
+                          <X size={14} /> Cancelar seleção
+                        </Button>
+                        <Button
+                          size="sm"
+                          data-testid="button-move-selected-reserve-units"
+                          onClick={() => {
+                            restoreReservedUnits(selectedReserveUnits);
+                            setSelectedReserveUnits([]);
+                          }}
+                        >
+                          Mover selecionados
+                        </Button>
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div className="mt-5 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4">
@@ -2571,6 +2703,7 @@ export function WifiPage({
         <Metric
           label="Pontos fixos"
           value={String(fixedPoints.length)}
+          detail="Pontos de acesso Wi-Fi cadastrados"
           icon={Network}
           href="#wifi-rooms"
           onClick={() => setRoomTab("fixed")}
