@@ -117,9 +117,11 @@ describe("API authentication safeguards", () => {
     });
     const [cookieName, token] = response.cookie.mock.calls[0];
     const [body, signature] = String(token).split(".");
+    const tamperedSignature =
+      (signature.startsWith("A") ? "B" : "A") + signature.slice(1);
     const request = {
       cookies: {
-        [cookieName]: `${body}.${signature.slice(0, -1)}x`,
+        [cookieName]: `${body}.${tamperedSignature}`,
       },
     } as unknown as Request;
 

@@ -2,14 +2,15 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./app-shell";
 
-const { authSession, setLocation, endAuthSession } = vi.hoisted(() => ({
-  authSession: { current: null as null | { role: "admin" | "operator"; name: string } },
+const { authSession, setLocation, endAuthSession, location } = vi.hoisted(() => ({
+  authSession: { current: null as null | { role: "admin" | "operator" | "user"; name: string } },
   setLocation: vi.fn(),
   endAuthSession: vi.fn(),
+  location: { current: "/operador" },
 }));
 
 vi.mock("wouter", () => ({
-  useLocation: () => ["/operador", setLocation],
+  useLocation: () => [location.current, setLocation],
   Link: ({
     href,
     children,
@@ -47,6 +48,7 @@ describe("app shell role navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    location.current = "/operador";
   });
 
   it("keeps all administration navigation available inside the TI operations view", () => {
@@ -73,5 +75,19 @@ describe("app shell role navigation", () => {
     expect(screen.getByRole("link", { name: "Pontos Wi-Fi" })).toHaveAttribute("href", "/wifi");
     expect(screen.queryByRole("link", { name: /Usuários/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("button-switch-role")).not.toBeInTheDocument();
+  });
+
+  it("shows support and the requested attribution in the teacher navigation", () => {
+    authSession.current = { role: "user", name: "Ana Souza" };
+    location.current = "/suporte";
+
+    render(<AppShell role="user"><main>Suporte</main></AppShell>);
+
+    expect(screen.getByRole("link", { name: "Suporte" })).toHaveAttribute("href", "/suporte");
+    expect(screen.getByRole("link", { name: "Meu perfil" })).toBeInTheDocument();
+    expect(screen.getByText("by: Eduardo Rios")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "eduardo123rios@gmail.com" }))
+      .toHaveAttribute("href", "mailto:eduardo123rios@gmail.com");
+    expect(screen.queryByRole("link", { name: "Usuários" })).not.toBeInTheDocument();
   });
 });

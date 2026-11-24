@@ -32,6 +32,7 @@ import {
 import { ReservationNotifications } from "@/components/reservation-notifications";
 import { PushNotifications } from "@/components/push-notifications";
 import { PwaInstall } from "@/components/pwa-install";
+import { SupportPage } from "@/pages/support";
 import { OperatorNotifications } from "@/components/operator-notifications";
 import { NotificationSettingsProvider } from "@/lib/notification-settings";
 import { getRoutePathname, isOperatorModeForLocation } from "@/lib/route-access";
@@ -74,6 +75,7 @@ function Router() {
   const teacherSpreadsheetRoute = pathname === "/visao-planilha";
   const operatorOnlyRoute =
     pathname === "/operador" || pathname.startsWith("/operador/");
+  const supportRoute = pathname === "/suporte";
   useEffect(() => {
     if (publicRoute) {
       setStoredRole(getAuthenticatedRole());
@@ -123,7 +125,10 @@ function Router() {
     return <RoleRedirect role={storedRole === "admin" ? "admin" : "access"} />;
   }
   const redirectRole =
-    storedRole === "user" && !userOnlyRoute && !teacherSpreadsheetRoute
+    storedRole === "user" &&
+    !userOnlyRoute &&
+    !teacherSpreadsheetRoute &&
+    !supportRoute
       ? "user"
       : storedRole === "operator" &&
           adminOnlyRoute &&
@@ -164,7 +169,9 @@ function Router() {
           role={
             operatorMode
               ? "operator"
-              : userMode || (teacherSpreadsheetRoute && storedRole === "user")
+              : userMode ||
+                  ((teacherSpreadsheetRoute || supportRoute) &&
+                    storedRole === "user")
                 ? "user"
                 : "admin"
           }
@@ -193,6 +200,9 @@ function Router() {
               <WifiPage readOnly={operatorMode} />
             </Route>
             <Route path="/historico" component={HistoryPage} />
+            <Route path="/suporte">
+              <SupportPage admin={storedRole === "admin"} />
+            </Route>
             <Route path="/visao-planilha">
               <SpreadsheetViewPage readOnly={storedRole === "user"} />
             </Route>

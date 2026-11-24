@@ -141,6 +141,22 @@ export const pushSubscriptionsTable = pgTable("push_subscriptions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const supportTicketsTable = pgTable("support_tickets", {
+  id: serial("id").primaryKey(),
+  accountId: integer("account_id").references(() => usersTable.id, { onDelete: "set null" }),
+  senderRole: text("sender_role").notNull(),
+  senderName: text("sender_name").notNull(),
+  category: text("category").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("Pendente"),
+  adminResponse: text("admin_response"),
+  respondedBy: text("responded_by"),
+  respondedAt: timestamp("responded_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User = typeof usersTable.$inferSelect;
 export type Cart = typeof cartsTable.$inferSelect;
 export type CartUnit = typeof cartUnitsTable.$inferSelect;
@@ -151,3 +167,4 @@ export type Movement = typeof movementsTable.$inferSelect;
 export type DayLock = typeof dayLocksTable.$inferSelect;
 export type Activity = typeof activityTable.$inferSelect;
 export type PushSubscription = typeof pushSubscriptionsTable.$inferSelect;
+export type SupportTicket = typeof supportTicketsTable.$inferSelect;

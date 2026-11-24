@@ -17,6 +17,7 @@ import {
   UserRound,
   X,
   Settings,
+  LifeBuoy,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
@@ -36,6 +37,7 @@ const adminNavItems = [
   { href: "/wifi", label: "Pontos Wi-Fi", icon: Network },
   { href: "/historico", label: "Histórico", icon: Activity },
   { href: "/visao-planilha", label: "Planilha", icon: Table2 },
+  { href: "/suporte", label: "Suporte", icon: LifeBuoy },
 ];
 const adminConfigurationNavItems = [
   { href: "/configuracao", label: "Configuração", icon: Settings },
@@ -46,6 +48,7 @@ const userNavItems = [
   { href: "/usuario", label: "Visão do dia", icon: LayoutDashboard },
   { href: "/usuario/reservas", label: "Minhas reservas", icon: CalendarDays },
   { href: "/usuario/perfil", label: "Meu perfil", icon: UserRound },
+  { href: "/suporte", label: "Suporte", icon: LifeBuoy },
 ];
 const teacherSpreadsheetNavItem = {
   href: "/visao-planilha",
@@ -59,6 +62,7 @@ const operatorNavItems = [
   { href: "/wifi", label: "Pontos Wi-Fi", icon: Network },
   { href: "/visao-planilha", label: "Planilha", icon: Table2 },
   { href: "/operador/configuracao", label: "Configuração", icon: Settings },
+  { href: "/suporte", label: "Suporte", icon: LifeBuoy },
 ];
 
 export function AppShell({
@@ -454,6 +458,13 @@ export function AppShell({
         <main className="app-grid min-h-[calc(100dvh-76px)] min-w-0 overflow-x-clip px-5 py-7 sm:px-8 lg:px-10">
           {children}
         </main>
+        <footer className="border-t border-[hsl(var(--border))] px-5 py-4 text-center text-xs text-[hsl(var(--muted-foreground))] sm:px-8 lg:px-10">
+          <span className="font-semibold text-[hsl(var(--foreground))]">by: Eduardo Rios</span>
+          <span className="mx-2 text-[hsl(var(--border))]">·</span>
+          <a className="hover:text-[hsl(var(--primary))] hover:underline" href="mailto:eduardo123rios@gmail.com">
+            eduardo123rios@gmail.com
+          </a>
+        </footer>
       </div>
       {mobileOpen && (
         <button
