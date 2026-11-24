@@ -3,11 +3,13 @@ import React, { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CampusDataProvider, useCampusData } from "./campus-data";
 import { RoomDirectoryProvider, segmentAbbreviation, useRoomDirectory } from "./room-directory";
+import { SharedRoomDirectoryConflictError } from "./room-directory-api";
 import { initialCampusRooms } from "./room-directory-seed";
 
-const { getRole, loadSharedRooms } = vi.hoisted(() => ({
+const { getRole, loadSharedRooms, saveSharedRooms } = vi.hoisted(() => ({
   getRole: vi.fn((): "admin" | "operator" | "user" | null => null),
   loadSharedRooms: vi.fn(),
+  saveSharedRooms: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-session", () => ({
@@ -16,9 +18,10 @@ vi.mock("@/lib/auth-session", () => ({
   onAuthenticatedSessionChange: vi.fn(() => () => {}),
 }));
 
-vi.mock("./room-directory-api", () => ({
+vi.mock("./room-directory-api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./room-directory-api")>(),
   loadSharedRooms,
-  saveSharedRooms: vi.fn().mockResolvedValue({ rooms: [], configured: true }),
+  saveSharedRooms,
 }));
 
 describe("Room directory factory reset", () => {
@@ -26,6 +29,11 @@ describe("Room directory factory reset", () => {
     window.localStorage.clear();
     vi.unstubAllEnvs();
     vi.clearAllMocks();
+    saveSharedRooms.mockResolvedValue({
+      rooms: [],
+      configured: true,
+      updatedAt: "2026-11-18T13:30:00.001Z",
+    });
     getRole.mockReturnValue(null);
     loadSharedRooms.mockResolvedValue({ rooms: [], configured: false });
   });
@@ -48,6 +56,87 @@ describe("Room directory factory reset", () => {
     const { result } = renderHook(() => useRoomDirectory(), { wrapper });
     await waitFor(() => expect(result.current.roomCatalogLoading).toBe(false));
     expect(loadSharedRooms).not.toHaveBeenCalled();
+  });
+
+  it("saves room deletions against the revision loaded from the server", async () => {
+    getRole.mockReturnValue("admin");
+    const room = {
+      id: "room-12",
+      number: "12",
+      floor: "Térreo",
+      segment: "Fundamental 1" as const,
+      morningClasses: ["3º ano B"],
+      afternoonClasses: [],
+    };
+    loadSharedRooms.mockResolvedValue({
+      configured: true,
+      rooms: [room],
+      updatedAt: "2026-11-18T13:30:00.000Z",
+    });
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.rooms).toHaveLength(1));
+
+    act(() => result.current.deleteRoom(room.id));
+
+    await waitFor(() => expect(saveSharedRooms).toHaveBeenCalledWith(
+      [],
+      "2026-11-18T13:30:00.000Z",
+    ));
+  });
+
+  it("retries a room deletion after merging concurrent remote changes", async () => {
+    getRole.mockReturnValue("admin");
+    const rooms = [
+      {
+        id: "room-12",
+        number: "12",
+        floor: "Térreo",
+        segment: "Fundamental 1" as const,
+        morningClasses: ["3º ano B"],
+        afternoonClasses: [],
+      },
+      {
+        id: "room-14",
+        number: "14",
+        floor: "Térreo",
+        segment: "Fundamental 1" as const,
+        morningClasses: [],
+        afternoonClasses: [],
+      },
+    ];
+    const remoteRoom = {
+      id: "room-15",
+      number: "15",
+      floor: "Térreo",
+      segment: "Fundamental 1" as const,
+      morningClasses: [],
+      afternoonClasses: [],
+    };
+    loadSharedRooms
+      .mockResolvedValueOnce({
+        configured: true,
+        rooms,
+        updatedAt: "2026-11-18T13:30:00.000Z",
+      })
+      .mockResolvedValueOnce({
+        configured: true,
+        rooms: [...rooms, remoteRoom],
+        updatedAt: "2026-11-18T13:30:00.001Z",
+      });
+    saveSharedRooms.mockRejectedValueOnce(
+      new SharedRoomDirectoryConflictError("Versão desatualizada."),
+    );
+    const { result } = renderHook(() => useRoomDirectory(), { wrapper });
+    await waitFor(() => expect(result.current.rooms).toHaveLength(2));
+
+    act(() => result.current.deleteRoom("room-12"));
+
+    await waitFor(() => expect(saveSharedRooms).toHaveBeenCalledTimes(2));
+    expect(saveSharedRooms).toHaveBeenLastCalledWith(
+      [rooms[1], remoteRoom],
+      "2026-11-18T13:30:00.001Z",
+    );
+    expect(result.current.rooms).toEqual([rooms[1], remoteRoom]);
   });
 
   it("does not recreate sample rooms after a factory reset or app reload", async () => {

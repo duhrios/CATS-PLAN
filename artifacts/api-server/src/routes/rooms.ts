@@ -1,8 +1,15 @@
+import { and, eq } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { campusSettingsTable } from "@workspace/db/schema";
 import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
-import { getRoomDirectory, roomDirectorySettingKey, type CampusRoom } from "../lib/room-directory";
+import {
+  getRoomDirectory,
+  nextRoomDirectoryTimestamp,
+  roomDirectorySettingKey,
+  roomDirectoryVersionMatches,
+  type CampusRoom,
+} from "../lib/room-directory";
 
 const router: IRouter = Router();
 const segments = ["Educação Infantil", "Fundamental 1", "Fundamental 2", "Ensino Médio", "Contraturno"];
@@ -53,13 +60,49 @@ router.put("/rooms", requireSameOrigin, requireSession, async (req, res) => {
   if (!rooms) {
     return res.status(400).json({ error: "O cadastro de salas contém dados inválidos ou repetidos." });
   }
-  await db.insert(campusSettingsTable)
-    .values({ key: roomDirectorySettingKey, value: JSON.stringify(rooms) })
-    .onConflictDoUpdate({
-      target: campusSettingsTable.key,
-      set: { value: JSON.stringify(rooms), updatedAt: new Date() },
+  const expectedUpdatedAt = req.body?.updatedAt;
+  if (
+    !Object.prototype.hasOwnProperty.call(req.body ?? {}, "updatedAt") ||
+    (expectedUpdatedAt !== null && typeof expectedUpdatedAt !== "string")
+  ) {
+    return res.status(400).json({ error: "A versão do cadastro de salas está ausente ou inválida." });
+  }
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ updatedAt: campusSettingsTable.updatedAt })
+      .from(campusSettingsTable)
+      .where(eq(campusSettingsTable.key, roomDirectorySettingKey))
+      .for("update")
+      .limit(1);
+    if (!roomDirectoryVersionMatches(current?.updatedAt ?? null, expectedUpdatedAt)) {
+      return null;
+    }
+
+    const updatedAt = nextRoomDirectoryTimestamp(current?.updatedAt ?? null);
+    const saved = current
+      ? (await tx.update(campusSettingsTable)
+          .set({ value: JSON.stringify(rooms), updatedAt })
+          .where(and(
+            eq(campusSettingsTable.key, roomDirectorySettingKey),
+            eq(campusSettingsTable.updatedAt, current.updatedAt),
+          ))
+          .returning({ updatedAt: campusSettingsTable.updatedAt }))[0]
+      : (await tx.insert(campusSettingsTable)
+          .values({ key: roomDirectorySettingKey, value: JSON.stringify(rooms), updatedAt })
+          .onConflictDoNothing()
+          .returning({ updatedAt: campusSettingsTable.updatedAt }))[0];
+    if (!saved) return null;
+    return {
+      rooms,
+      configured: true,
+      updatedAt: saved.updatedAt.toISOString(),
+    };
+  });
+  if (!result) {
+    return res.status(409).json({
+      error: "O cadastro de salas foi alterado em outro dispositivo. Atualize a página antes de salvar novamente.",
     });
-  return res.json({ rooms, configured: true });
+  }
+  return res.json(result);
 });
 
 export default router;

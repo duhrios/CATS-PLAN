@@ -119,8 +119,11 @@ describe("configuration data maintenance", () => {
     expect(window.confirm).toHaveBeenCalled();
   });
 
-  it("lets administrators enable same-day scheduling and configure released intervals", () => {
+  it("lets administrators enable same-day scheduling and configure released intervals", async () => {
     render(<ConfigurationPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("toggle-teacher-spreadsheet")).toBeChecked(),
+    );
 
     fireEvent.click(screen.getByTestId("toggle-same-day-booking"));
     expect(updateCampusSettings).toHaveBeenCalledWith(expect.objectContaining({
@@ -141,5 +144,22 @@ describe("configuration data maintenance", () => {
     expect(updateCampusSettings).toHaveBeenLastCalledWith(expect.objectContaining({
       reservationFreezeHours: 4,
     }));
+  });
+
+  it("lays out configuration sections compactly without stretching collapsed cards", async () => {
+    render(<ConfigurationPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("toggle-teacher-spreadsheet")).toBeChecked(),
+    );
+
+    const sectionToggle = screen.getByRole("button", {
+      name: "Maximizar Acesso do professor à planilha",
+    });
+    const sectionsGrid = sectionToggle.closest(".grid");
+
+    expect(sectionsGrid).toHaveClass("items-start", "lg:grid-cols-2");
+    expect(screen.getByRole("button", {
+      name: "Maximizar Manutenção de dados",
+    })).toHaveAttribute("aria-expanded", "false");
   });
 });

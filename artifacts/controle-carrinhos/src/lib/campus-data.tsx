@@ -21,6 +21,7 @@ import {
 import {
   loadSharedOperationalState,
   mergeOperationalStateWithLocalChanges,
+  OperationalStateConflictError,
   operationalStateStorageKeys,
   saveSharedOperationalState,
   type OperationalState,
@@ -1283,8 +1284,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
   const operationalStateUpdatedAtRef = useRef<string | null>(null);
   const operationalStateSaveQueueRef = useRef(Promise.resolve());
   const operationalStateSyncedSignatureRef = useRef<string | null>(null);
+  const operationalStateSyncedStateRef = useRef<OperationalState | null>(null);
   const [operationalStateReady, setOperationalStateReady] = useState(false);
-  const applyOperationalStateRef = useRef<(state: OperationalState) => void>(() => {});
+  const applyOperationalStateRef = useRef<
+    (state: OperationalState, syncedState?: OperationalState) => void
+  >(() => {});
   const restoreDeletedUnitsRef = useRef(false);
   const operationalStateCurrent: OperationalState = {
     [cartStorageKey]: carts,
@@ -1304,7 +1308,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
-    const applyOperationalState = (state: OperationalState) => {
+    const applyOperationalState = (
+      state: OperationalState,
+      syncedState: OperationalState = state,
+    ) => {
       const mergedState = {
         ...operationalStateCurrentRef.current,
         ...state,
@@ -1337,7 +1344,8 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         }
         window.localStorage.setItem(key, JSON.stringify(value));
       }
-      operationalStateSyncedSignatureRef.current = JSON.stringify(mergedState);
+      operationalStateSyncedStateRef.current = syncedState;
+      operationalStateSyncedSignatureRef.current = JSON.stringify(syncedState);
     };
     applyOperationalStateRef.current = applyOperationalState;
     const refreshOperationalState = async () => {
@@ -1358,7 +1366,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         }
         operationalStateUpdatedAtRef.current = result.updatedAt;
         if (result.state) applyOperationalState(result.state);
-        else operationalStateSyncedSignatureRef.current = localSignature;
+        else {
+          operationalStateSyncedStateRef.current = operationalStateCurrentRef.current;
+          operationalStateSyncedSignatureRef.current = localSignature;
+        }
         setOperationalStateSyncError(null);
       } catch (error) {
         if (!active) return;
@@ -1391,10 +1402,10 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
             operationalStateCurrentRef.current,
             result.state,
           );
-          applyOperationalState(state);
+          applyOperationalState(state, syncedState);
           if (hasLocalChanges) {
-            operationalStateSyncedSignatureRef.current =
-              JSON.stringify(syncedState);
+            operationalStateSyncedStateRef.current = syncedState;
+            operationalStateSyncedSignatureRef.current = JSON.stringify(syncedState);
           }
         } else if (role === "admin" || role === "operator") {
           operationalStateSyncedSignatureRef.current =
@@ -1413,9 +1424,11 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
           const saved = await saveSharedOperationalState(initialState, null);
           if (!active) return;
           operationalStateUpdatedAtRef.current = saved.updatedAt;
+          operationalStateSyncedStateRef.current = operationalStateCurrentRef.current;
           operationalStateSyncedSignatureRef.current =
             JSON.stringify(operationalStateCurrentRef.current);
         } else {
+          operationalStateSyncedStateRef.current = operationalStateCurrentRef.current;
           operationalStateSyncedSignatureRef.current =
             JSON.stringify(operationalStateCurrentRef.current);
         }
@@ -1464,29 +1477,63 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       const save = operationalStateSaveQueueRef.current
         .catch(() => undefined)
-        .then(() => saveSharedOperationalState(
-          state,
-          operationalStateUpdatedAtRef.current,
-          restoreDeletedUnitsRef.current,
-        ));
+        .then(async () => {
+          let stateToSave = state;
+          try {
+            const result = await saveSharedOperationalState(
+              stateToSave,
+              operationalStateUpdatedAtRef.current,
+              restoreDeletedUnitsRef.current,
+            );
+            return { result, stateToSave };
+          } catch (error) {
+            if (!(error instanceof OperationalStateConflictError)) throw error;
+            const remote = await loadSharedOperationalState();
+            if (!remote.state) throw error;
+            const base = operationalStateSyncedStateRef.current ?? stateToSave;
+            const local = operationalStateCurrentRef.current;
+            const reconciliation = mergeOperationalStateWithLocalChanges(
+              base,
+              local,
+              remote.state,
+            );
+            operationalStateUpdatedAtRef.current = remote.updatedAt;
+            if (JSON.stringify(local) !== JSON.stringify(reconciliation.state)) {
+              applyOperationalStateRef.current(reconciliation.state, remote.state);
+            }
+            operationalStateSyncedStateRef.current = remote.state;
+            operationalStateSyncedSignatureRef.current = JSON.stringify(remote.state);
+            if (!reconciliation.hasLocalChanges) {
+              return { result: remote, stateToSave: reconciliation.state };
+            }
+            stateToSave = reconciliation.state;
+            const result = await saveSharedOperationalState(
+              stateToSave,
+              remote.updatedAt,
+              restoreDeletedUnitsRef.current,
+            );
+            return { result, stateToSave };
+          }
+        });
       operationalStateSaveQueueRef.current = save.then(
         () => undefined,
         () => undefined,
       );
       void save
-        .then((result) => {
+        .then(({ result, stateToSave }) => {
           operationalStateUpdatedAtRef.current = result.updatedAt;
           restoreDeletedUnitsRef.current = false;
           const currentSignature = JSON.stringify(operationalStateCurrentRef.current);
           if (
             result.state &&
-            currentSignature === JSON.stringify(state) &&
-            JSON.stringify(result.state) !== JSON.stringify(state)
+            currentSignature === JSON.stringify(stateToSave) &&
+            JSON.stringify(result.state) !== JSON.stringify(stateToSave)
           ) {
-            applyOperationalStateRef.current(result.state);
+            applyOperationalStateRef.current(result.state, result.state);
           }
+          operationalStateSyncedStateRef.current = result.state ?? stateToSave;
           operationalStateSyncedSignatureRef.current = JSON.stringify(
-            result.state ?? state,
+            result.state ?? stateToSave,
           );
           setOperationalStateSyncError(null);
         })
@@ -2039,7 +2086,9 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
     );
   };
   const addCart = (cart: Omit<Cart, "id">) => {
-    const nextCart = { ...cart, id: `cart-${cart.code.toLowerCase()}-${carts.length + 1}` };
+    const uniqueId = globalThis.crypto?.randomUUID?.() ??
+      `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const nextCart = { ...cart, id: `cart-${cart.code.toLowerCase()}-${uniqueId}` };
     persistCarts([...carts, nextCart]);
     persistCartSchedules({
       ...cartSchedules,

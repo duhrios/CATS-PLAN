@@ -157,7 +157,7 @@ export function AdminNotifications() {
         </div>
       )}
       {loading && <p role="status" className="text-sm text-[hsl(var(--muted-foreground))]">Carregando configurações...</p>}
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
         {groups.map((group) => (
           <NotificationGroupCard key={group.id} group={group} />
         ))}

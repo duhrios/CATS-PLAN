@@ -15,6 +15,7 @@ export type SharedOperationalState = {
 };
 
 const wifiPointsStorageKey = "controle-carrinhos-wifi-points";
+const cartsStorageKey = "controle-carrinhos-carts";
 
 const isIdentifiedRecord = (value: unknown): value is { id: string } =>
   typeof value === "object" &&
@@ -22,7 +23,7 @@ const isIdentifiedRecord = (value: unknown): value is { id: string } =>
   !Array.isArray(value) &&
   typeof (value as Record<string, unknown>).id === "string";
 
-const mergeWifiPointChanges = (
+const mergeIdentifiedRecordChanges = (
   original: unknown,
   local: unknown,
   remote: unknown,
@@ -77,8 +78,8 @@ export const mergeOperationalStateWithLocalChanges = (
     }
 
     hasLocalChanges = true;
-    state[key] = key === wifiPointsStorageKey
-      ? mergeWifiPointChanges(
+    state[key] = key === wifiPointsStorageKey || key === cartsStorageKey
+      ? mergeIdentifiedRecordChanges(
           localAtRequestStart[key],
           localAfterRequest[key],
           syncedState[key],
@@ -89,14 +90,21 @@ export const mergeOperationalStateWithLocalChanges = (
   return { state, syncedState, hasLocalChanges };
 };
 
+export class OperationalStateConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OperationalStateConflictError";
+  }
+}
+
 const requireResponse = async (response: Response) => {
   if (response.ok) return response;
   const body = await response.json().catch(() => ({})) as { error?: unknown };
-  throw new Error(
-    typeof body.error === "string"
-      ? body.error
-      : `Falha ao sincronizar os dados operacionais (${response.status}).`,
-  );
+  const message = typeof body.error === "string"
+    ? body.error
+    : `Falha ao sincronizar os dados operacionais (${response.status}).`;
+  if (response.status === 409) throw new OperationalStateConflictError(message);
+  throw new Error(message);
 };
 
 export const loadSharedOperationalState = async (): Promise<SharedOperationalState> => {

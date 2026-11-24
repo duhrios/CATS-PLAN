@@ -87,6 +87,38 @@ describe("Admin notification settings", () => {
     );
   });
 
+  it("keeps a collapsed notification group compact when the other group is expanded", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ti: {
+        "reservation-created": true,
+        "reservation-scheduled": true,
+        "movement-request": true,
+        "movement-audio": true,
+        push: true,
+      },
+      teachers: { push: true },
+    }), { status: 200 })));
+
+    renderSettings();
+    const tiToggle = await screen.findByRole("button", { name: "Maximizar TI" });
+    const teacherToggle = screen.getByRole("button", { name: "Maximizar Professores" });
+    const grid = tiToggle.closest(".grid");
+    const teacherContent = document.getElementById(
+      teacherToggle.getAttribute("aria-controls") ?? "",
+    );
+
+    expect(grid).toHaveClass("items-start");
+    expect(teacherContent).toHaveAttribute("hidden");
+
+    fireEvent.click(tiToggle);
+
+    expect(teacherContent).toHaveAttribute("hidden");
+    expect(screen.getByRole("button", { name: "Minimizar TI" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("keeps the saved state and shows an error when a toggle cannot be saved", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
       init?.method === "PUT"

@@ -259,6 +259,7 @@ describe('Campus data core logic', () => {
     act(() => {
       expect(result.current.saveReservation(created)).toBe(true);
     });
+
     createdId = result.current.reservations.find((item) => item.teacher === created.teacher)?.id ?? 0;
 
     act(() => {
@@ -293,6 +294,34 @@ describe('Campus data core logic', () => {
     });
 
     expect(result.current.reservations.some((item) => item.id === createdId)).toBe(false);
+  });
+
+  it("uses a new cart identifier when adding a replacement for a deleted cart", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const cart: Omit<Cart, "id"> = {
+      name: "Carrinho B",
+      code: "B",
+      prefix: "B",
+      total: 30,
+      available: 30,
+      location: "Sala TI",
+      status: "Disponível",
+      lastCheck: "2026-01-01",
+      accent: "#000000",
+      unavailable: false,
+      unavailableUnits: [],
+      reservedUnits: [],
+      reserveCapacity: 30,
+    };
+
+    act(() => result.current.addCart(cart));
+    const originalId = result.current.carts.at(-1)?.id;
+    if (!originalId) throw new Error("Carrinho de teste não foi criado.");
+
+    act(() => expect(result.current.deleteCart(originalId)).toBe(true));
+    act(() => result.current.addCart(cart));
+
+    expect(result.current.carts.at(-1)?.id).not.toBe(originalId);
   });
 
   it("preserves every movement completed in the same update cycle", () => {

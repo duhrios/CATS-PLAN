@@ -493,9 +493,10 @@ export function ConfigurationPage() {
       window.alert(error instanceof Error ? error.message : "Não foi possível importar a planilha.");
     }
   };
-  return <div className="animate-rise space-y-7">
+  return <div className="animate-rise space-y-5">
     <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
     <AdminNotifications />
+    <div className="grid items-start gap-4 lg:grid-cols-2">
     <SectionCard title="Acesso do professor à planilha" eyebrow="Permissões de visualização">
       <div className="space-y-3 p-4 sm:p-5">
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[hsl(var(--border))] p-4 text-sm">
@@ -520,9 +521,9 @@ export function ConfigurationPage() {
       </div>
     </SectionCard>
     <SectionCard title="Agendamentos dos carrinhos" eyebrow="Planilha de professores">
-      <div className="flex flex-col gap-3 p-4 text-sm text-[hsl(var(--muted-foreground))] sm:flex-row sm:items-center sm:justify-between sm:p-5">
+      <div className="flex flex-col gap-3 p-4 text-sm text-[hsl(var(--muted-foreground))] sm:p-5">
         <p>Use o modelo com Data, Professor, Disciplina, Turma, Sala, Período, Início, Fim, Carrinho e Quantidade.</p>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={exportAppointments}><span className="inline-flex items-center gap-2"><Download size={14} /> Exportar agendamentos</span></Button>
           <Button type="button" onClick={() => scheduleFileInputRef.current?.click()}><span className="inline-flex items-center gap-2"><Upload size={14} /> Importar planilha</span></Button>
           <input ref={scheduleFileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={importAppointments} className="hidden" />
@@ -665,6 +666,7 @@ export function ConfigurationPage() {
         </div>
       </div>
     </SectionCard>
+    </div>
     {pendingAction && <Modal title="Confirmar ação protegida" onClose={dismissAction}>
       <form className="space-y-5 p-5 sm:p-6" onSubmit={confirmAction}>
         <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">Esta operação exige autorização do superadministrador. Informe as credenciais dele para executar <strong>{pendingAction[1]}</strong>.</p>

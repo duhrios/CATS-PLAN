@@ -167,11 +167,11 @@ export function SectionCard({
   return (
     <section
       className={cx(
-        "min-w-0 overflow-hidden rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] shadow-[0_8px_28px_hsl(187_30%_20%/.045)]",
+        "min-w-0 self-start overflow-hidden rounded-2xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] shadow-[0_8px_28px_hsl(187_30%_20%/.045)]",
         className,
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-5 py-4 sm:items-end sm:px-6">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3 sm:items-end sm:px-5">
         <div>
           {eyebrow && (
             <p className="mb-1 text-[10px] font-bold uppercase tracking-[.15em] text-[hsl(var(--primary))]">

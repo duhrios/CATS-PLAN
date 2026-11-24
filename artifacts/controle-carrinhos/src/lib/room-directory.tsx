@@ -2,7 +2,12 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { type Segment } from "@/lib/campus-data";
 import { initialCampusRooms } from "@/lib/room-directory-seed";
 import { getAuthenticatedRole, onAuthenticatedSessionChange } from "@/lib/auth-session";
-import { loadSharedRooms, saveSharedRooms } from "@/lib/room-directory-api";
+import {
+  loadSharedRooms,
+  mergeRoomDirectoryChanges,
+  saveSharedRooms,
+  SharedRoomDirectoryConflictError,
+} from "@/lib/room-directory-api";
 
 export const periods = ["Manhã", "Tarde"] as const;
 export type Period = (typeof periods)[number];
@@ -124,6 +129,8 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
   const roomsRef = useRef(rooms);
   const [roomCatalogLoading, setRoomCatalogLoading] = useState(true);
   const [roomsSyncError, setRoomsSyncError] = useState("");
+  const roomsUpdatedAtRef = useRef<string | null>(null);
+  const syncedRoomsRef = useRef(rooms);
   const syncQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     const clearRooms = () => {
@@ -131,7 +138,7 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
       setRooms([]);
       window.localStorage.removeItem(storageKey);
       window.localStorage.setItem(factoryResetKey, "1");
-      queueRoomSave([]);
+      queueRoomSave();
     };
     window.addEventListener("controle-carrinhos-clear-rooms", clearRooms);
     return () => window.removeEventListener("controle-carrinhos-clear-rooms", clearRooms);
@@ -162,14 +169,41 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
     setRooms(nextRooms);
     window.localStorage.setItem(storageKey, JSON.stringify(nextRooms));
     window.localStorage.removeItem(factoryResetKey);
-    queueRoomSave(nextRooms);
+    queueRoomSave();
   };
 
-  const queueRoomSave = (nextRooms: Room[]) => {
+  const saveRooms = async (requestedRooms: Room[]) => {
+    let result;
+    try {
+      result = await saveSharedRooms(requestedRooms, roomsUpdatedAtRef.current);
+    } catch (error) {
+      if (!(error instanceof SharedRoomDirectoryConflictError)) throw error;
+      const remote = await loadSharedRooms();
+      const local = roomsRef.current;
+      const merged = mergeRoomDirectoryChanges(
+        syncedRoomsRef.current,
+        local,
+        remote.rooms,
+      );
+      if (JSON.stringify(local) !== JSON.stringify(merged)) {
+        roomsRef.current = merged;
+        setRooms(merged);
+        window.localStorage.setItem(storageKey, JSON.stringify(merged));
+      }
+      result = JSON.stringify(merged) === JSON.stringify(remote.rooms)
+        ? remote
+        : await saveSharedRooms(merged, remote.updatedAt);
+    }
+    roomsUpdatedAtRef.current = result.updatedAt;
+    syncedRoomsRef.current = result.rooms;
+    return result;
+  };
+
+  const queueRoomSave = () => {
     syncQueue.current = syncQueue.current
       .catch(() => undefined)
       .then(async () => {
-        await saveSharedRooms(nextRooms);
+        await saveRooms(roomsRef.current);
         setRoomsSyncError("");
       })
       .catch((cause: unknown) => {
@@ -181,7 +215,8 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
     setRoomsSyncError("");
     try {
       await syncQueue.current;
-      await saveSharedRooms(roomsRef.current);
+      await saveRooms(roomsRef.current);
+      setRoomsSyncError("");
     } catch (cause) {
       setRoomsSyncError(cause instanceof Error ? cause.message : "Não foi possível sincronizar as salas com o servidor.");
     }
@@ -199,8 +234,10 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
       try {
         const directory = await loadSharedRooms();
         if (!active) return;
+        roomsUpdatedAtRef.current = directory.updatedAt;
         if (directory.configured) {
           const normalizedRooms = directory.rooms.map(normalizeRoomRecord);
+          syncedRoomsRef.current = normalizedRooms;
           roomsRef.current = normalizedRooms;
           setRooms(normalizedRooms);
           window.localStorage.setItem(storageKey, JSON.stringify(normalizedRooms));
@@ -209,14 +246,18 @@ export function RoomDirectoryProvider({ children }: { children: ReactNode }) {
             (role === "admin" || role === "operator") &&
             JSON.stringify(normalizedRooms) !== JSON.stringify(directory.rooms)
           ) {
-            await saveSharedRooms(normalizedRooms);
+            await saveRooms(normalizedRooms);
           }
-        } else if ((role === "admin" || role === "operator") && roomsRef.current.length > 0) {
-          await saveSharedRooms(roomsRef.current);
         } else if (role === "user") {
+          syncedRoomsRef.current = directory.rooms;
           roomsRef.current = [];
           setRooms([]);
           window.localStorage.removeItem(storageKey);
+        } else if (roomsRef.current.length > 0) {
+          syncedRoomsRef.current = directory.rooms;
+          await saveRooms(roomsRef.current);
+        } else {
+          syncedRoomsRef.current = directory.rooms;
         }
         setRoomsSyncError("");
       } catch (cause) {

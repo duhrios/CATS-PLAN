@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CartsPage, HistoryPage, ReservationModal } from "./operations";
+import { Router } from "wouter";
+import {
+  CartsPage,
+  HistoryPage,
+  ReservationModal,
+  ReservationsPage,
+  WifiPage,
+} from "./operations";
 
 const { useCampusData, loadTeacherAccounts, loadSharedHistory } = vi.hoisted(() => ({
   useCampusData: vi.fn(),
@@ -16,6 +23,7 @@ vi.mock("@/lib/campus-data", async (importOriginal) => {
 vi.mock("@/lib/room-directory", () => ({
   useRoomDirectory: () => ({
     classEntries: [],
+    roomOptions: [],
     roomForClass: (className: string) => className ? "Sala 22" : "",
     classesForRoom: () => [],
     roomOptionsForSegment: () => ["Sala 22"],
@@ -28,6 +36,68 @@ vi.mock("@/lib/teacher-accounts", () => ({
 }));
 
 vi.mock("@/lib/history-api", () => ({ loadSharedHistory }));
+
+describe("reservation calendar visibility", () => {
+  beforeEach(() => {
+    useCampusData.mockReturnValue({
+      reservations: [],
+      replaceReservations: vi.fn(),
+      saveReservation: vi.fn(),
+      teacher: { name: "Ana Souza", segment: "Fundamental 2", subject: "Ciências" },
+      reserveAvailable: 4,
+      teacherReserved: 0,
+      movements: [],
+      updateMovementStatus: vi.fn(),
+      reportNotReceived: vi.fn(),
+      requestMovementAgain: vi.fn(),
+      deleteReservation: vi.fn(),
+      carts: [],
+      movementSettings: { allowCartATransitionScheduling: false },
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+    });
+  });
+
+  it.each(["admin", "user", "operator"] as const)(
+    "shows the calendar expanded by default for the %s profile",
+    (mode) => {
+      render(
+        <Router>
+          <ReservationsPage mode={mode} />
+        </Router>,
+      );
+
+      expect(
+        screen.getByRole("button", { name: "Minimizar Calendário" }),
+      ).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByTestId("calendar-reservations").closest("[hidden]")).toBeNull();
+    },
+  );
+});
+
+describe("Wi-Fi inventory counts", () => {
+  it("distinguishes fixed access points from mobile antennas", () => {
+    useCampusData.mockReturnValue({
+      wifiPoints: [
+        { id: "fixed-1", type: "Ponto fixo", status: "Disponível" },
+        { id: "fixed-2", type: "Ponto fixo", status: "Disponível" },
+        { id: "mobile-1", type: "Antena volante", status: "Disponível" },
+      ],
+      wifiRooms: [],
+      toggleRoomWifi: vi.fn(),
+      updateWifiPointStatus: vi.fn(),
+      updateWifiPoint: vi.fn(),
+      addWifiPoint: vi.fn(),
+      deleteWifiPoint: vi.fn(),
+      assignMobileAntenna: vi.fn(),
+    });
+
+    render(<WifiPage />);
+
+    expect(screen.getByText("Pontos fixos")).toBeInTheDocument();
+    expect(screen.getByText("1 antena volante cadastrada")).toBeInTheDocument();
+    expect(screen.getByText("Antenas disponíveis")).toBeInTheDocument();
+  });
+});
 
 describe("reservation modal teacher selection", () => {
   const onSave = vi.fn();

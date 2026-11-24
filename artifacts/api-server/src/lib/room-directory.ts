@@ -3,6 +3,20 @@ import { db } from "@workspace/db";
 import { campusSettingsTable } from "@workspace/db/schema";
 
 export const roomDirectorySettingKey = "campus-rooms-v1";
+export const roomDirectoryVersionMatches = (
+  currentUpdatedAt: Date | null,
+  expectedUpdatedAt: string | null,
+) => currentUpdatedAt?.toISOString() === expectedUpdatedAt ||
+  (!currentUpdatedAt && expectedUpdatedAt === null);
+
+export const nextRoomDirectoryTimestamp = (
+  currentUpdatedAt: Date | null,
+  now = Date.now(),
+) => new Date(Math.max(
+  now,
+  currentUpdatedAt ? currentUpdatedAt.getTime() + 1 : now,
+));
+
 export type CampusRoom = {
   id: string;
   number: string;
@@ -27,11 +41,14 @@ const isCampusRoom = (value: unknown): value is CampusRoom => {
 };
 
 export const getRoomDirectory = async () => {
-  const [setting] = await db.select({ value: campusSettingsTable.value })
+  const [setting] = await db.select({
+    value: campusSettingsTable.value,
+    updatedAt: campusSettingsTable.updatedAt,
+  })
     .from(campusSettingsTable)
     .where(eq(campusSettingsTable.key, roomDirectorySettingKey))
     .limit(1);
-  if (!setting) return { rooms: [] as CampusRoom[], configured: false };
+  if (!setting) return { rooms: [] as CampusRoom[], configured: false, updatedAt: null };
 
   let value: unknown;
   try {
@@ -42,5 +59,5 @@ export const getRoomDirectory = async () => {
   if (!Array.isArray(value) || !value.every(isCampusRoom)) {
     throw new Error("O cadastro de salas persistido tem um formato inválido.");
   }
-  return { rooms: value, configured: true };
+  return { rooms: value, configured: true, updatedAt: setting.updatedAt.toISOString() };
 };

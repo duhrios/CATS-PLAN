@@ -30,6 +30,7 @@ describe("Modal", () => {
       );
 
       const toggle = screen.getByRole("button", { name: "Maximizar Contas de acesso" });
+      expect(toggle.closest("section")).toHaveClass("self-start");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       expect(screen.getByText("Lista de usuários").parentElement).toHaveAttribute("hidden");
       expect(screen.getByRole("button", { name: "Importar e-mails" })).toBeVisible();

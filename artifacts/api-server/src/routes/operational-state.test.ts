@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  nextOperationalStateTimestamp,
   operationalStateForRole,
+  preserveDeletedOperationalEntities,
   preserveDeletedCartUnits,
+  publicOperationalState,
   validateOperationalState,
 } from "./operational-state";
 import {
@@ -147,6 +150,11 @@ describe("operational state validation", () => {
       "controle-carrinhos-carts": [{ details: "x".repeat(513_000) }],
     })).toBeNull();
     expect(validateOperationalState(null)).toBeNull();
+    expect(validateOperationalState({ __deletedWifiPointIds: ["wifi-1"] })).toBeNull();
+    expect(validateOperationalState(
+      { __deletedWifiPointIds: ["wifi-1"] },
+      true,
+    )).not.toBeNull();
   });
 
   it("does not expose staff movements or Wi-Fi data to teacher sessions", () => {
@@ -217,5 +225,50 @@ describe("operational state validation", () => {
         unavailableUnitReasons: {},
       }],
     });
+  });
+
+  it("does not let stale operational snapshots restore deleted Wi-Fi points or carts", () => {
+    const activeState = {
+      "controle-carrinhos-carts": [{ id: "cart-a", name: "Carrinho A" }],
+      "controle-carrinhos-wifi-points": [{ id: "wifi-mobile-1", name: "Antena volante" }],
+    };
+    const deletedState = preserveDeletedOperationalEntities(activeState, {
+      "controle-carrinhos-carts": [],
+      "controle-carrinhos-wifi-points": [],
+    });
+    const staleWrite = preserveDeletedOperationalEntities(deletedState, activeState);
+
+    expect(staleWrite["controle-carrinhos-carts"]).toEqual([]);
+    expect(staleWrite["controle-carrinhos-wifi-points"]).toEqual([]);
+    expect(publicOperationalState(staleWrite)).toEqual({
+      "controle-carrinhos-carts": [],
+      "controle-carrinhos-wifi-points": [],
+    });
+  });
+
+  it("allows factory restoration of deleted carts without restoring deleted Wi-Fi points", () => {
+    const activeState = {
+      "controle-carrinhos-carts": [{ id: "cart-a", name: "Carrinho A" }],
+      "controle-carrinhos-wifi-points": [{ id: "wifi-mobile-1", name: "Antena volante" }],
+    };
+    const deletedState = preserveDeletedOperationalEntities(activeState, {
+      "controle-carrinhos-carts": [],
+      "controle-carrinhos-wifi-points": [],
+    });
+    const factoryState = preserveDeletedOperationalEntities(
+      deletedState,
+      activeState,
+      true,
+    );
+
+    expect(factoryState["controle-carrinhos-carts"]).toEqual(activeState["controle-carrinhos-carts"]);
+    expect(factoryState["controle-carrinhos-wifi-points"]).toEqual([]);
+  });
+
+  it("advances operational-state versions even when writes occur in the same millisecond", () => {
+    const now = new Date("2026-11-18T13:30:00.000Z");
+    const next = nextOperationalStateTimestamp(now, now.getTime());
+
+    expect(next.getTime()).toBe(now.getTime() + 1);
   });
 });

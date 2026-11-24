@@ -355,7 +355,7 @@ export function OverviewPage() {
           href="/reservas?conflitos=1"
         />
       </div>
-      <div className="grid gap-6 xl:grid-cols-[1.45fr_.85fr]">
+      <div className="grid items-start gap-6 xl:grid-cols-[1.45fr_.85fr]">
         <SectionCard
           title="Pulso do dia"
           eyebrow="Acompanhamento em tempo real"
@@ -1466,11 +1466,11 @@ export function ReservationsPage({
           />
         )}
       </div>
-      <div className="grid gap-6 xl:grid-cols-[20rem_1fr]">
+      <div className="grid items-start gap-6 xl:grid-cols-[20rem_1fr]">
         <SectionCard
           title="Calendário"
           eyebrow="Agendamentos por dia"
-          defaultExpanded={mode === "operator"}
+          defaultExpanded
         >
           <div className="p-3">
             <Calendar
@@ -2561,9 +2561,9 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric
-          label="Pontos cadastrados"
-          value={String(wifiPoints.length)}
-          detail={`${fixedPoints.length} fixos · ${mobilePoints.length} antenas volantes`}
+          label="Pontos fixos"
+          value={String(fixedPoints.length)}
+          detail={`${mobilePoints.length} ${mobilePoints.length === 1 ? "antena volante cadastrada" : "antenas volantes cadastradas"}`}
           icon={Network}
           href="#wifi-rooms"
           onClick={() => setRoomTab("fixed")}

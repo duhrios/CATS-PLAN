@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   loadSharedOperationalState,
   mergeOperationalStateWithLocalChanges,
+  OperationalStateConflictError,
   saveSharedOperationalState,
 } from "./operational-state-api";
 
@@ -50,6 +51,25 @@ describe("shared operational state API", () => {
     expect(result.state["controle-carrinhos-carts"]).toEqual([{ id: "cart-remote" }]);
   });
 
+  it("preserves cart deletions while merging a newer remote snapshot", () => {
+    const cartKey = "controle-carrinhos-carts";
+    const original = {
+      [cartKey]: [{ id: "cart-a" }, { id: "cart-b" }],
+    };
+    const localAfterRequest = {
+      [cartKey]: [{ id: "cart-b" }],
+    };
+    const remote = {
+      [cartKey]: [{ id: "cart-a", name: "Remote edit" }, { id: "cart-b" }, { id: "cart-c" }],
+    };
+
+    expect(mergeOperationalStateWithLocalChanges(
+      original,
+      localAfterRequest,
+      remote,
+    ).state[cartKey]).toEqual([{ id: "cart-b" }, { id: "cart-c" }]);
+  });
+
   it("loads state without using a cached response", async () => {
     const payload = { state: { "controle-carrinhos-carts": [] }, updatedAt: null };
     const fetchMock = vi.fn().mockResolvedValue(
@@ -77,7 +97,10 @@ describe("shared operational state API", () => {
 
     await saveSharedOperationalState({}, "2026-10-26T09:00:00.000Z", true);
     await expect(saveSharedOperationalState({}, "2026-10-26T09:00:00.000Z"))
-      .rejects.toThrow("Os dados operacionais foram alterados em outro dispositivo.");
+      .rejects.toMatchObject({
+        name: OperationalStateConflictError.name,
+        message: "Os dados operacionais foram alterados em outro dispositivo.",
+      });
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "PUT",
       credentials: "same-origin",
