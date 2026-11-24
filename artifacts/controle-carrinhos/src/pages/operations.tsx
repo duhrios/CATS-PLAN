@@ -2501,7 +2501,13 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
+export function WifiPage({
+  readOnly = false,
+  allowAntennaDeletion = false,
+}: {
+  readOnly?: boolean;
+  allowAntennaDeletion?: boolean;
+}) {
   const {
     wifiPoints,
     wifiRooms,
@@ -2708,6 +2714,7 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
                     )
                   }
                   className={inputClass}
+                  disabled={readOnly}
                   data-testid={`select-wifi-status-${activePoint.id}`}
                 >
                   <option>Disponível</option>
@@ -2741,40 +2748,43 @@ export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
                   </select>
                 </Field>
               )}
-              {!readOnly && activePoint.type === "Antena volante" && (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setEditingAntenna(activePoint.id);
-                      setNewAntenna({
-                        name: activePoint.name,
-                        point: activePoint.point,
-                        rack: activePoint.rack ?? "",
-                        observations: activePoint.observations ?? "",
-                      });
-                      setAntennaError("");
-                    }}
-                  >
-                    <Pencil size={14} /> Editar antena
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
-                    onClick={() => {
-                      if (window.confirm(`Excluir ${activePoint.name}?`)) {
-                        deleteWifiPoint(activePoint.id);
-                        setSelected(null);
-                      }
-                    }}
-                    data-testid={`button-delete-wifi-${activePoint.id}`}
-                  >
-                    <Trash2 size={14} /> Excluir antena volante
-                  </Button>
-                </div>
-              )}
+              {(!readOnly || allowAntennaDeletion) &&
+                activePoint.type === "Antena volante" && (
+                  <div className="flex flex-wrap gap-2">
+                    {!readOnly && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setEditingAntenna(activePoint.id);
+                          setNewAntenna({
+                            name: activePoint.name,
+                            point: activePoint.point,
+                            rack: activePoint.rack ?? "",
+                            observations: activePoint.observations ?? "",
+                          });
+                          setAntennaError("");
+                        }}
+                      >
+                        <Pencil size={14} /> Editar antena
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                      onClick={() => {
+                        if (window.confirm(`Excluir ${activePoint.name}?`)) {
+                          deleteWifiPoint(activePoint.id);
+                          setSelected(null);
+                        }
+                      }}
+                      data-testid={`button-delete-wifi-${activePoint.id}`}
+                    >
+                      <Trash2 size={14} /> Excluir antena volante
+                    </Button>
+                  </div>
+                )}
             </div>
           ) : (
             <div className="p-5 sm:p-6">

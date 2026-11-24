@@ -197,7 +197,10 @@ function Router() {
             />
             <Route path="/operador" component={OperatorPage} />
             <Route path="/wifi">
-              <WifiPage readOnly={operatorMode} />
+              <WifiPage
+                readOnly={operatorMode}
+                allowAntennaDeletion={operatorMode}
+              />
             </Route>
             <Route path="/historico" component={HistoryPage} />
             <Route path="/suporte">

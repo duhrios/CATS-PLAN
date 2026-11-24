@@ -1,5 +1,12 @@
-import { Bell, Music2, Volume2, VolumeX, Vibrate } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Bell,
+  Music2,
+  Trash2,
+  Upload,
+  Volume2,
+  Vibrate,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Button,
@@ -20,31 +27,63 @@ const operatorSettingsStorageKey = "controle-carrinhos-operator-settings";
 export function OperatorSettingsPage() {
   const [settings, setSettings] =
     useState<OperatorSettings>(readOperatorSettings);
+  const [toneUploadError, setToneUploadError] = useState("");
+  const toneFileInputRef = useRef<HTMLInputElement>(null);
   useEffect(
     () => subscribeToOperatorAudioErrors((message) => toast.error(message)),
     [],
   );
   const saveSettings = (next: OperatorSettings) => {
-    setSettings(next);
     window.localStorage.setItem(
       operatorSettingsStorageKey,
       JSON.stringify(next),
     );
+    setSettings(next);
   };
   const handleToneUpload = (file: File | undefined) => {
-    if (!file || !file.type.startsWith("audio/") || file.size > 2_000_000)
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      setToneUploadError("Selecione um arquivo de áudio válido.");
       return;
+    }
+    if (file.size > 2_000_000) {
+      setToneUploadError("O arquivo excede o limite de 2 MB.");
+      return;
+    }
+    setToneUploadError("");
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result !== "string") return;
-      saveSettings({
-        ...settings,
-        tone: "custom",
-        customToneName: file.name,
-        customToneUrl: reader.result,
-      });
+      if (typeof reader.result !== "string") {
+        setToneUploadError("Não foi possível carregar este arquivo de áudio.");
+        return;
+      }
+      try {
+        saveSettings({
+          ...settings,
+          tone: "custom",
+          customToneName: file.name,
+          customToneUrl: reader.result,
+        });
+      } catch {
+        setToneUploadError(
+          "Não foi possível salvar o toque neste navegador. Libere espaço ou escolha um arquivo menor.",
+        );
+      }
+    };
+    reader.onerror = () => {
+      setToneUploadError("Não foi possível ler este arquivo. Tente novamente.");
     };
     reader.readAsDataURL(file);
+  };
+  const removeCustomTone = () => {
+    saveSettings({
+      ...settings,
+      tone: settings.tone === "custom" ? "classic" : settings.tone,
+      customToneName: "",
+      customToneUrl: "",
+    });
+    if (toneFileInputRef.current) toneFileInputRef.current.value = "";
+    setToneUploadError("");
   };
   return (
     <div className="animate-rise space-y-7">
@@ -185,43 +224,87 @@ export function OperatorSettingsPage() {
               )}
             </select>
           </Field>
-          <Field
-            label={
-              <span className="inline-flex items-center gap-1.5">
-                <Music2 size={14} className="text-[hsl(var(--primary))]" />{" "}
-                Toque personalizado
-              </span>
-            }
-            hint="Escolha um arquivo de áudio de até 2 MB. Ele ficará salvo somente neste navegador."
-          >
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={(event) => handleToneUpload(event.target.files?.[0])}
-              className={inputClass}
-            />
-          </Field>
-          {settings.customToneUrl && (
-            <div className="flex items-center justify-between gap-3 rounded-lg bg-[hsl(var(--muted))] px-3 py-2 text-xs">
-              <span className="min-w-0 truncate">
-                {settings.customToneName}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  saveSettings({
-                    ...settings,
-                    tone: "classic",
-                    customToneName: "",
-                    customToneUrl: "",
-                  })
-                }
-              >
-                <VolumeX size={14} /> Remover
-              </Button>
+          <div className="block space-y-1.5">
+            <p
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]"
+            >
+              <Music2 size={14} className="text-[hsl(var(--primary))]" />{" "}
+              Toque personalizado
+            </p>
+            <div className="space-y-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.22)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]">
+                    <Music2 size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      {settings.customToneUrl
+                        ? "Toque personalizado selecionado"
+                        : "Adicione um toque para os avisos"}
+                    </p>
+                    <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                      MP3, WAV ou outro áudio · até 2 MB · salvo neste navegador
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => toneFileInputRef.current?.click()}
+                  data-testid="button-select-custom-tone"
+                >
+                  <Upload size={15} />
+                  {settings.customToneUrl ? "Trocar arquivo" : "Escolher arquivo"}
+                </Button>
+                <input
+                  ref={toneFileInputRef}
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    handleToneUpload(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                  className="sr-only"
+                  aria-label="Arquivo de áudio personalizado"
+                  data-testid="input-custom-tone-file"
+                />
+              </div>
+              {toneUploadError && (
+                <p
+                  role="alert"
+                  className="text-xs font-medium text-[hsl(var(--destructive))]"
+                >
+                  {toneUploadError}
+                </p>
+              )}
+              {settings.customToneUrl && (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2.5"
+                >
+                  <div className="flex min-w-0 items-center gap-2 text-sm">
+                    <Music2
+                      size={15}
+                      className="shrink-0 text-[hsl(var(--primary))]"
+                    />
+                    <span className="truncate font-medium">
+                      {settings.customToneName || "Toque personalizado"}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                    onClick={removeCustomTone}
+                    data-testid="button-remove-custom-tone"
+                  >
+                    <Trash2 size={14} /> Remover toque
+                  </Button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
             As preferências são locais e não alteram as configurações gerais
             definidas pelo administrador.

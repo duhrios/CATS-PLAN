@@ -75,6 +75,29 @@ describe("reservation calendar visibility", () => {
 });
 
 describe("Wi-Fi inventory counts", () => {
+  const mobileAntenna = {
+    id: "mobile-1",
+    name: "Antena Volante",
+    point: "AV-01",
+    location: "Armário de conectividade",
+    type: "Antena volante",
+    status: "Disponível",
+  } as const;
+
+  const mockWifiInventory = (deleteWifiPoint = vi.fn()) => {
+    useCampusData.mockReturnValue({
+      wifiPoints: [mobileAntenna],
+      wifiRooms: [],
+      toggleRoomWifi: vi.fn(),
+      updateWifiPointStatus: vi.fn(),
+      updateWifiPoint: vi.fn(),
+      addWifiPoint: vi.fn(),
+      deleteWifiPoint,
+      assignMobileAntenna: vi.fn(),
+    });
+    return deleteWifiPoint;
+  };
+
   it("distinguishes fixed access points from mobile antennas", () => {
     useCampusData.mockReturnValue({
       wifiPoints: [
@@ -96,6 +119,38 @@ describe("Wi-Fi inventory counts", () => {
     expect(screen.getByText("Pontos fixos")).toBeInTheDocument();
     expect(screen.getByText("1 antena volante cadastrada")).toBeInTheDocument();
     expect(screen.getByText("Antenas disponíveis")).toBeInTheDocument();
+  });
+
+  it("allows TI to delete a mobile antenna without enabling other read-only actions", () => {
+    const deleteWifiPoint = mockWifiInventory();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<WifiPage readOnly allowAntennaDeletion />);
+    fireEvent.click(screen.getByTestId("row-wifi-mobile-1"));
+
+    expect(screen.getByTestId("button-delete-wifi-mobile-1")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Editar antena" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("select-wifi-status-mobile-1")).toBeDisabled();
+    expect(screen.getByTestId("select-wifi-room-mobile-1")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("button-delete-wifi-mobile-1"));
+
+    expect(confirm).toHaveBeenCalledWith("Excluir Antena Volante?");
+    expect(deleteWifiPoint).toHaveBeenCalledWith("mobile-1");
+    confirm.mockRestore();
+  });
+
+  it("does not expose antenna deletion to read-only viewers without permission", () => {
+    mockWifiInventory();
+
+    render(<WifiPage readOnly />);
+    fireEvent.click(screen.getByTestId("row-wifi-mobile-1"));
+
+    expect(
+      screen.queryByTestId("button-delete-wifi-mobile-1"),
+    ).not.toBeInTheDocument();
   });
 });
 
