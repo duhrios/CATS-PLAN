@@ -945,6 +945,11 @@ type CampusDataValue = {
   deleteCart: (id: string) => boolean;
   toggleCartUnavailable: (id: string) => void;
   toggleCartUnitUnavailable: (cartId: string, unit: string) => void;
+  setCartUnitsStatus: (
+    cartId: string,
+    units: string[],
+    status: "unavailable" | "reserved",
+  ) => boolean;
   setCartUnitUnavailableReason: (cartId: string, unit: string, reason: string) => void;
   updateReserveUnitAssignments: (
     units: string[],
@@ -1971,6 +1976,77 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
       }),
     );
   };
+  const setCartUnitsStatus = (
+    cartId: string,
+    units: string[],
+    status: "unavailable" | "reserved",
+  ) => {
+    const targetCart = carts.find((cart) => cart.id === cartId);
+    if (!targetCart) return false;
+    const activeInventoryUnits = new Set(
+      Array.from(
+        { length: targetCart.total },
+        (_, index) => `${targetCart.prefix}${index + 1}`,
+      ).filter((unit) => !(targetCart.deletedUnits ?? []).includes(unit)),
+    );
+    const activeUnits = new Set(
+      [...new Set(units)].filter(
+        (unit) =>
+          activeInventoryUnits.has(unit) &&
+          (status === "unavailable"
+            ? !targetCart.unavailable && !targetCart.unavailableUnits.includes(unit)
+            : !targetCart.unavailable &&
+              !targetCart.unavailableUnits.includes(unit) &&
+              !targetCart.reservedUnits.includes(unit)),
+      ),
+    );
+    if (activeUnits.size === 0) return true;
+    if (
+      status === "reserved" &&
+      targetCart.code === "A" &&
+      !window.confirm(
+        "As reservas são preferenciais aos carrinhos B e C. Deseja continuar usando o Carrinho A para reservas?",
+      )
+    ) {
+      return false;
+    }
+    persistCarts(
+      carts.map((cart) => {
+        if (cart.id !== cartId) return cart;
+        if (status === "unavailable") {
+          const unavailableUnits = [...new Set([...cart.unavailableUnits, ...activeUnits])];
+          return {
+            ...cart,
+            unavailableUnits,
+            reservedUnits: cart.reservedUnits.filter((unit) => !activeUnits.has(unit)),
+            available: Math.max(
+              0,
+              cart.total - unavailableUnits.length - (cart.deletedUnits ?? []).length,
+            ),
+            status:
+              unavailableUnits.length >= cart.total - (cart.deletedUnits ?? []).length
+                ? "Indisponível"
+                : cart.status === "Indisponível"
+                  ? "Pronto"
+                  : cart.status,
+          };
+        }
+        const reservedUnits = [...new Set([...cart.reservedUnits, ...activeUnits])];
+        return {
+          ...cart,
+          reservedUnits,
+          reserveCapacity: Math.max(cart.reserveCapacity, reservedUnits.length),
+          available: Math.max(
+            0,
+            cart.total -
+              cart.unavailableUnits.length -
+              (cart.deletedUnits ?? []).length,
+          ),
+        };
+      }),
+    );
+    return true;
+  };
   const setCartUnitUnavailableReason = (
     cartId: string,
     unit: string,
@@ -2400,6 +2476,7 @@ export function CampusDataProvider({ children }: { children: ReactNode }) {
         deleteCart,
         toggleCartUnavailable,
         toggleCartUnitUnavailable,
+        setCartUnitsStatus,
         setCartUnitUnavailableReason,
         updateReserveUnitAssignments,
         deleteCartUnit,

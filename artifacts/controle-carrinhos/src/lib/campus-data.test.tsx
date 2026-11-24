@@ -594,6 +594,40 @@ describe('Campus data core logic', () => {
     expect(result.current.reserveAvailable).toBe(20);
   });
 
+  it("applies multiple unavailable Chromebook statuses in one persisted update", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+    const initialAvailable = result.current.carts.find((cart) => cart.id === "b")?.available;
+
+    act(() => result.current.setCartUnitsStatus("b", ["B1", "B2"], "unavailable"));
+
+    const cart = result.current.carts.find((item) => item.id === "b");
+    expect(cart?.unavailableUnits).toEqual(expect.arrayContaining(["B1", "B2"]));
+    expect(cart?.available).toBe((initialAvailable ?? 0) - 2);
+    const persistedCart = JSON.parse(
+      window.localStorage.getItem("controle-carrinhos-carts") ?? "[]",
+    ).find((item: Cart) => item.id === "b");
+    expect(persistedCart.unavailableUnits).toEqual(
+      expect.arrayContaining(["B1", "B2"]),
+    );
+  });
+
+  it("applies multiple reserve assignments atomically and confirms Carrinho A once", () => {
+    const { result } = renderHook(() => useCampusData(), { wrapper });
+
+    act(() => result.current.setCartUnitsStatus("b", ["B1", "B2"], "reserved"));
+    expect(result.current.carts.find((cart) => cart.id === "b")?.reservedUnits).toEqual(
+      expect.arrayContaining(["B1", "B2"]),
+    );
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    act(() => result.current.setCartUnitsStatus("a", ["A1", "A2"], "reserved"));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(
+      result.current.carts.find((cart) => cart.id === "a")?.reservedUnits,
+    ).not.toEqual(expect.arrayContaining(["A1", "A2"]));
+    confirm.mockRestore();
+  });
+
   it("persists an observation for an unavailable Chromebook and clears it when restored", () => {
     const { result } = renderHook(() => useCampusData(), { wrapper });
 

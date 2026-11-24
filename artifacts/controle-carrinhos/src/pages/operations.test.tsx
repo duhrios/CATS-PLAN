@@ -463,6 +463,132 @@ describe("cart unit availability observations", () => {
       "  Tela quebrada  ",
     );
   });
+
+  it("lets an operator select multiple Chromebooks before marking them unavailable", () => {
+    const setCartUnitsStatus = vi.fn(() => true);
+    useCampusData.mockReturnValue({
+      carts: [{
+        id: "cart-a",
+        name: "Carrinho A",
+        code: "A",
+        prefix: "A",
+        total: 2,
+        available: 2,
+        location: "Sala TI",
+        status: "Pronto",
+        lastCheck: "2026-01-01",
+        accent: "bg-blue-500",
+        unavailable: false,
+        unavailableUnits: [],
+        reservedUnits: [],
+        deletedUnits: [],
+        reserveCapacity: 0,
+      }],
+      addCart: vi.fn(),
+      addCartUnit: vi.fn(),
+      deleteCart: vi.fn(),
+      toggleCartUnavailable: vi.fn(),
+      toggleCartUnitUnavailable: vi.fn(),
+      setCartUnitsStatus,
+      setCartUnitUnavailableReason: vi.fn(),
+      deleteCartUnit: vi.fn(),
+      toggleCartUnitReserved: vi.fn(),
+      restoreReservedUnits: vi.fn(),
+      reservations: [],
+      reserveAvailable: 0,
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+      updateCampusSettings: vi.fn(),
+    });
+
+    render(<CartsPage />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Minimizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Maximizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByTestId("button-select-units-cart-a"));
+    fireEvent.click(screen.getByTestId("button-unit-A1"));
+    fireEvent.click(screen.getByTestId("button-unit-A2"));
+
+    expect(screen.getByTestId("button-unit-A1")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("button-unit-A2")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("selected-cart-units-cart-a")).toHaveTextContent(
+      "2 unidade(s) selecionada(s)",
+    );
+
+    fireEvent.click(screen.getByTestId("button-mark-selected-unavailable-cart-a"));
+
+    expect(setCartUnitsStatus).toHaveBeenCalledWith(
+      "cart-a",
+      ["A1", "A2"],
+      "unavailable",
+    );
+    expect(screen.getByTestId("unit-observation-panel-A1")).toBeInTheDocument();
+    expect(screen.queryByTestId("selected-cart-units-cart-a")).not.toBeInTheDocument();
+  });
+
+  it("lets an operator select units before marking them for reservation and cancel with Escape", () => {
+    const setCartUnitsStatus = vi.fn(() => true);
+    useCampusData.mockReturnValue({
+      carts: [{
+        id: "cart-a",
+        name: "Carrinho A",
+        code: "A",
+        prefix: "A",
+        total: 2,
+        available: 2,
+        location: "Sala TI",
+        status: "Pronto",
+        lastCheck: "2026-01-01",
+        accent: "bg-blue-500",
+        unavailable: false,
+        unavailableUnits: [],
+        reservedUnits: [],
+        deletedUnits: [],
+        reserveCapacity: 0,
+      }],
+      addCart: vi.fn(),
+      addCartUnit: vi.fn(),
+      deleteCart: vi.fn(),
+      toggleCartUnavailable: vi.fn(),
+      toggleCartUnitUnavailable: vi.fn(),
+      setCartUnitsStatus,
+      setCartUnitUnavailableReason: vi.fn(),
+      deleteCartUnit: vi.fn(),
+      toggleCartUnitReserved: vi.fn(),
+      restoreReservedUnits: vi.fn(),
+      reservations: [],
+      reserveAvailable: 0,
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+      updateCampusSettings: vi.fn(),
+    });
+
+    render(<CartsPage />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Minimizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Maximizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByTestId("button-select-units-cart-a"));
+    fireEvent.click(screen.getByTestId("button-unit-A2"));
+    expect(screen.getByTestId("selected-cart-units-cart-a")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("selected-cart-units-cart-a")).not.toBeInTheDocument();
+    expect(setCartUnitsStatus).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("button-unit-A2"));
+    fireEvent.click(screen.getByTestId("button-mark-selected-reserved-cart-a"));
+
+    expect(setCartUnitsStatus).toHaveBeenCalledWith(
+      "cart-a",
+      ["A2"],
+      "reserved",
+    );
+    expect(screen.queryByTestId("selected-cart-units-cart-a")).not.toBeInTheDocument();
+  });
 });
 
 describe("reserved Chromebook selection in cart inventory", () => {

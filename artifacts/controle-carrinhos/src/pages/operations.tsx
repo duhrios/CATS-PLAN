@@ -1816,6 +1816,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
     deleteCart,
     toggleCartUnavailable,
     toggleCartUnitUnavailable,
+    setCartUnitsStatus,
     setCartUnitUnavailableReason,
     deleteCartUnit,
     toggleCartUnitReserved,
@@ -1832,6 +1833,9 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [newCart, setNewCart] = useState({ letter: "", location: "" });
   const [expandedCarts, setExpandedCarts] = useState<string[]>([]);
   const [selectedReserveUnits, setSelectedReserveUnits] = useState<string[]>([]);
+  const [selectedCartUnits, setSelectedCartUnits] = useState<
+    Array<{ cartId: string; unit: string }>
+  >([]);
   const reserveSelectionDraggingRef = useRef(false);
   const reserveSelectionBaseUnitRef = useRef<string | null>(null);
   const reserveSelectionBaseRef = useRef<string[]>([]);
@@ -1840,7 +1844,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const reserveSelectionAdditiveRef = useRef(false);
   const reserveSelectionMouseStartedRef = useRef(false);
   const [unitSelectionMode, setUnitSelectionMode] = useState<
-    "unavailable" | "reserved" | "deleted"
+    "select" | "unavailable" | "reserved" | "deleted"
   >("unavailable");
   const [unavailableObservationUnit, setUnavailableObservationUnit] =
     useState<{ cartId: string; unit: string } | null>(null);
@@ -1871,6 +1875,14 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
     window.addEventListener("keydown", clearSelectionOnEscape);
     return () => window.removeEventListener("keydown", clearSelectionOnEscape);
   }, [selectedReserveUnits.length]);
+  useEffect(() => {
+    if (selectedCartUnits.length === 0) return;
+    const clearSelectionOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedCartUnits([]);
+    };
+    window.addEventListener("keydown", clearSelectionOnEscape);
+    return () => window.removeEventListener("keydown", clearSelectionOnEscape);
+  }, [selectedCartUnits.length]);
   const selectReserveInventoryUnit = (unit: string, additive: boolean) => {
     setSelectedReserveUnits((current) => {
       if (!additive) {
@@ -1880,6 +1892,39 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         ? current.filter((selected) => selected !== unit)
         : [...current, unit];
     });
+  };
+  const toggleCartUnitSelection = (cartId: string, unit: string) => {
+    setSelectedCartUnits((current) =>
+      current.some((selected) => selected.cartId === cartId && selected.unit === unit)
+        ? current.filter((selected) => selected.cartId !== cartId || selected.unit !== unit)
+        : [...current, { cartId, unit }],
+    );
+  };
+  const clearCartUnitSelection = (cartId: string) => {
+    setSelectedCartUnits((current) =>
+      current.filter((selected) => selected.cartId !== cartId),
+    );
+  };
+  const applyCartUnitSelection = (
+    cart: (typeof carts)[number],
+    action: "unavailable" | "reserved",
+  ) => {
+    const units = selectedCartUnits
+      .filter((selected) => selected.cartId === cart.id)
+      .map((selected) => selected.unit);
+    if (!setCartUnitsStatus(cart.id, units, action)) return;
+    if (action === "unavailable") {
+      const firstUnit = units.find(
+        (unit) => !cart.unavailable && !cart.unavailableUnits.includes(unit),
+      );
+      if (firstUnit) {
+        setUnavailableObservationUnit({ cartId: cart.id, unit: firstUnit });
+        setUnavailableObservationDraft(
+          cart.unavailableUnitReasons?.[firstUnit] ?? "",
+        );
+      }
+    }
+    clearCartUnitSelection(cart.id);
   };
   return (
     <div className="animate-rise space-y-7">
@@ -2067,8 +2112,30 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         <button
                           type="button"
                           disabled={readOnly}
+                          aria-pressed={unitSelectionMode === "select"}
+                          onClick={() => {
+                            if (unitSelectionMode !== "select") {
+                              setSelectedCartUnits([]);
+                            }
+                            setUnitSelectionMode("select");
+                            setUnavailableObservationUnit(null);
+                          }}
+                          className={cx(
+                            "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
+                            unitSelectionMode === "select"
+                              ? "bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"
+                              : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]",
+                          )}
+                          data-testid={`button-select-units-${cart.id}`}
+                        >
+                          Selecionar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
                           onClick={() => {
                             setUnitSelectionMode("unavailable");
+                            setSelectedCartUnits([]);
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2085,6 +2152,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           onClick={() => {
                             setUnitSelectionMode("reserved");
                             setUnavailableObservationUnit(null);
+                            setSelectedCartUnits([]);
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2101,6 +2169,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           onClick={() => {
                             setUnitSelectionMode("deleted");
                             setUnavailableObservationUnit(null);
+                            setSelectedCartUnits([]);
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2137,13 +2206,19 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         const reserved = cart.reservedUnits.includes(unit);
                         const observation =
                           cart.unavailableUnitReasons?.[unit] ?? "";
+                        const selected = selectedCartUnits.some(
+                          (item) => item.cartId === cart.id && item.unit === unit,
+                        );
                         return (
                           <button
                             type="button"
                             key={unit}
                             disabled={readOnly}
+                            aria-pressed={unitSelectionMode === "select" ? selected : undefined}
                             onClick={() => {
-                              if (unitSelectionMode === "deleted") {
+                              if (unitSelectionMode === "select") {
+                                toggleCartUnitSelection(cart.id, unit);
+                              } else if (unitSelectionMode === "deleted") {
                                 if (window.confirm(`Excluir a unidade ${unit} permanentemente do ${cart.name}?`)) {
                                   deleteCartUnit(cart.id, unit);
                                 }
@@ -2168,10 +2243,12 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                                 ? "border-[hsl(var(--destructive)/.35)] bg-[hsl(var(--destructive)/.1)] text-[hsl(var(--destructive))] line-through"
                                 : reserved
                                   ? "border-[hsl(var(--primary)/.55)] bg-[hsl(var(--primary)/.08)] text-[hsl(var(--primary))] line-through"
+                                : selected
+                                  ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))] ring-1 ring-[hsl(var(--primary)/.35)]"
                                 : "border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/.6)]",
                             )}
                             title={observation ? `Motivo: ${observation}` : undefined}
-                            aria-label={`${unit}: ${unitSelectionMode === "deleted" ? "excluir unidade" : unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "editar observação de indisponibilidade" : "marcar indisponível"}`}
+                            aria-label={`${unit}: ${unitSelectionMode === "select" ? (selected ? "desmarcar unidade" : "selecionar unidade") : unitSelectionMode === "deleted" ? "excluir unidade" : unitSelectionMode === "reserved" ? (reserved ? "remover da reserva" : "marcar para reserva") : unavailable ? "editar observação de indisponibilidade" : "marcar indisponível"}`}
                             data-testid={`button-unit-${unit}`}
                           >
                             {unit}
@@ -2179,6 +2256,42 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         );
                       })}
                     </div>
+                    {!readOnly &&
+                      unitSelectionMode === "select" &&
+                      selectedCartUnits.some((item) => item.cartId === cart.id) && (
+                        <div
+                          className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[hsl(var(--muted)/.55)] p-2"
+                          data-testid={`selected-cart-units-${cart.id}`}
+                        >
+                          <span className="mr-auto text-[11px] font-semibold text-[hsl(var(--muted-foreground))]">
+                            {selectedCartUnits.filter((item) => item.cartId === cart.id).length} unidade(s) selecionada(s)
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => applyCartUnitSelection(cart, "unavailable")}
+                            data-testid={`button-mark-selected-unavailable-${cart.id}`}
+                          >
+                            Indisponível
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => applyCartUnitSelection(cart, "reserved")}
+                            data-testid={`button-mark-selected-reserved-${cart.id}`}
+                          >
+                            Reserva
+                          </Button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 text-[11px] font-semibold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                            onClick={() => clearCartUnitSelection(cart.id)}
+                            data-testid={`button-cancel-cart-unit-selection-${cart.id}`}
+                          >
+                            Cancelar seleção
+                          </button>
+                        </div>
+                      )}
                     {!readOnly &&
                       unavailableObservationUnit?.cartId === cart.id &&
                       units.includes(unavailableObservationUnit.unit) && (
