@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSupportTicket,
+  deleteSupportTicket,
   loadSupportTickets,
   updateSupportTicket,
 } from "./support-api";
@@ -67,6 +68,17 @@ describe("support API client", () => {
         status: "Resolvido",
         adminResponse: "A alteração foi aplicada.",
       }),
+    });
+  });
+
+  it("deletes a responded ticket", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await deleteSupportTicket("2");
+    expect(fetchMock).toHaveBeenCalledWith("/api/support/tickets/2", {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: {},
     });
   });
 });

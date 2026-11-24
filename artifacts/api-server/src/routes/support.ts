@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { supportTicketsTable } from "@workspace/db/schema";
@@ -124,6 +124,28 @@ router.put("/support/tickets/:id", requireSameOrigin, requireAdmin, async (req, 
     respondedAt: ticket.respondedAt,
     createdAt: ticket.createdAt,
   });
+});
+
+router.delete("/support/tickets/:id", requireSameOrigin, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Chamado inválido." });
+  }
+
+  const [deletedTicket] = await db.delete(supportTicketsTable)
+    .where(and(
+      eq(supportTicketsTable.id, id),
+      inArray(supportTicketsTable.status, ["Respondido", "Resolvido"]),
+    ))
+    .returning({ id: supportTicketsTable.id });
+  if (deletedTicket) return res.status(204).end();
+
+  const [ticket] = await db.select({ id: supportTicketsTable.id })
+    .from(supportTicketsTable)
+    .where(eq(supportTicketsTable.id, id))
+    .limit(1);
+  if (!ticket) return res.status(404).json({ error: "Chamado não encontrado." });
+  return res.status(409).json({ error: "Só é possível excluir chamados já respondidos." });
 });
 
 export default router;

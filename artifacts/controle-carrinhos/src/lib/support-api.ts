@@ -60,3 +60,9 @@ export async function updateSupportTicket(
     body: JSON.stringify(data),
   });
 }
+
+export async function deleteSupportTicket(id: string) {
+  await request(`/api/support/tickets/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

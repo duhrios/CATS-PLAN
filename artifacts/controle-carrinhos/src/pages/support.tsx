@@ -1,9 +1,10 @@
-import { Check, MessageSquareText, Plus, Send } from "lucide-react";
+import { Check, MessageSquareText, Plus, Send, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Field, Modal, PageHeader, SectionCard, StatusPill, inputClass } from "@/components/app-ui";
 import { getAuthenticatedSession } from "@/lib/auth-session";
 import {
   createSupportTicket,
+  deleteSupportTicket,
   loadSupportTickets,
   updateSupportTicket,
   type SupportTicket,
@@ -85,6 +86,21 @@ export function SupportPage({ admin = false }: { admin?: boolean }) {
     }
   };
 
+  const removeTicket = async (ticket: SupportTicket) => {
+    if (!admin || ticket.status === "Pendente" || !ticket.adminResponse?.trim()) return;
+    if (!window.confirm(`Excluir o chamado "${ticket.title}"? Esta ação não pode ser desfeita.`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await deleteSupportTicket(ticket.id);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível excluir o chamado.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const selectedTicket = tickets.find((ticket) => ticket.id === selectedId);
 
   return (
@@ -132,7 +148,14 @@ export function SupportPage({ admin = false }: { admin?: boolean }) {
                     <p className="text-xs text-[hsl(var(--muted-foreground))]">
                       {ticket.senderRole === "operator" ? "TI" : ticket.senderRole === "user" ? "Professor" : "Administrador"} · {ticket.senderName}
                     </p>
-                    {admin && <Button size="sm" variant="secondary" onClick={() => openResponse(ticket)}><MessageSquareText size={14} /> Responder</Button>}
+                    {admin && <div className="flex items-center gap-2">
+                      {ticket.status !== "Pendente" && ticket.adminResponse?.trim() && (
+                        <Button size="sm" variant="danger" disabled={saving} onClick={() => void removeTicket(ticket)} data-testid={`button-delete-support-ticket-${ticket.id}`}>
+                          <Trash2 size={14} /> Excluir
+                        </Button>
+                      )}
+                      <Button size="sm" variant="secondary" disabled={saving} onClick={() => openResponse(ticket)}><MessageSquareText size={14} /> Responder</Button>
+                    </div>}
                   </div>
                 </article>
               ))}

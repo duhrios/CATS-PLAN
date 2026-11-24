@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SupportPage } from "./support";
 
-const { getSession, createTicket, loadTickets, updateTicket } = vi.hoisted(() => ({
+const { getSession, createTicket, deleteTicket, loadTickets, updateTicket } = vi.hoisted(() => ({
   getSession: vi.fn(),
   createTicket: vi.fn(),
+  deleteTicket: vi.fn(),
   loadTickets: vi.fn(),
   updateTicket: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("@/lib/auth-session", () => ({
 
 vi.mock("@/lib/support-api", () => ({
   createSupportTicket: createTicket,
+  deleteSupportTicket: deleteTicket,
   loadSupportTickets: loadTickets,
   updateSupportTicket: updateTicket,
 }));
@@ -42,6 +44,8 @@ describe("support page", () => {
     updateTicket.mockResolvedValue(undefined);
   });
 
+  afterEach(() => vi.restoreAllMocks());
+
   it("lets a teacher submit a bug report and shows only the new-ticket action", async () => {
     render(<SupportPage />);
     await screen.findByText("Você ainda não enviou solicitações ao suporte.");
@@ -67,6 +71,7 @@ describe("support page", () => {
 
     expect(await screen.findByText("Planilha não abre")).toBeInTheDocument();
     expect(screen.getByText(/Ana Souza/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Excluir" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Responder" }));
     fireEvent.change(screen.getByLabelText("Resposta"), {
       target: { value: "A falha foi corrigida." },
@@ -77,5 +82,28 @@ describe("support page", () => {
       status: "Respondido",
       adminResponse: "A falha foi corrigida.",
     }));
+  });
+
+  it("allows an administrator to delete a responded ticket after confirmation", async () => {
+    getSession.mockReturnValue({ role: "admin", name: "Administrador" });
+    const respondedTicket = {
+      ...ticket,
+      status: "Respondido" as const,
+      adminResponse: "Confirmado.",
+    };
+    loadTickets.mockResolvedValueOnce([respondedTicket]).mockResolvedValueOnce([]);
+    deleteTicket.mockResolvedValue(undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+    render(<SupportPage admin />);
+
+    await screen.findByText("Planilha não abre");
+    const deleteButton = screen.getByTestId("button-delete-support-ticket-1");
+    fireEvent.click(deleteButton);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(deleteTicket).not.toHaveBeenCalled();
+
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(deleteTicket).toHaveBeenCalledWith("1"));
+    await screen.findByText("Não há chamados pendentes.");
   });
 });
