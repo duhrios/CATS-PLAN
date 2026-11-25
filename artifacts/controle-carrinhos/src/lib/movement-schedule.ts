@@ -2,6 +2,44 @@ import type { CartMovement, Reservation } from "@/lib/campus-data";
 
 export const repeatedLessonAutoCompleteActor = "Aula repetida na mesma sala/turma";
 
+export function getDueAutoCompletedMovementReservations(
+  reservations: Reservation[],
+  movements: CartMovement[],
+  now: number,
+  autoCompleteEnabled: boolean,
+  intervalMinutes: number,
+): Reservation[] {
+  if (
+    !autoCompleteEnabled ||
+    !Number.isFinite(now) ||
+    !Number.isFinite(intervalMinutes) ||
+    intervalMinutes < 0
+  ) return [];
+
+  const movementByReservation = new Map(
+    movements.map((movement) => [movement.reservationId, movement]),
+  );
+  const alreadyInRoom = getAlreadyInRoomReservationIds(reservations, movements);
+  const intervalMs = intervalMinutes * 60_000;
+
+  return reservations.filter((reservation) => {
+    if (alreadyInRoom.has(reservation.id)) return false;
+
+    const movement = movementByReservation.get(reservation.id);
+    if (
+      movement &&
+      movement.status !== "Movendo" &&
+      movement.status !== "Não movido"
+    ) return false;
+    if (movement?.notReceived) return false;
+
+    const intervalStart = movement?.status === "Movendo"
+      ? new Date(movement.updatedAt).getTime()
+      : new Date(`${reservation.date}T${reservation.start}:00`).getTime();
+    return Number.isFinite(intervalStart) && now >= intervalStart + intervalMs;
+  }).sort((a, b) => a.start.localeCompare(b.start) || a.id - b.id);
+}
+
 const itineraryKey = (reservation: Reservation) => [
   reservation.date,
   reservation.cart.trim().toLocaleLowerCase("pt-BR"),

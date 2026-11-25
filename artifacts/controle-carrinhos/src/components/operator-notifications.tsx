@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { todayISO } from "@/components/app-ui";
 import {
   getAuthenticatedRole,
+  onAuthenticatedSessionChange,
 } from "@/lib/auth-session";
 import {
   movementChangeEventName,
@@ -10,6 +12,7 @@ import {
   useCampusData,
   type CartMovement,
 } from "@/lib/campus-data";
+import { getDueAutoCompletedMovementReservations } from "@/lib/movement-schedule";
 import {
   openSyncChannel,
   showBrowserNotification,
@@ -18,9 +21,51 @@ import { isNewTeacherMovementRequest } from "@/lib/movement-notifications";
 import { useNotificationSettings } from "@/lib/notification-settings";
 
 export function OperatorNotifications() {
-  const { movements, reservations } = useCampusData();
+  const {
+    movements,
+    reservations,
+    movementSettings,
+    updateMovementStatus,
+  } = useCampusData();
   const { settings, loading: settingsLoading, error: settingsError } = useNotificationSettings();
   const known = useRef(new Map<number, CartMovement>());
+  const [now, setNow] = useState(Date.now());
+  const [role, setRole] = useState(getAuthenticatedRole);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(
+    () => onAuthenticatedSessionChange(() => setRole(getAuthenticatedRole())),
+    [],
+  );
+
+  useEffect(() => {
+    if (role !== "admin" && role !== "operator") return;
+    const todaysReservations = reservations.filter(
+      (reservation) =>
+        reservation.date === todayISO() && reservation.kind === "Aula",
+    );
+    getDueAutoCompletedMovementReservations(
+      todaysReservations,
+      movements,
+      now,
+      movementSettings.autoComplete,
+      movementSettings.alertIntervalMinutes,
+    ).forEach((reservation) => {
+      updateMovementStatus(reservation.id, "Concluído", true);
+    });
+  }, [
+    movements,
+    movementSettings.alertIntervalMinutes,
+    movementSettings.autoComplete,
+    now,
+    reservations,
+    role,
+    updateMovementStatus,
+  ]);
 
   useEffect(() => {
     movements.forEach((movement) =>
@@ -34,7 +79,7 @@ export function OperatorNotifications() {
         settingsLoading ||
         settingsError ||
         !settings.ti["movement-request"] ||
-        getAuthenticatedRole() !== "operator"
+        !["operator", "admin"].includes(getAuthenticatedRole() ?? "")
       ) {
         next.forEach((movement) =>
           known.current.set(movement.reservationId, movement),

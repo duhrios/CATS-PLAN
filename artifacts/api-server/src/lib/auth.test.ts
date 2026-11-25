@@ -34,6 +34,7 @@ describe("API authentication safeguards", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   it("verifies scrypt passwords and rejects malformed or incorrect hashes", () => {
@@ -105,6 +106,27 @@ describe("API authentication safeguards", () => {
       expiresAt,
     });
   });
+
+  it.each(["admin", "operator", "user"] as const)(
+    "keeps %s sessions for 24 hours in this browser profile",
+    (role) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-11-25T12:00:00.000Z"));
+      const response = makeResponse();
+      const expiresAt = establishSession(response as unknown as Response, {
+        role,
+        name: "Usuário",
+        isSuperAdmin: false,
+        mustChangePassword: false,
+      });
+
+      expect(expiresAt).toBe(Date.now() + 24 * 60 * 60 * 1000);
+      expect(response.cookie.mock.calls[0][2]).toMatchObject({
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+    },
+  );
 
   it("rejects expired and tampered sessions", () => {
     const response = makeResponse();

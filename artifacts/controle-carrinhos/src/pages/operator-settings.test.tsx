@@ -128,4 +128,11 @@ describe("operator custom tone settings", () => {
       "O arquivo excede o limite de 2 MB.",
     );
   });
+
+  it("shows movement reminder settings when embedded in administrator settings", () => {
+    render(<OperatorSettingsPage embedded />);
+
+    expect(screen.getByText("Lembretes de movimentação")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /testar aviso/i })).toBeInTheDocument();
+  });
 });

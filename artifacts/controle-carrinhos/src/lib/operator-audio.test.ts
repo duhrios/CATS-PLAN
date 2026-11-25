@@ -4,6 +4,7 @@ describe("operator movement alarm audio", () => {
   afterEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "AudioContext");
   });
 
@@ -78,5 +79,69 @@ describe("operator movement alarm audio", () => {
     await vi.waitFor(() => expect(oscillators.length).toBeGreaterThan(initialOscillatorCount));
     expect(createdContext?.resume).toHaveBeenCalledOnce();
     stopAgain();
+  });
+
+  it("loops the selected custom ringtone instead of using a short fallback beep", async () => {
+    let source: {
+      buffer: AudioBuffer | null;
+      loop: boolean;
+      connect: ReturnType<typeof vi.fn>;
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+    } | undefined;
+    const oscillator = vi.fn();
+
+    class MockAudioContext {
+      state: AudioContextState = "running";
+      currentTime = 0;
+      destination = {};
+      resume = vi.fn(async () => {});
+      decodeAudioData = vi.fn(async () => ({} as AudioBuffer));
+      createGain() {
+        return {
+          gain: { value: 1 },
+          connect: vi.fn((destination: object) => destination),
+        } as unknown as GainNode;
+      }
+      createBufferSource() {
+        const gain = this.createGain();
+        source = {
+          buffer: null,
+          loop: false,
+          connect: vi.fn(() => gain),
+          start: vi.fn(),
+          stop: vi.fn(),
+        };
+        return source as unknown as AudioBufferSourceNode;
+      }
+      createOscillator() {
+        oscillator();
+        throw new Error("Custom ringtone unexpectedly fell back to a beep.");
+      }
+    }
+
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: MockAudioContext,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    })));
+
+    const { playOperatorAlert } = await import("@/lib/operator-audio");
+    const stop = playOperatorAlert({
+      volume: 70,
+      vibration: false,
+      tone: "custom",
+      customToneUrl: "data:audio/mpeg;base64,dGVzdA==",
+      alarmDurationSeconds: 30,
+    }, 3);
+
+    await vi.waitFor(() => expect(source?.start).toHaveBeenCalledOnce());
+    expect(source?.loop).toBe(true);
+    expect(oscillator).not.toHaveBeenCalled();
+    stop();
+    expect(source?.stop).toHaveBeenCalledOnce();
   });
 });

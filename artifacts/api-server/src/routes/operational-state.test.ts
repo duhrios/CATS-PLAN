@@ -133,6 +133,27 @@ describe("operational state validation", () => {
       });
     });
 
+    it("labels automatically completed movements in the history", () => {
+      const events = buildDeletedReservationMovementEvents({
+        id: 18,
+        teacherName: "Ana Souza",
+        cartName: "Carrinho A",
+        room: "Sala 12",
+      }, [{
+        reservationId: 18,
+        completedAt: "2026-11-18T13:45:00.000Z",
+        completedBy: "Conclusão automática",
+        autoCompleted: true,
+      }], "Administradora");
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        title: "Movimentação concluída",
+        detail: "Carrinho A · Sala 12 · Movido automaticamente",
+        entityKeys: ["movement:18:completed"],
+      });
+    });
+
     it("reads legacy plain-text activity descriptions", () => {
       expect(activityMetadata("Descrição antiga")).toEqual({
         detail: "Descrição antiga",

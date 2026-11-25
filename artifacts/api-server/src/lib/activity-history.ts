@@ -435,7 +435,9 @@ export const buildDeletedReservationMovementEvents = (
     "completed",
     movement.completedAt,
     "Movimentação concluída",
-    `${context} · Concluído por: ${text(movement.completedBy) || "TI"}`,
+    movement.autoCompleted === true
+      ? `${context} · Movido automaticamente`
+      : `${context} · Concluído por: ${text(movement.completedBy) || "TI"}`,
     text(movement.completedBy) || actor,
     "TI",
   );

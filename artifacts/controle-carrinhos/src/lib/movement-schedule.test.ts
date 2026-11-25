@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CartMovement, Reservation } from "@/lib/campus-data";
 import {
+  getDueAutoCompletedMovementReservations,
   getDueMovementNotifications,
   getDueRepeatedRoomClassReservations,
   getAlreadyInRoomReservationIds,
@@ -39,6 +40,84 @@ const movement = (
 });
 
 describe("operator movement schedule rules", () => {
+  it("automatically completes unhandled movements after the configured interval", () => {
+    const current = reservation({ id: 21, start: "14:00" });
+    const dueAt = new Date("2026-09-28T14:10:00").getTime();
+
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [],
+        dueAt - 1,
+        true,
+        10,
+      ),
+    ).toEqual([]);
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [],
+        dueAt,
+        true,
+        10,
+      ),
+    ).toEqual([current]);
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [],
+        dueAt,
+        false,
+        10,
+      ),
+    ).toEqual([]);
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [{ ...movement(current.id, "Não movido"), notReceived: true }],
+        dueAt,
+        true,
+        10,
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the existing timeout for movements already in progress", () => {
+    const current = reservation({ id: 22 });
+    const activeMovement = {
+      ...movement(current.id, "Movendo"),
+      updatedAt: "2026-09-28T14:05:00",
+    };
+
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [activeMovement],
+        new Date("2026-09-28T14:14:59").getTime(),
+        true,
+        10,
+      ),
+    ).toEqual([]);
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [activeMovement],
+        new Date("2026-09-28T14:15:00").getTime(),
+        true,
+        10,
+      ),
+    ).toEqual([current]);
+    expect(
+      getDueAutoCompletedMovementReservations(
+        [current],
+        [movement(current.id, "Concluído")],
+        new Date("2026-09-28T15:00:00").getTime(),
+        true,
+        10,
+      ),
+    ).toEqual([]);
+  });
+
   it("notifies every cart scheduled at the same time", () => {
     const reservations = [
       reservation({

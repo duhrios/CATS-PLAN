@@ -22,6 +22,7 @@ import {
 } from "@/lib/teacher-spreadsheet";
 import * as XLSX from "xlsx";
 import { AdminNotifications } from "@/components/admin-notifications";
+import { OperatorSettingsPage } from "@/pages/operator-settings";
 
 const normalizeSpreadsheetHeader = (value: unknown) =>
   String(value ?? "")
@@ -495,7 +496,10 @@ export function ConfigurationPage() {
   };
   return <div className="animate-rise space-y-5">
     <PageHeader eyebrow="Acesso exclusivo · Administrador" title="Configuração" description="Ações de manutenção do sistema e validação rápida de fluxos do aplicativo." />
-    <AdminNotifications />
+    <div className="space-y-5">
+      <AdminNotifications />
+      <OperatorSettingsPage embedded />
+    </div>
     <div className="grid items-start gap-4 lg:grid-cols-2">
     <SectionCard title="Acesso do professor à planilha" eyebrow="Permissões de visualização">
       <div className="space-y-3 p-4 sm:p-5">

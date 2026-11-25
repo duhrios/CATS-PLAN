@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Button, PageHeader, StatusPill, todayISO } from "@/components/app-ui";
 import {
   type Cart,
@@ -169,6 +169,7 @@ function ResponsibleNameCombobox({
   autoFocus?: boolean;
 }) {
   const listId = `responsible-suggestions-${useId()}`;
+  const inputRef = useRef<HTMLInputElement>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const query = normalizeSuggestionText(value);
@@ -193,6 +194,10 @@ function ResponsibleNameCombobox({
     setActiveIndex(-1);
   };
 
+  useLayoutEffect(() => {
+    if (autoFocus) inputRef.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
+
   return (
     <div className="relative min-w-0">
       <input
@@ -208,7 +213,7 @@ function ResponsibleNameCombobox({
             : undefined
         }
         maxLength={120}
-        autoFocus={autoFocus}
+        ref={inputRef}
         required={required}
         disabled={disabled}
         placeholder={placeholder}
@@ -3116,12 +3121,12 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     }
   });
   const [selectedDate, setSelectedDate] = useState(() =>
-    getMondayOfWeek(new Date()),
+    new Date(`${todayISO()}T12:00:00`),
   );
-  const [quickAccessFocus, setQuickAccessFocus] = useState<{
-    date: string;
-    id: number;
-  } | null>(null);
+  const [quickAccessFocus, setQuickAccessFocus] = useState(() => ({
+    date: todayISO(),
+    id: 0,
+  }));
   const quickAccessFocusIdRef = useRef(0);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("Todos");
   const weekStart = getMondayOfWeek(selectedDate);
@@ -3279,11 +3284,13 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     next.setDate(next.getDate() + amount * 7);
     setSelectedDate(next);
   };
-  const focusTomorrow = () => {
-    const date = nextBookableWeekday(new Date(`${todayISO()}T12:00:00`));
+  const focusSpreadsheetDate = (date: string) => {
     setSelectedDate(new Date(`${date}T12:00:00`));
     quickAccessFocusIdRef.current += 1;
     setQuickAccessFocus({ date, id: quickAccessFocusIdRef.current });
+  };
+  const focusTomorrow = () => {
+    focusSpreadsheetDate(nextBookableWeekday(new Date(`${todayISO()}T12:00:00`)));
   };
   const saveVisibleColumns = (columns: CompleteViewColumnKey[]) => {
     setVisibleColumns(columns);
@@ -3430,7 +3437,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
               if (isTeacherView) {
                 focusTomorrow();
               } else {
-                setSelectedDate(getMondayOfWeek(new Date()));
+                focusSpreadsheetDate(todayISO());
               }
             }}
           >

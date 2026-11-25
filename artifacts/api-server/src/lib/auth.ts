@@ -17,8 +17,7 @@ export type AuthSession = {
 
 const cookieName = "cc_session";
 const adminBootstrapUsedKey = "admin-bootstrap-password-used-v1";
-const teacherSessionMs = 45 * 60 * 1000;
-const staffSessionMs = 12 * 60 * 60 * 1000;
+const sessionDurationMs = 24 * 60 * 60 * 1000;
 
 const sessionSecret = () => {
   const secret = process.env.SESSION_SECRET;
@@ -173,7 +172,7 @@ export const requireSuperAdmin: RequestHandler = (req, res, next) => {
 export const getAuthSession = (req: Request) => readAuthSession(req);
 
 export const establishSession = (res: Response, identity: Omit<AuthSession, "expiresAt">) => {
-  const expiresAt = Date.now() + (identity.role === "user" ? teacherSessionMs : staffSessionMs);
+  const expiresAt = Date.now() + sessionDurationMs;
   res.cookie(cookieName, encodeSession({ ...identity, expiresAt }), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

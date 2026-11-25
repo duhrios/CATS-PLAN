@@ -24,7 +24,11 @@ import { subscribeToOperatorAudioErrors } from "@/lib/operator-audio";
 
 const operatorSettingsStorageKey = "controle-carrinhos-operator-settings";
 
-export function OperatorSettingsPage() {
+export function OperatorSettingsPage({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   const [settings, setSettings] =
     useState<OperatorSettings>(readOperatorSettings);
   const [toneUploadError, setToneUploadError] = useState("");
@@ -87,26 +91,37 @@ export function OperatorSettingsPage() {
   };
   return (
     <div className="animate-rise space-y-7">
-      <PageHeader
-        eyebrow="Área do TI"
-        title="Configuração"
-        description="Personalize os lembretes de movimentação e os avisos deste dispositivo."
-        action={
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => playOperatorAlert(settings, 2)}
-          >
-            <Volume2 size={15} /> Testar aviso
-          </Button>
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          eyebrow="Área do TI"
+          title="Configuração"
+          description="Personalize os lembretes de movimentação e os avisos deste dispositivo."
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => playOperatorAlert(settings, 2)}
+            >
+              <Volume2 size={15} /> Testar aviso
+            </Button>
+          }
+        />
+      )}
       <SectionCard
         title="Lembretes de movimentação"
-        eyebrow="Preferências deste dispositivo"
+        eyebrow={embedded ? "Preferências deste dispositivo" : "Configurações de alerta"}
         defaultExpanded
       >
         <div className="grid max-w-2xl gap-5 p-5">
+          {embedded && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => playOperatorAlert(settings, 2)}
+            >
+              <Volume2 size={15} /> Testar aviso
+            </Button>
+          )}
           <Field
             label={
               <span className="inline-flex items-center gap-1.5">

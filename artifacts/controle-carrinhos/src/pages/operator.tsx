@@ -518,17 +518,6 @@ export function OperatorPage() {
     );
   }, [today, movements, updateMovementStatus]);
   useEffect(() => {
-    if (!movementSettings.autoComplete) return;
-    movements.forEach((movement) => {
-      if (
-        movement.status === "Movendo" &&
-        now - new Date(movement.updatedAt).getTime() >=
-          movementSettings.alertIntervalMinutes * 60000
-      )
-        updateMovementStatus(movement.reservationId, "Concluído", true);
-    });
-  }, [now, movementSettings, movements, updateMovementStatus]);
-  useEffect(() => {
     const current = new Date(now);
     const currentMinutes = current.getHours() * 60 + current.getMinutes();
     getDueRepeatedRoomClassReservations(
@@ -545,6 +534,7 @@ export function OperatorPage() {
     });
   }, [now, today, movements, updateMovementStatus]);
   useEffect(() => {
+    if (movementSettings.autoComplete) return;
     const currentMinutes =
       new Date(now).getHours() * 60 + new Date(now).getMinutes();
     today.forEach((reservation) => {
@@ -564,6 +554,7 @@ export function OperatorPage() {
     now,
     today,
     movements,
+    movementSettings.autoComplete,
     markMovementNotAttended,
     alreadyInRoomReservationIds,
   ]);
@@ -615,7 +606,13 @@ export function OperatorPage() {
       return !movement || movement.status === "Não movido";
     });
     if (pendingQueue.length !== alarmQueueRef.current.length) {
-      if (!pendingQueue.some((item) => item.id === alarm?.id)) {
+      const currentAlarmMovement = alarm
+        ? movements.find((entry) => entry.reservationId === alarm.id)
+        : undefined;
+      if (
+        !pendingQueue.some((item) => item.id === alarm?.id) &&
+        currentAlarmMovement?.status !== "Movendo"
+      ) {
         alarmStopRef.current?.();
         alarmStopRef.current = null;
       }

@@ -3540,7 +3540,9 @@ export function HistoryPage() {
         time: new Date(movement.completedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
         date: eventDate(movement.completedAt),
         title: "Movimentação concluída",
-        detail: `${reservation.cart} · ${reservation.room} · Concluído por: ${movement.completedBy ?? "TI"}`,
+        detail: movement.autoCompleted
+          ? `${reservation.cart} · ${reservation.room} · Movido automaticamente`
+          : `${reservation.cart} · ${reservation.room} · Concluído por: ${movement.completedBy ?? "TI"}`,
         type: "Movimentação",
         tone: "good",
         person: eventPerson(movement.completedBy),

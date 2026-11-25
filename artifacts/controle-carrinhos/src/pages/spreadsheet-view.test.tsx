@@ -145,6 +145,22 @@ describe("teacher spreadsheet view", () => {
     });
   });
 
+  it("opens the administrator spreadsheet focused on today's column", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T12:00:00.000Z"));
+    render(<SpreadsheetViewPage />);
+
+    expect(screen.getByLabelText("Escolher semana pela data")).toHaveValue("2026-11-25");
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-week-scroll-container").scrollLeft).toBe(1520);
+    });
+    const scrollContainer = screen.getByTestId("quick-week-scroll-container");
+    scrollContainer.scrollLeft = 0;
+    fireEvent.scroll(scrollContainer);
+    fireEvent.click(screen.getByRole("button", { name: "Hoje" }));
+    await waitFor(() => expect(scrollContainer.scrollLeft).toBe(1520));
+  });
+
   it("hides past weekdays unless the teacher navigates to the previous week", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-24T12:00:00.000Z"));
@@ -180,6 +196,10 @@ describe("teacher spreadsheet view", () => {
     expect(await screen.findByTestId(`quick-day-${formatDateKey(new Date("2026-11-24T12:00:00"))}`))
       .toBeInTheDocument();
     expect(screen.queryByTestId(`quick-day-${mondayKey}`)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Escolher semana pela data")).toHaveValue("2026-11-24");
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-week-scroll-container").scrollLeft).toBe(0);
+    });
     expect(screen.getByRole("button", { name: "Amanhã" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Anterior" })).toHaveLength(2);
 
@@ -194,6 +214,45 @@ describe("teacher spreadsheet view", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Anterior" })[0]);
     expect(await screen.findByTestId(`quick-day-${formatDateKey(previousMonday)}`))
       .toBeInTheDocument();
+  });
+
+  it("keeps the spreadsheet position when the booking form receives focus and input", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T12:00:00.000Z"));
+    getCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{ name: "Carrinho A", unavailable: false }],
+      cartSchedules: {
+        "Carrinho A": {
+          Manhã: [{ id: "morning-slot", start: "07:00", end: "07:45" }],
+          Tarde: [],
+        },
+      },
+      movementSettings: { allowCartATransitionScheduling: false },
+      replaceReservations: vi.fn(),
+    });
+    const focusSpy = vi.spyOn(HTMLInputElement.prototype, "focus");
+    render(<SpreadsheetViewPage />);
+
+    const todayKey = formatDateKey(new Date("2026-11-25T12:00:00"));
+    const today = await screen.findByTestId(`quick-day-${todayKey}`);
+    const scrollContainer = screen.getByTestId("quick-week-scroll-container");
+    await waitFor(() => expect(scrollContainer.scrollLeft).toBe(1520));
+    scrollContainer.scrollLeft = 760;
+
+    fireEvent.click(within(today).getByRole("button", {
+      name: "Reservar horário 07:00 para Carrinho A",
+    }));
+
+    const teacherInput = screen.getByTestId("quick-book-teacher");
+    expect(teacherInput).toHaveFocus();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(scrollContainer.scrollLeft).toBe(760);
+    fireEvent.change(teacherInput, { target: { value: "Ana Souza" } });
+    expect(teacherInput).toHaveValue("Ana Souza");
+    expect(scrollContainer.scrollLeft).toBe(760);
+    focusSpy.mockRestore();
   });
 
   it("allows teachers to book multiple free sheet slots only under their own name", async () => {
@@ -475,6 +534,9 @@ describe("teacher spreadsheet view", () => {
     expect(screen.getAllByTestId("quick-time-grid")[0].className)
       .toContain("grid-cols-[96px_minmax(0,1fr)]");
 
+    const weekdayIndex = (new Date().getDay() + 6) % 7;
+    const initialFocusLeft = weekdayIndex < 5 ? weekdayIndex * 760 : 0;
+    await waitFor(() => expect(quickWeekScroll.scrollLeft).toBe(initialFocusLeft));
     quickWeekTopScroll.scrollLeft = 320;
     fireEvent.scroll(quickWeekTopScroll);
     await waitFor(() => expect(quickWeekScroll.scrollLeft).toBe(320));

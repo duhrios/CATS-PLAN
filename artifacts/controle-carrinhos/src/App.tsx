@@ -193,10 +193,9 @@ function Router() {
             </Route>
             <Route path="/login" component={TeacherLoginPage} />
             <Route path="/operador/login" component={OperatorLoginPage} />
-            <Route
-              path="/operador/configuracao"
-              component={OperatorSettingsPage}
-            />
+            <Route path="/operador/configuracao">
+              <OperatorSettingsPage />
+            </Route>
             <Route path="/operador" component={OperatorPage} />
             <Route path="/wifi">
               <WifiPage
