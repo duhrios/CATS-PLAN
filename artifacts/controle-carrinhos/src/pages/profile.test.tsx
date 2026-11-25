@@ -91,7 +91,8 @@ vi.mock("@/lib/room-directory", () => ({
 }));
 
 const expandSection = (label: string) => {
-  fireEvent.click(screen.getByRole("button", { name: `Maximizar ${label}` }));
+  const expandButton = screen.queryByRole("button", { name: `Maximizar ${label}` });
+  if (expandButton) fireEvent.click(expandButton);
 };
 
 describe("Teacher first access", () => {
@@ -210,6 +211,15 @@ describe("Teacher first access", () => {
         className: "",
       });
       saveProfile.mockImplementation(async (profile) => profile);
+    });
+
+    it("opens the teacher profile card as soon as the page is opened", async () => {
+      render(<TeacherProfilePage />);
+
+      expect(
+        screen.getByRole("button", { name: "Minimizar Dados do professor" }),
+      ).toHaveAttribute("aria-expanded", "true");
+      expect(await screen.findByTestId("form-teacher-profile")).toBeInTheDocument();
     });
 
     it("offers only TI-registered classes for Fundamental 1 and saves the selection", async () => {

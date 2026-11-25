@@ -1,5 +1,5 @@
 import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { db } from "@workspace/db";
 import {
   activityTable,
@@ -28,6 +28,14 @@ import {
 import { availableReserveUnitsFromState } from "./reserve-inventory";
 
 const router: IRouter = Router();
+const rejectOperatorReservationChanges: RequestHandler = (req, res, next) => {
+  if (getAuthSession(req)?.role === "operator") {
+    return res.status(403).json({
+      error: "O perfil TI pode apenas consultar reservas e atualizar as movimentações dos carrinhos.",
+    });
+  }
+  return next();
+};
 const teacherProfileSettingKey = "teacher-profiles-v1";
 const teacherSegments = [
   "Educação Infantil",
@@ -437,7 +445,7 @@ const saveReservation = async (
   }
 };
 
-router.post("/reservations", requireSameOrigin, requireSession, (req, res) => {
+router.post("/reservations", requireSameOrigin, requireSession, rejectOperatorReservationChanges, (req, res) => {
   const session = getAuthSession(req);
   if (session?.role === "user" && session.name !== req.body?.teacherName) {
     return res.status(403).json({ error: "Você só pode criar agendamentos em seu próprio nome." });
@@ -445,7 +453,7 @@ router.post("/reservations", requireSameOrigin, requireSession, (req, res) => {
   return saveReservation(req, res);
 });
 
-router.put("/reservations/:id", requireSameOrigin, requireSession, async (req, res) => {
+router.put("/reservations/:id", requireSameOrigin, requireSession, rejectOperatorReservationChanges, async (req, res) => {
   const reservationId = Number(req.params.id);
   if (!Number.isInteger(reservationId) || reservationId <= 0) {
     return res.status(400).json({ error: "Agendamento inválido." });
@@ -536,7 +544,7 @@ router.put("/reservations/:id", requireSameOrigin, requireSession, async (req, r
   return saveReservation(req, res, reservationId);
 });
 
-router.delete("/reservations/:id", requireSameOrigin, requireSession, async (req, res) => {
+router.delete("/reservations/:id", requireSameOrigin, requireSession, rejectOperatorReservationChanges, async (req, res) => {
   const reservationId = Number(req.params.id);
   if (!Number.isInteger(reservationId) || reservationId <= 0) {
     return res.status(400).json({ error: "Agendamento inválido." });

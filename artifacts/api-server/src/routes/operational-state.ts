@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { isDeepStrictEqual } from "node:util";
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { activityTable, campusSettingsTable } from "@workspace/db/schema";
@@ -236,6 +237,95 @@ export const publicOperationalState = (state: Record<string, unknown>) =>
     Object.entries(state).filter(([key]) => !internalKeys.has(key)),
   );
 
+const sameStateValue = (first: unknown, second: unknown) =>
+  isDeepStrictEqual(first, second);
+
+const operatorMovementsUpdateAllowed = (
+  previousValue: unknown,
+  nextValue: unknown,
+) => {
+  const previous = previousValue ?? [];
+  const next = nextValue ?? [];
+  if (!Array.isArray(previous) || !Array.isArray(next)) return false;
+  const nextReservationIds = new Set(
+    next.filter(isRecord).map((movement) => movement.reservationId),
+  );
+  return previous.every(
+    (movement) =>
+      isRecord(movement) &&
+      nextReservationIds.has(movement.reservationId),
+  );
+};
+
+const operatorWifiPointUpdateAllowed = (
+  previousValue: unknown,
+  nextValue: unknown,
+) => {
+  const previous = previousValue ?? [];
+  const next = nextValue ?? [];
+  if (!Array.isArray(previous) || !Array.isArray(next)) return false;
+  if (previous.length !== next.length) return false;
+  const nextById = new Map(
+    next
+      .filter(isRecord)
+      .filter((point) => typeof point.id === "string")
+      .map((point) => [point.id as string, point]),
+  );
+
+  return previous.every((point) => {
+    if (!isRecord(point) || typeof point.id !== "string") return false;
+    const updatedPoint = nextById.get(point.id);
+    if (!updatedPoint || point.type !== "Antena volante") {
+      return sameStateValue(point, updatedPoint);
+    }
+
+    const {
+      status: previousStatus,
+      assignedRoom: previousRoom,
+      ...previousDetails
+    } = point;
+    const {
+      status: nextStatus,
+      assignedRoom: nextRoom,
+      ...nextDetails
+    } = updatedPoint;
+    if (!sameStateValue(previousDetails, nextDetails)) return false;
+    if (
+      nextStatus !== previousStatus &&
+      nextStatus !== "Disponível" &&
+      nextStatus !== "Em uso"
+    ) return false;
+    if (
+      nextRoom !== previousRoom &&
+      nextRoom !== undefined &&
+      (typeof nextRoom !== "string" || !nextRoom.trim())
+    ) return false;
+    return true;
+  });
+};
+
+export const operatorOperationalStateUpdateAllowed = (
+  previousState: Record<string, unknown>,
+  nextState: Record<string, unknown>,
+) => {
+  const movementsKey = "controle-carrinhos-movements";
+  const wifiPointsKey = "controle-carrinhos-wifi-points";
+  for (const key of allowedKeys) {
+    if (
+      key !== movementsKey &&
+      key !== wifiPointsKey &&
+      !sameStateValue(previousState[key], nextState[key])
+    ) return false;
+  }
+  return operatorMovementsUpdateAllowed(
+    previousState[movementsKey],
+    nextState[movementsKey],
+  ) && operatorWifiPointUpdateAllowed(
+    previousState[wifiPointsKey],
+    nextState[wifiPointsKey],
+  );
+};
+
 export const nextOperationalStateTimestamp = (
   currentUpdatedAt: Date | null,
   now = Date.now(),
@@ -337,6 +427,13 @@ router.put(
           throw new Error("O estado operacional persistido está inválido.");
         }
       }
+      if (
+        session?.role === "operator" &&
+        (!previousState ||
+          !operatorOperationalStateUpdateAllowed(previousState, requestedState))
+      ) {
+        return { forbidden: true as const };
+      }
       const state = previousState
         ? preserveDeletedOperationalEntities(
             previousState,
@@ -380,6 +477,11 @@ router.put(
         updatedAt: saved.updatedAt.toISOString(),
       };
     });
+    if (result && "forbidden" in result) {
+      return res.status(403).json({
+        error: "O perfil TI pode apenas atualizar movimentações e disponibilidades de antenas volantes.",
+      });
+    }
     if (!result) {
       return res.status(409).json({
         error: "Os dados operacionais foram alterados em outro dispositivo. Atualize a página antes de salvar novamente.",

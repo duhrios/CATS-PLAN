@@ -77,7 +77,7 @@ export function UserOverviewPage() {
                 <ChevronLeft size={16} /> Dia anterior
               </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => setAvailabilityDate(nextBookableDate)} data-testid="button-availability-today">
-                <CalendarDays size={15} /> Hoje
+                <CalendarDays size={15} /> Amanhã
               </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => moveAvailabilityDateByDay(1)} data-testid="button-availability-next-day">
                 Próximo dia <ChevronRight size={16} />

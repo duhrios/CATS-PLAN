@@ -1294,7 +1294,7 @@ export function ReservationsPage({
     const params = new URLSearchParams(
       typeof window !== "undefined" ? window.location.search : "",
     );
-    if (params.get("nova") === "1") {
+    if (mode !== "operator" && params.get("nova") === "1") {
       const requestedDate = params.get("data");
       if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
         setCalendarDate(requestedDate);
@@ -2881,13 +2881,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-export function WifiPage({
-  readOnly = false,
-  allowAntennaDeletion = false,
-}: {
-  readOnly?: boolean;
-  allowAntennaDeletion?: boolean;
-}) {
+export function WifiPage({ readOnly = false }: { readOnly?: boolean }) {
   const {
     wifiPoints,
     wifiRooms,
@@ -3128,8 +3122,7 @@ export function WifiPage({
                   </select>
                 </Field>
               )}
-              {(!readOnly || allowAntennaDeletion) &&
-                activePoint.type === "Antena volante" && (
+              {!readOnly && activePoint.type === "Antena volante" && (
                   <div className="flex flex-wrap gap-2">
                     {!readOnly && (
                       <Button

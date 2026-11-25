@@ -185,7 +185,9 @@ function Router() {
             <Route path="/carrinhos">
               <CartsPage readOnly={operatorMode} />
             </Route>
-            <Route path="/salas" component={RoomsPage} />
+            <Route path="/salas">
+              <RoomsPage readOnly={operatorMode} />
+            </Route>
             <Route path="/professores">
               <TeacherProfilePage admin />
             </Route>
@@ -199,7 +201,6 @@ function Router() {
             <Route path="/wifi">
               <WifiPage
                 readOnly={operatorMode}
-                allowAntennaDeletion={operatorMode}
               />
             </Route>
             <Route path="/historico" component={HistoryPage} />

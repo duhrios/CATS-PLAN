@@ -12,6 +12,13 @@ export const isOperatorModeForLocation = (
     pathname === "/operador" ||
     pathname.startsWith("/operador/") ||
     (role === "operator" &&
-      ["/salas", "/visao-planilha", "/reservas", "/carrinhos", "/wifi"].includes(pathname))
+      [
+        "/salas",
+        "/visao-planilha",
+        "/reservas",
+        "/carrinhos",
+        "/wifi",
+        "/suporte",
+      ].includes(pathname))
   );
 };

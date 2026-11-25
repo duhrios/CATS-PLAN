@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   nextOperationalStateTimestamp,
   operationalStateForRole,
+  operatorOperationalStateUpdateAllowed,
   preserveDeletedOperationalEntities,
   preserveDeletedCartUnits,
   publicOperationalState,
@@ -172,6 +173,67 @@ describe("operational state validation", () => {
       "controle-carrinhos-campus-settings": {},
     });
     expect(operationalStateForRole(state, "admin")).toEqual(state);
+  });
+
+  it("limits TI state changes to movements and mobile antenna assignments", () => {
+    const previousState = {
+      "controle-carrinhos-carts": [{ id: "cart-a", name: "Carrinho A" }],
+      "controle-carrinhos-cart-schedules": { "Carrinho A": {} },
+      "controle-carrinhos-wifi-points": [
+        {
+          id: "mobile-1",
+          name: "Antena volante",
+          type: "Antena volante",
+          status: "Disponível",
+        },
+        {
+          id: "fixed-1",
+          name: "Ponto fixo",
+          type: "Ponto fixo",
+          status: "Disponível",
+        },
+      ],
+      "controle-carrinhos-wifi-rooms": [{ room: "Sala 12", hasWifi: false }],
+      "controle-carrinhos-movements": [
+        { reservationId: 17, status: "Não movido" },
+      ],
+      "controle-carrinhos-movement-settings": { autoComplete: false },
+      "controle-carrinhos-campus-settings": { campusName: "Campus" },
+    };
+    const nextState = {
+      ...previousState,
+      "controle-carrinhos-wifi-points": [
+        {
+          ...previousState["controle-carrinhos-wifi-points"][0],
+          assignedRoom: "Sala 12",
+          status: "Em uso",
+        },
+        previousState["controle-carrinhos-wifi-points"][1],
+      ],
+      "controle-carrinhos-movements": [
+        { reservationId: 17, status: "Movendo" },
+      ],
+    };
+
+    expect(operatorOperationalStateUpdateAllowed(previousState, nextState)).toBe(true);
+    expect(operatorOperationalStateUpdateAllowed(previousState, {
+      ...nextState,
+      "controle-carrinhos-carts": [],
+    })).toBe(false);
+    expect(operatorOperationalStateUpdateAllowed(previousState, {
+      ...nextState,
+      "controle-carrinhos-wifi-points": [
+        nextState["controle-carrinhos-wifi-points"][0],
+      ],
+    })).toBe(false);
+    expect(operatorOperationalStateUpdateAllowed(previousState, {
+      ...nextState,
+      "controle-carrinhos-movement-settings": { autoComplete: true },
+    })).toBe(false);
+    expect(operatorOperationalStateUpdateAllowed(previousState, {
+      ...nextState,
+      "controle-carrinhos-movements": [],
+    })).toBe(false);
   });
 
   it("does not let a stale state restore deleted Chromebook units", () => {

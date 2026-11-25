@@ -95,6 +95,7 @@ describe("teacher dashboard cart availability", () => {
     ).toHaveAttribute("aria-expanded", "true");
 
     const initialDate = nextBookableWeekday(new Date());
+    expect(screen.getByRole("button", { name: "Amanhã" })).toBeInTheDocument();
     const nextDayDate = new Date(`${initialDate}T12:00:00`);
     nextDayDate.setDate(nextDayDate.getDate() + 1);
     const expectedNextDay = `${nextDayDate.getFullYear()}-${String(nextDayDate.getMonth() + 1).padStart(2, "0")}-${String(nextDayDate.getDate()).padStart(2, "0")}`;

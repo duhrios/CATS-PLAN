@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { campusSettingsTable } from "@workspace/db/schema";
-import { getAuthSession, requireSameOrigin, requireSession } from "../lib/auth";
+import { requireAdmin, requireSameOrigin, requireSession } from "../lib/auth";
 import {
   getRoomDirectory,
   nextRoomDirectoryTimestamp,
@@ -51,11 +51,7 @@ router.get("/rooms", requireSession, async (_req, res) => {
   return res.json(directory);
 });
 
-router.put("/rooms", requireSameOrigin, requireSession, async (req, res) => {
-  const session = getAuthSession(req);
-  if (session?.role !== "admin" && session?.role !== "operator") {
-    return res.status(403).json({ error: "Somente o TI ou a administração podem cadastrar salas e turmas." });
-  }
+router.put("/rooms", requireSameOrigin, requireAdmin, async (req, res) => {
   const rooms = validateRooms(req.body?.rooms);
   if (!rooms) {
     return res.status(400).json({ error: "O cadastro de salas contém dados inválidos ou repetidos." });

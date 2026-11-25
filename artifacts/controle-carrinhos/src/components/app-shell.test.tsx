@@ -77,6 +77,17 @@ describe("app shell role navigation", () => {
     expect(screen.queryByTestId("button-switch-role")).not.toBeInTheDocument();
   });
 
+  it("uses the TI navigation when an operator opens support", () => {
+    authSession.current = { role: "operator", name: "Equipe TI" };
+    location.current = "/suporte";
+
+    render(<AppShell role="operator"><main>Suporte</main></AppShell>);
+
+    expect(screen.getByRole("link", { name: "Suporte" })).toHaveAttribute("href", "/suporte");
+    expect(screen.getByRole("link", { name: "Reservas" })).toHaveAttribute("href", "/reservas");
+    expect(screen.queryByRole("link", { name: /Usuários/ })).not.toBeInTheDocument();
+  });
+
   it("shows support and the requested attribution in the teacher navigation", () => {
     authSession.current = { role: "user", name: "Ana Souza" };
     location.current = "/suporte";

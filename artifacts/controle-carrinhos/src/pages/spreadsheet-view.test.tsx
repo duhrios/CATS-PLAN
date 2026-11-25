@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { todayISO } from "@/components/app-ui";
 import type { Reservation } from "@/lib/campus-data";
 import type { ClassRoomEntry } from "@/lib/room-directory";
 import { getMondayOfWeek, formatDateKey } from "@/lib/spreadsheet-view";
@@ -100,8 +101,6 @@ describe("teacher spreadsheet view", () => {
       className: "",
     });
     loadTeacherAccountSuggestions.mockImplementation(() => new Promise(() => {}));
-    const date = new Date();
-    const monday = getMondayOfWeek(date);
     loadTeacherReservations.mockResolvedValue([{
       id: 41,
       teacher: "Ana Souza",
@@ -110,7 +109,7 @@ describe("teacher spreadsheet view", () => {
       className: "2º ano A",
       room: "",
       period: "Manhã",
-      date: formatDateKey(monday),
+      date: todayISO(),
       start: "08:00",
       end: "08:45",
       cart: "Carrinho A",
@@ -146,7 +145,7 @@ describe("teacher spreadsheet view", () => {
     });
   });
 
-  it("blocks teachers from selecting slots on past dates", async () => {
+  it("hides past weekdays unless the teacher navigates to the previous week", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-24T12:00:00.000Z"));
     getSession.mockReturnValue({ role: "user", name: "Ana Souza" });
@@ -178,12 +177,23 @@ describe("teacher spreadsheet view", () => {
     const mondayKey = formatDateKey(monday);
     render(<SpreadsheetViewPage readOnly />);
 
-    const pastDaySlot = await screen.findByTestId(
-      `teacher-book-slot-${mondayKey}-Carrinho A-Manhã-07:00-07:45`,
-    );
-    expect(pastDaySlot).toBeDisabled();
-    expect(pastDaySlot).toHaveTextContent("Data passada");
-    expect(pastDaySlot).toHaveAccessibleName(/Bloqueado para data passada/);
+    expect(await screen.findByTestId(`quick-day-${formatDateKey(new Date("2026-11-24T12:00:00"))}`))
+      .toBeInTheDocument();
+    expect(screen.queryByTestId(`quick-day-${mondayKey}`)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Amanhã" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Anterior" })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Amanhã" }));
+    expect(screen.getByLabelText("Escolher semana pela data")).toHaveValue("2026-11-25");
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-week-scroll-container").scrollLeft).toBeGreaterThan(0);
+    });
+
+    const previousMonday = new Date(monday);
+    previousMonday.setDate(previousMonday.getDate() - 7);
+    fireEvent.click(screen.getAllByRole("button", { name: "Anterior" })[0]);
+    expect(await screen.findByTestId(`quick-day-${formatDateKey(previousMonday)}`))
+      .toBeInTheDocument();
   });
 
   it("allows teachers to book multiple free sheet slots only under their own name", async () => {

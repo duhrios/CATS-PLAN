@@ -520,7 +520,7 @@ export function TeacherProfilePage({ admin = false }: { admin?: boolean }) {
     return (
       <div className="animate-rise space-y-7">
         <PageHeader eyebrow="Área do professor · Perfil" title="Meu perfil" description="Mantenha seu e-mail e segmento atualizados. Eles são usados para liberar o acesso e filtrar as salas disponíveis nas reservas." />
-        <SectionCard title="Dados do professor" eyebrow="Cadastro pessoal">
+        <SectionCard title="Dados do professor" eyebrow="Cadastro pessoal" defaultExpanded>
           {profileLoading ? <p className="p-5 text-sm text-[hsl(var(--muted-foreground))]" role="status">Carregando seus dados...</p> : profileError && !form.name ? <div className="space-y-3 p-5"><p className="text-sm text-[hsl(var(--destructive))]" role="alert">{profileError}</p><Button type="button" variant="secondary" onClick={() => void refreshProfile()}>Tentar novamente</Button></div> : <>
           <form className="max-w-xl space-y-5 p-5 sm:p-6" autoComplete="on" onSubmit={handleProfileSubmit} data-testid="form-teacher-profile">
             <div className="flex items-center gap-3 rounded-xl bg-[hsl(var(--muted)/.45)] p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[hsl(var(--primary)/.1)] text-[hsl(var(--primary))]"><UserRound size={19} /></span><div><p className="text-sm font-semibold">Perfil usado nas reservas</p><p className="text-xs text-[hsl(var(--muted-foreground))]">O nome abaixo será preenchido automaticamente.</p></div></div>

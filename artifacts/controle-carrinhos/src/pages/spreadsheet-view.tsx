@@ -65,6 +65,7 @@ import {
   prepareQuickAccessMove,
   type CompleteViewColumnKey,
 } from "@/lib/spreadsheet-view";
+import { nextBookableWeekday } from "@/lib/cart-availability";
 import { loadTeacherProfile } from "@/lib/teacher-profile";
 import { loadTeacherSpreadsheetReservations } from "@/lib/teacher-spreadsheet";
 
@@ -402,6 +403,7 @@ function QuickBookingForm({
 
 function QuickAccess({
   dates,
+  focusRequest,
   cartNames,
   reservations,
   cartSchedules,
@@ -429,6 +431,7 @@ function QuickAccess({
   roomsSyncError,
 }: {
   dates: Date[];
+  focusRequest: { date: string; id: number } | null;
   cartNames: string[];
   reservations: Reservation[];
   cartSchedules: ReturnType<typeof useCampusData>["cartSchedules"];
@@ -685,6 +688,7 @@ function QuickAccess({
   const [deleteError, setDeleteError] = useState("");
   const topWeekScrollRef = useRef<HTMLDivElement>(null);
   const weekScrollRef = useRef<HTMLDivElement>(null);
+  const appliedFocusRequestRef = useRef<number | null>(null);
   const pendingWeekScrollSourceRef = useRef<"top" | "bottom" | null>(null);
   const weekScrollFrameRef = useRef<number | null>(null);
   const syncWeekScroll = (source: "top" | "bottom") => {
@@ -712,6 +716,25 @@ function QuickAccess({
       window.clearTimeout(weekScrollFrameRef.current);
     }
   }, []);
+  useEffect(() => {
+    if (!focusRequest || appliedFocusRequestRef.current === focusRequest.id) return;
+    const targetIndex = dates.findIndex(
+      (date) => formatDateKey(date) === focusRequest.date,
+    );
+    if (targetIndex < 0) return;
+    const scrollToDate = () => {
+      const left = targetIndex * 760;
+      if (weekScrollRef.current) weekScrollRef.current.scrollLeft = left;
+      if (topWeekScrollRef.current) topWeekScrollRef.current.scrollLeft = left;
+      appliedFocusRequestRef.current = focusRequest.id;
+    };
+    const frame = window.requestAnimationFrame?.(scrollToDate) ??
+      window.setTimeout(scrollToDate, 0);
+    return () => {
+      if (window.cancelAnimationFrame) window.cancelAnimationFrame(frame);
+      else window.clearTimeout(frame);
+    };
+  }, [dates, focusRequest]);
   const createReservation = async (
     target: { date: string; cart: string; start: string; end: string; period: "Manhã" | "Tarde" },
   ) => {
@@ -1286,7 +1309,11 @@ function QuickAccess({
         role="region"
         tabIndex={0}
       >
-        <div aria-hidden="true" className="h-px min-w-[3804px]" />
+        <div
+          aria-hidden="true"
+          className="h-px min-w-[3804px]"
+          style={{ minWidth: `${dates.length * 760 + 4}px` }}
+        />
       </div>
       <div
         aria-label="Planilha semanal com rolagem horizontal"
@@ -1298,7 +1325,15 @@ function QuickAccess({
         tabIndex={0}
       >
         <div
-          className="grid w-max min-w-[3800px] grid-cols-[repeat(5,minmax(760px,1fr))] gap-px bg-[#a9b7c8]"
+          className={`grid w-max gap-px bg-[#a9b7c8] ${
+            dates.length === 5
+              ? "min-w-[3800px] grid-cols-[repeat(5,minmax(760px,1fr))]"
+              : ""
+          }`}
+          style={{
+            minWidth: `${dates.length * 760}px`,
+            gridTemplateColumns: `repeat(${dates.length}, minmax(760px, 1fr))`,
+          }}
           data-testid="quick-week-grid"
         >
           {dates.map((date) => {
@@ -1307,7 +1342,11 @@ function QuickAccess({
               (reservation) => reservation.date === dateKey,
             );
             return (
-              <article key={dateKey} className="min-w-0 bg-white">
+              <article
+                key={dateKey}
+                className="min-w-0 bg-white"
+                data-testid={`quick-day-${dateKey}`}
+              >
                 <header className="border-b border-[#9baec4] bg-[#dce7f3] px-3 py-2 text-center text-sm font-bold capitalize text-[#142e50]">
                   {weekdayFormatter.format(date)}
                   <span className="mt-0.5 block font-mono text-xs font-semibold">
@@ -3079,10 +3118,24 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
   const [selectedDate, setSelectedDate] = useState(() =>
     getMondayOfWeek(new Date()),
   );
+  const [quickAccessFocus, setQuickAccessFocus] = useState<{
+    date: string;
+    id: number;
+  } | null>(null);
+  const quickAccessFocusIdRef = useRef(0);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("Todos");
   const weekStart = getMondayOfWeek(selectedDate);
   const weekDates = getWeekDates(weekStart);
   const workWeekDates = weekDates;
+  const isTeacherView = readOnly && session?.role === "user";
+  const todayDate = todayISO();
+  const currentWeekStart = formatDateKey(
+    getMondayOfWeek(new Date(`${todayDate}T12:00:00`)),
+  );
+  const quickAccessDates = isTeacherView &&
+      formatDateKey(weekStart) >= currentWeekStart
+    ? workWeekDates.filter((date) => formatDateKey(date) >= todayDate)
+    : workWeekDates;
   const teacherFrom = formatDateKey(workWeekDates[0]);
   const teacherTo = formatDateKey(workWeekDates.at(-1)!);
   const teacherSegments: Segment[] = teacherProfile
@@ -3226,6 +3279,12 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     next.setDate(next.getDate() + amount * 7);
     setSelectedDate(next);
   };
+  const focusTomorrow = () => {
+    const date = nextBookableWeekday(new Date(`${todayISO()}T12:00:00`));
+    setSelectedDate(new Date(`${date}T12:00:00`));
+    quickAccessFocusIdRef.current += 1;
+    setQuickAccessFocus({ date, id: quickAccessFocusIdRef.current });
+  };
   const saveVisibleColumns = (columns: CompleteViewColumnKey[]) => {
     setVisibleColumns(columns);
     window.localStorage.setItem(completeColumnsStorageKey, JSON.stringify(columns));
@@ -3357,18 +3416,26 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
             variant="secondary"
             size="sm"
             onClick={() => moveWeek(-1)}
-            aria-label="Semana anterior"
+            aria-label={isTeacherView ? "Anterior" : "Semana anterior"}
           >
             <ChevronLeft size={16} />
-            <span className="hidden sm:inline">Semana anterior</span>
+            <span className="hidden sm:inline">
+              {isTeacherView ? "Anterior" : "Semana anterior"}
+            </span>
           </Button>
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => setSelectedDate(getMondayOfWeek(new Date()))}
+            onClick={() => {
+              if (isTeacherView) {
+                focusTomorrow();
+              } else {
+                setSelectedDate(getMondayOfWeek(new Date()));
+              }
+            }}
           >
             <CalendarDays size={15} />
-            Hoje
+            {isTeacherView ? "Amanhã" : "Hoje"}
           </Button>
           <Button
             variant="secondary"
@@ -3497,7 +3564,8 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
       )}
       {mode === "quick" ? (
         <QuickAccess
-          dates={workWeekDates}
+          dates={quickAccessDates}
+          focusRequest={quickAccessFocus}
           cartNames={cartNames}
           reservations={visibleReservations}
           cartSchedules={cartSchedules}
@@ -3594,7 +3662,7 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
       <div className="flex justify-end">
         <Button variant="ghost" size="sm" onClick={() => moveWeek(-1)}>
           <ArrowLeft size={15} />
-          Semana anterior
+          {isTeacherView ? "Anterior" : "Semana anterior"}
         </Button>
         <Button variant="ghost" size="sm" onClick={() => moveWeek(1)}>
           Próxima semana

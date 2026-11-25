@@ -8,6 +8,12 @@ describe("operator route context", () => {
     expect(isOperatorModeForLocation("/reservas", "operator")).toBe(true);
   });
 
+  it("keeps TI context on support and room-view routes", () => {
+    expect(isOperatorModeForLocation("/suporte", "operator")).toBe(true);
+    expect(isOperatorModeForLocation("/salas", "operator")).toBe(true);
+    expect(isOperatorModeForLocation("/suporte", "admin")).toBe(false);
+  });
+
   it("does not turn an administrator session into the TI profile", () => {
     expect(isOperatorModeForLocation("/reservas?hoje=1", "admin")).toBe(false);
     expect(isOperatorModeForLocation("/operador", "admin")).toBe(true);
