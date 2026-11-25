@@ -389,7 +389,17 @@ export function SavingLabel({ active }: { active: boolean }) {
   );
 }
 
-export const todayISO = () => new Date().toISOString().slice(0, 10);
+export const todayISO = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+};
 export const isFridayISO = (value: string) =>
   new Date(`${value}T12:00:00`).getDay() === 5;
 const sabbathMessages = [

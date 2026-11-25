@@ -71,6 +71,11 @@ describe("teacher dashboard cart availability", () => {
     render(<UserOverviewPage />);
 
     expect(screen.getByText("Carrinhos e horários disponíveis")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Minimizar Carrinhos e horários disponíveis",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("slot-availability-cart-a-Manhã-a-1")).toHaveTextContent(
       "07:00–07:45 · Reservado",
     );
@@ -83,11 +88,11 @@ describe("teacher dashboard cart availability", () => {
 
   it("lets the teacher navigate days, reset the date, and filter availability by period", () => {
     render(<UserOverviewPage />);
-    fireEvent.click(
+    expect(
       screen.getByRole("button", {
-        name: "Maximizar Carrinhos e horários disponíveis",
+        name: "Minimizar Carrinhos e horários disponíveis",
       }),
-    );
+    ).toHaveAttribute("aria-expanded", "true");
 
     const initialDate = nextBookableWeekday(new Date());
     const nextDayDate = new Date(`${initialDate}T12:00:00`);

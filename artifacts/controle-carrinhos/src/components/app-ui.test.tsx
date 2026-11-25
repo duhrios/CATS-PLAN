@@ -1,6 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Modal, SectionCard } from "./app-ui";
+import { Modal, SectionCard, todayISO } from "./app-ui";
+
+describe("todayISO", () => {
+  it("returns the date in the Sao Paulo timezone", () => {
+    expect(todayISO(new Date("2026-11-24T01:30:00.000Z"))).toBe("2026-11-23");
+  });
+});
 
 describe("Modal", () => {
   it("renders centered in the document body outside animated page containers", () => {

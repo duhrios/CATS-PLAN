@@ -14,6 +14,7 @@ import {
   buildDeletedReservationMovementEvents,
 } from "../lib/activity-history";
 import {
+  isReservationDateInPast,
   isReservationCancellationAllowed,
   isSameDayReservationAllowed,
   type ReservationPolicy,
@@ -167,6 +168,11 @@ const saveReservation = async (
     const endTime = requiredText(body.endTime, "Fim");
     const cartId = Number(body.cartId);
     const session = getAuthSession(req);
+    if (session?.role === "user" && isReservationDateInPast(scheduledDate)) {
+      return res.status(409).json({
+        error: "Não é possível criar ou agendar em uma data que já passou.",
+      });
+    }
     if (session?.role === "user" && !session.accountId) {
       return res.status(403).json({ error: "A conta não possui um identificador seguro." });
     }

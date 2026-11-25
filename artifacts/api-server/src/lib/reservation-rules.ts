@@ -29,6 +29,11 @@ const brazilDateTimeParts = (date: Date) => {
   };
 };
 
+export const isReservationDateInPast = (
+  scheduledDate: string,
+  now = new Date(),
+) => scheduledDate < brazilDateTimeParts(now).date;
+
 const validWindows = (policy: ReservationPolicy) =>
   Array.isArray(policy.sameDayBookingWindows)
     ? policy.sameDayBookingWindows.filter((window) =>

@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Activity,
   AlertTriangle,
@@ -767,6 +774,10 @@ export function ReservationModal({
             setError("Selecione um professor com cadastro ativo.");
             return;
           }
+          if (mode === "user" && form.date < todayISO()) {
+            setError("Não é possível agendar em uma data que já passou.");
+            return;
+          }
           const quantity = Math.max(1, Number(form.quantity) || 1);
           if (isReserve && !campusSettings.reservationsEnabled) {
             setError("As reservas de Chromebooks estão desativadas pelo administrador.");
@@ -983,6 +994,7 @@ export function ReservationModal({
               required
               type="date"
               value={form.date}
+              min={mode === "user" ? todayISO() : undefined}
               onChange={(event) => update("date", event.target.value)}
               className={inputClass}
               data-testid="input-reservation-date"
@@ -1836,6 +1848,13 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const [selectedCartUnits, setSelectedCartUnits] = useState<
     Array<{ cartId: string; unit: string }>
   >([]);
+  const cartUnitSelectionDraggingRef = useRef(false);
+  const cartUnitSelectionBaseCartIdRef = useRef<string | null>(null);
+  const cartUnitSelectionBaseUnitRef = useRef<string | null>(null);
+  const cartUnitSelectionBaseRef = useRef<Array<{ cartId: string; unit: string }>>([]);
+  const cartUnitSelectionPathRef = useRef<string[]>([]);
+  const cartUnitSelectionMovedRef = useRef(false);
+  const cartUnitSelectionMouseStartedRef = useRef(false);
   const reserveSelectionDraggingRef = useRef(false);
   const reserveSelectionBaseUnitRef = useRef<string | null>(null);
   const reserveSelectionBaseRef = useRef<string[]>([]);
@@ -1864,6 +1883,19 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   const reserveUnits = carts.flatMap((cart) =>
     cart.reservedUnits.map((unit) => ({ unit, cartName: cart.name })),
   );
+  const clearAllCartUnitSelection = () => {
+    cartUnitSelectionDraggingRef.current = false;
+    cartUnitSelectionBaseCartIdRef.current = null;
+    cartUnitSelectionBaseUnitRef.current = null;
+    cartUnitSelectionBaseRef.current = [];
+    cartUnitSelectionPathRef.current = [];
+    cartUnitSelectionMovedRef.current = false;
+    cartUnitSelectionMouseStartedRef.current = false;
+    setSelectedCartUnits([]);
+  };
+  const stopCartUnitSelectionDrag = () => {
+    cartUnitSelectionDraggingRef.current = false;
+  };
   useEffect(() => {
     if (selectedReserveUnits.length === 0) return;
     const clearSelectionOnEscape = (event: KeyboardEvent) => {
@@ -1878,7 +1910,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
   useEffect(() => {
     if (selectedCartUnits.length === 0) return;
     const clearSelectionOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedCartUnits([]);
+      if (event.key === "Escape") clearAllCartUnitSelection();
     };
     window.addEventListener("keydown", clearSelectionOnEscape);
     return () => window.removeEventListener("keydown", clearSelectionOnEscape);
@@ -1900,7 +1932,92 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
         : [...current, { cartId, unit }],
     );
   };
+  const startCartUnitSelectionDrag = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    cartId: string,
+    unit: string,
+  ) => {
+    if (readOnly || unitSelectionMode !== "select") return;
+    event.preventDefault();
+    const additive = event.ctrlKey || event.metaKey;
+    const selected = selectedCartUnits.some(
+      (item) => item.cartId === cartId && item.unit === unit,
+    );
+    const wasSelected = selected && selectedCartUnits.length === 1;
+    cartUnitSelectionDraggingRef.current = true;
+    cartUnitSelectionBaseCartIdRef.current = cartId;
+    cartUnitSelectionBaseUnitRef.current = unit;
+    cartUnitSelectionPathRef.current = [];
+    cartUnitSelectionMovedRef.current = false;
+    cartUnitSelectionMouseStartedRef.current = true;
+    const nextSelection = additive
+      ? selected
+        ? selectedCartUnits.filter(
+            (item) => item.cartId !== cartId || item.unit !== unit,
+          )
+        : [...selectedCartUnits, { cartId, unit }]
+      : wasSelected
+        ? []
+        : [{ cartId, unit }];
+    cartUnitSelectionBaseRef.current = nextSelection;
+    setSelectedCartUnits(nextSelection);
+  };
+  const extendCartUnitSelectionDrag = (cartId: string, unit: string) => {
+    if (
+      readOnly ||
+      !cartUnitSelectionDraggingRef.current ||
+      cartUnitSelectionBaseCartIdRef.current !== cartId
+    ) {
+      return;
+    }
+    cartUnitSelectionMovedRef.current = true;
+    const currentPath = cartUnitSelectionPathRef.current;
+    const pathIndex = currentPath.indexOf(unit);
+    const nextPath =
+      unit === cartUnitSelectionBaseUnitRef.current
+        ? []
+        : pathIndex >= 0
+          ? currentPath.slice(0, pathIndex + 1)
+          : [...currentPath, unit];
+    cartUnitSelectionPathRef.current = nextPath;
+    const nextSelection = [...cartUnitSelectionBaseRef.current];
+    nextPath.forEach((pathUnit) => {
+      if (
+        !nextSelection.some(
+          (item) => item.cartId === cartId && item.unit === pathUnit,
+        )
+      ) {
+        nextSelection.push({ cartId, unit: pathUnit });
+      }
+    });
+    setSelectedCartUnits(nextSelection);
+  };
+  const handleCartUnitSelectionClick = (
+    cartId: string,
+    unit: string,
+  ) => {
+    if (cartUnitSelectionMouseStartedRef.current) {
+      cartUnitSelectionMouseStartedRef.current = false;
+      if (cartUnitSelectionMovedRef.current) {
+        cartUnitSelectionMovedRef.current = false;
+        return;
+      }
+      return;
+    }
+    if (cartUnitSelectionMovedRef.current) {
+      cartUnitSelectionMovedRef.current = false;
+      return;
+    }
+    toggleCartUnitSelection(cartId, unit);
+  };
   const clearCartUnitSelection = (cartId: string) => {
+    if (cartUnitSelectionBaseCartIdRef.current === cartId) {
+      stopCartUnitSelectionDrag();
+      cartUnitSelectionBaseCartIdRef.current = null;
+      cartUnitSelectionBaseUnitRef.current = null;
+      cartUnitSelectionBaseRef.current = [];
+      cartUnitSelectionPathRef.current = [];
+    }
     setSelectedCartUnits((current) =>
       current.filter((selected) => selected.cartId !== cartId),
     );
@@ -2115,7 +2232,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           aria-pressed={unitSelectionMode === "select"}
                           onClick={() => {
                             if (unitSelectionMode !== "select") {
-                              setSelectedCartUnits([]);
+                              clearAllCartUnitSelection();
                             }
                             setUnitSelectionMode("select");
                             setUnavailableObservationUnit(null);
@@ -2135,7 +2252,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           disabled={readOnly}
                           onClick={() => {
                             setUnitSelectionMode("unavailable");
-                            setSelectedCartUnits([]);
+                            clearAllCartUnitSelection();
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2152,7 +2269,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           onClick={() => {
                             setUnitSelectionMode("reserved");
                             setUnavailableObservationUnit(null);
-                            setSelectedCartUnits([]);
+                            clearAllCartUnitSelection();
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2169,7 +2286,7 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                           onClick={() => {
                             setUnitSelectionMode("deleted");
                             setUnavailableObservationUnit(null);
-                            setSelectedCartUnits([]);
+                            clearAllCartUnitSelection();
                           }}
                           className={cx(
                             "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 transition",
@@ -2198,7 +2315,17 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                         {activeTotal}
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    {!readOnly && unitSelectionMode === "select" && (
+                      <p className="mb-2 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">
+                        Clique para selecionar ou arraste sobre os Chromebooks; volte pelo trajeto para desmarcar. Esc cancela.
+                      </p>
+                    )}
+                    <div
+                      className="flex flex-wrap gap-1.5"
+                      aria-label={`Chromebooks do ${cart.name}`}
+                      onMouseUp={stopCartUnitSelectionDrag}
+                      onMouseLeave={stopCartUnitSelectionDrag}
+                    >
                       {visibleUnits.map((unit) => {
                         const unavailable =
                           cart.unavailable ||
@@ -2215,9 +2342,15 @@ export function CartsPage({ readOnly = false }: { readOnly?: boolean }) {
                             key={unit}
                             disabled={readOnly}
                             aria-pressed={unitSelectionMode === "select" ? selected : undefined}
+                            onMouseDown={(event) =>
+                              startCartUnitSelectionDrag(event, cart.id, unit)
+                            }
+                            onMouseEnter={() =>
+                              extendCartUnitSelectionDrag(cart.id, unit)
+                            }
                             onClick={() => {
                               if (unitSelectionMode === "select") {
-                                toggleCartUnitSelection(cart.id, unit);
+                                handleCartUnitSelectionClick(cart.id, unit);
                               } else if (unitSelectionMode === "deleted") {
                                 if (window.confirm(`Excluir a unidade ${unit} permanentemente do ${cart.name}?`)) {
                                   deleteCartUnit(cart.id, unit);

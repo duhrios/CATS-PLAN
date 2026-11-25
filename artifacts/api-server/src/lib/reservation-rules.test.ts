@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  isReservationDateInPast,
   isReservationCancellationAllowed,
   isSameDayReservationAllowed,
 } from "./reservation-rules";
+
+describe("teacher reservation date restrictions", () => {
+  it("compares reservation dates against the current date in Sao Paulo", () => {
+    const now = new Date("2026-11-24T01:30:00.000Z");
+
+    expect(isReservationDateInPast("2026-11-22", now)).toBe(true);
+    expect(isReservationDateInPast("2026-11-23", now)).toBe(false);
+    expect(isReservationDateInPast("2026-11-24", now)).toBe(false);
+  });
+});
 
 describe("teacher reservation cancellation window", () => {
   const date = "2027-01-04";

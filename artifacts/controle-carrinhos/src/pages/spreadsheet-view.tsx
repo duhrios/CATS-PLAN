@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent } from "react";
-import { Button, PageHeader, StatusPill } from "@/components/app-ui";
+import { Button, PageHeader, StatusPill, todayISO } from "@/components/app-ui";
 import {
   type Cart,
   type CartMovement,
@@ -804,12 +804,16 @@ function QuickAccess({
       room: slot.room.trim(),
       allowedRooms: roomOptionsForTeacherSlot(slot),
     }));
+    if (bookings.some(({ slot }) => slot.date < todayISO())) {
+      setTeacherBookingError("Não é possível agendar em uma data que já passou.");
+      return;
+    }
     if (bookings.some(({ room, allowedRooms }) => !room || !allowedRooms.includes(room))) {
       setTeacherBookingError("Escolha, para cada horário, uma sala cadastrada pelo TI para sua turma e segmento.");
       return;
     }
     if (bookings.some(({ slot }) =>
-      slot.date === formatDateKey(new Date()) &&
+      slot.date === todayISO() &&
       !isSameDayReservationAllowed(
         slot.date,
         slot.start,
@@ -1383,10 +1387,13 @@ function QuickAccess({
                             );
                             const targetKey = `${dateKey}-${cartName}-${period}-${row.start}-${row.end}`;
                             const isDropTarget = dropTarget === targetKey;
+                            const pastDateBlocked = Boolean(
+                              canTeacherBook && slot && dateKey < todayISO(),
+                            );
                             const sameDayBlocked = Boolean(
                               canTeacherBook &&
                               slot &&
-                              dateKey === formatDateKey(new Date()) &&
+                              dateKey === todayISO() &&
                               !isSameDayReservationAllowed(
                                 dateKey,
                                 slot.start,
@@ -1488,11 +1495,13 @@ function QuickAccess({
                                   ) : (
                                     canTeacherBook && slot ? (
                                       <button
-                                        disabled={sameDayBlocked}
+                                        disabled={pastDateBlocked || sameDayBlocked}
                                         type="button"
                                         aria-pressed={teacherBookingSlots.some((item) => item.key === targetKey)}
-                                        aria-label={sameDayBlocked
-                                          ? `Bloqueado para agendamento no mesmo dia: ${slot.start} ${slot.period}, ${cartName}`
+                                        aria-label={pastDateBlocked
+                                          ? `Bloqueado para data passada: ${slot.start} ${slot.period}, ${cartName}`
+                                          : sameDayBlocked
+                                            ? `Bloqueado para agendamento no mesmo dia: ${slot.start} ${slot.period}, ${cartName}`
                                           : `${teacherBookingSlots.some((item) => item.key === targetKey) ? "Remover seleção de" : "Selecionar"} ${slot.start} ${slot.period}, ${dateFormatter.format(date)}, ${cartName}`}
                                         data-testid={`teacher-book-slot-${targetKey}`}
                                         onClick={() => {
@@ -1530,8 +1539,10 @@ function QuickAccess({
                                             : "text-slate-400 hover:bg-[#e8eff7] hover:text-[#345779]"
                                         }`}
                                       >
-                                        {sameDayBlocked
-                                          ? "Bloqueado hoje"
+                                        {pastDateBlocked
+                                          ? "Data passada"
+                                          : sameDayBlocked
+                                            ? "Bloqueado hoje"
                                           : teacherBookingSlots.some((item) => item.key === targetKey)
                                             ? "Selecionado"
                                             : "Livre · selecionar"}
@@ -3251,6 +3262,9 @@ export function SpreadsheetViewPage({ readOnly = false }: { readOnly?: boolean }
     reservation: Omit<Reservation, "id" | "status">,
   ) => {
     if (readOnly && canTeacherBook) {
+      if (reservation.date < todayISO()) {
+        throw new Error("Não é possível agendar em uma data que já passou.");
+      }
       if (
         reservation.teacher.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR") !==
         currentTeacherName.toLocaleLowerCase("pt-BR")

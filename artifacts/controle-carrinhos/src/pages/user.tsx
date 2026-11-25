@@ -68,6 +68,7 @@ export function UserOverviewPage() {
       <SectionCard
         title="Carrinhos e horários disponíveis"
         eyebrow={`Dia selecionado para agendamento · ${formatDate(availabilityDate)}`}
+        defaultExpanded
       >
         <div className="p-5 sm:p-6" data-testid="cart-schedule-availability">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
+import { todayISO } from "@/components/app-ui";
 import {
   CartsPage,
   HistoryPage,
@@ -250,6 +251,33 @@ describe("reservation modal teacher selection", () => {
       className: "7º ano A",
     })));
     expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("teacherAccountId");
+  });
+
+  it("rejects a teacher reservation dated before today", async () => {
+    const yesterday = new Date(`${todayISO()}T12:00:00Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const yesterdayISO = yesterday.toISOString().slice(0, 10);
+
+    render(
+      <ReservationModal
+        mode="user"
+        onClose={vi.fn()}
+        onSave={onSave}
+        teacher={{ name: "Ana Souza", segment: "Fundamental 2", subject: "Ciências" }}
+        reserveAvailable={10}
+        teacherReserved={0}
+      />,
+    );
+
+    const dateInput = screen.getByTestId("input-reservation-date");
+    expect(dateInput).toHaveAttribute("min", todayISO());
+    fireEvent.change(dateInput, { target: { value: yesterdayISO } });
+    fireEvent.submit(screen.getByTestId("form-reservation"));
+
+    expect(await screen.findByTestId("text-reservation-error")).toHaveTextContent(
+      "Não é possível agendar em uma data que já passou.",
+    );
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 
@@ -588,6 +616,86 @@ describe("cart unit availability observations", () => {
       "reserved",
     );
     expect(screen.queryByTestId("selected-cart-units-cart-a")).not.toBeInTheDocument();
+  });
+
+  it("selects while dragging, deselects when retracing, and cancels with Escape", () => {
+    const setCartUnitsStatus = vi.fn(() => true);
+    useCampusData.mockReturnValue({
+      carts: [{
+        id: "cart-a",
+        name: "Carrinho A",
+        code: "A",
+        prefix: "A",
+        total: 3,
+        available: 3,
+        location: "Sala TI",
+        status: "Pronto",
+        lastCheck: "2026-01-01",
+        accent: "bg-blue-500",
+        unavailable: false,
+        unavailableUnits: [],
+        reservedUnits: [],
+        deletedUnits: [],
+        reserveCapacity: 0,
+      }],
+      addCart: vi.fn(),
+      addCartUnit: vi.fn(),
+      deleteCart: vi.fn(),
+      toggleCartUnavailable: vi.fn(),
+      toggleCartUnitUnavailable: vi.fn(),
+      setCartUnitsStatus,
+      setCartUnitUnavailableReason: vi.fn(),
+      deleteCartUnit: vi.fn(),
+      toggleCartUnitReserved: vi.fn(),
+      restoreReservedUnits: vi.fn(),
+      reservations: [],
+      reserveAvailable: 0,
+      campusSettings: { reservationsEnabled: true, reservationLimit: 10 },
+      updateCampusSettings: vi.fn(),
+    });
+
+    render(<CartsPage />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Minimizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Maximizar Inventário operacional",
+    }));
+    fireEvent.click(screen.getByTestId("button-select-units-cart-a"));
+
+    const first = screen.getByTestId("button-unit-A1");
+    const second = screen.getByTestId("button-unit-A2");
+    const third = screen.getByTestId("button-unit-A3");
+    const unitList = screen.getByLabelText("Chromebooks do Carrinho A");
+
+    fireEvent.mouseDown(first);
+    fireEvent.mouseEnter(second);
+    fireEvent.mouseEnter(third);
+    expect(first).toHaveAttribute("aria-pressed", "true");
+    expect(second).toHaveAttribute("aria-pressed", "true");
+    expect(third).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.mouseEnter(second);
+    expect(first).toHaveAttribute("aria-pressed", "true");
+    expect(second).toHaveAttribute("aria-pressed", "true");
+    expect(third).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(first).toHaveAttribute("aria-pressed", "false");
+    expect(second).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("selected-cart-units-cart-a")).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(first);
+    fireEvent.mouseEnter(second);
+    fireEvent.mouseUp(unitList);
+    fireEvent.click(first);
+    fireEvent.click(screen.getByTestId("button-mark-selected-unavailable-cart-a"));
+
+    expect(setCartUnitsStatus).toHaveBeenCalledWith(
+      "cart-a",
+      ["A1", "A2"],
+      "unavailable",
+    );
   });
 });
 

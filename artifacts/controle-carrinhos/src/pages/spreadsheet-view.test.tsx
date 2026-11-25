@@ -146,6 +146,46 @@ describe("teacher spreadsheet view", () => {
     });
   });
 
+  it("blocks teachers from selecting slots on past dates", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-24T12:00:00.000Z"));
+    getSession.mockReturnValue({ role: "user", name: "Ana Souza" });
+    loadTeacherProfile.mockResolvedValue({
+      name: "Ana Souza",
+      email: "ana@escola.com.br",
+      segment: "Fundamental 2",
+      additionalSegments: [],
+      subject: "Ciências",
+      className: "",
+    });
+    loadTeacherReservations.mockResolvedValue([]);
+    getCampusData.mockReturnValue({
+      reservations: [],
+      movements: [],
+      carts: [{ name: "Carrinho A", unavailable: false }],
+      cartSchedules: {
+        "Carrinho A": {
+          Manhã: [{ id: "morning-slot", start: "07:00", end: "07:45" }],
+          Tarde: [],
+        },
+      },
+      movementSettings: { allowCartATransitionScheduling: false },
+      campusSettings: { sameDayBookingEnabled: true },
+      replaceReservations: vi.fn(),
+    });
+
+    const monday = getMondayOfWeek(new Date());
+    const mondayKey = formatDateKey(monday);
+    render(<SpreadsheetViewPage readOnly />);
+
+    const pastDaySlot = await screen.findByTestId(
+      `teacher-book-slot-${mondayKey}-Carrinho A-Manhã-07:00-07:45`,
+    );
+    expect(pastDaySlot).toBeDisabled();
+    expect(pastDaySlot).toHaveTextContent("Data passada");
+    expect(pastDaySlot).toHaveAccessibleName(/Bloqueado para data passada/);
+  });
+
   it("allows teachers to book multiple free sheet slots only under their own name", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-23T09:00:00.000Z"));
